@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>וויסות רכבים חטיבתי — פיזור מחדש בין מסגרות</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&family=Rubik:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script id="data" type="application/json">
+{
+  "frames": ["7020","8110","8111","גדס\"ר","גדס\"מ","מפח\"ט","פלת\"צ","פלחי\"ק","פלה\"ק"],
+  "combat": ["7020","8110","8111","גדס\"ר"],
+  "categories": {
+    "משפחת האמר": ["האמר סיור","האמר פינוי","האמר מנהלה","האמר לביא","האמר כתק\"ל","האמר רק\"ש","האמרבולנס"],
+    "משאיות ורכבי משא": ["FMTV קצר","ריו ארוך","ריו קצר","FMTV ארוך","ריאו משא (שינוע)"],
+    "מכליות": ["מכלית סולר","מכלית מים"],
+    "רכבי תקשוב": ["JLTV","אושקוש תקשוב","טטרה תקשוב"],
+    "גרורים": ["גרורים עד 5000 טון ח\"א","גרורי מים קטנים"]
+  },
+  "inventory": {
+    "7020":   {"האמר סיור":6,"האמר פינוי":2,"האמר מנהלה":4,"האמר לביא":2,"האמר כתק\"ל":1,"האמר רק\"ש":1,"מכלית סולר":1,"FMTV קצר":2,"ריו ארוך":2,"ריו קצר":2,"גרורי מים קטנים":1,"גרורים עד 5000 טון ח\"א":1},
+    "8110":   {"האמר סיור":6,"האמר פינוי":2,"האמר מנהלה":4,"האמר לביא":2,"האמר כתק\"ל":1,"האמר רק\"ש":1,"האמרבולנס":1,"מכלית מים":1,"מכלית סולר":1,"FMTV קצר":3,"ריו קצר":1,"גרורי מים קטנים":1,"גרורים עד 5000 טון ח\"א":2},
+    "8111":   {"האמר סיור":6,"האמר פינוי":2,"האמר מנהלה":4,"האמר לביא":2,"האמר כתק\"ל":1,"האמר רק\"ש":1,"האמרבולנס":1,"מכלית מים":1,"מכלית סולר":1,"FMTV קצר":3,"ריו ארוך":1,"ריו קצר":1,"גרורי מים קטנים":2,"גרורים עד 5000 טון ח\"א":2},
+    "גדס\"ר": {"האמר סיור":22,"האמר פינוי":3,"האמר מנהלה":4,"האמר לביא":2,"האמר כתק\"ל":1,"האמר רק\"ש":1,"האמרבולנס":1,"מכלית מים":1,"מכלית סולר":1,"FMTV ארוך":1,"FMTV קצר":2,"ריו ארוך":3,"גרורי מים קטנים":3,"גרורים עד 5000 טון ח\"א":2},
+    "גדס\"מ": {"האמר סיור":7,"האמר פינוי":2,"האמר מנהלה":3,"האמר לביא":2,"האמר כתק\"ל":2,"מכלית סולר":1,"FMTV קצר":4,"ריו ארוך":1,"ריו קצר":1,"ריאו משא (שינוע)":1,"גרורים עד 5000 טון ח\"א":2},
+    "מפח\"ט": {"האמר סיור":4,"האמר מנהלה":5,"האמר לביא":2,"מכלית סולר":1},
+    "פלת\"צ": {"האמר סיור":0},
+    "פלחי\"ק":{"JLTV":2,"אושקוש תקשוב":1,"טטרה תקשוב":1},
+    "פלה\"ק": {"ריו קצר":1}
+  }
+}
+</script>
+<style>
+  :root{
+    --bg:#f5f8fd; --card:#ffffff; --ink:#0f172a; --ink2:#334155; --muted:#4b5768; --line:#e6ecf4; --line2:#eef2f8;
+    --brand:#1e40af; --brand2:#3b82f6; --brand-soft:#eaf1ff; --brand-ink:#1e3a8a;
+    --pos:#15803d; --pos-bg:#e6f6ec; --pos-line:#bfe6cd;
+    --neg:#d33f3f; --neg-bg:#fdecec; --neg-line:#f4c9c9;
+    --amber:#c9760a; --amber-bg:#fff5e6; --amber-line:#f4d59a; --amber-strong:#e8890c;
+    --combat-bg:#f3f7ff; --combat-bar:#3b82f6;
+    --cat0:#e9efff; --cat0d:#2f5fe0;
+    --cat1:#e4f6ee; --cat1d:#0f9d63;
+    --cat2:#fdefdd; --cat2d:#d5820f;
+    --cat3:#f3ecfd; --cat3d:#8b47d6;
+    --cat4:#eaeff6; --cat4d:#556173;
+    --sh-xs:0 1px 2px rgba(15,23,42,.05);
+    --sh:0 3px 14px rgba(15,23,42,.07);
+    --sh-lg:0 12px 40px rgba(15,23,42,.14);
+    --r:16px; --r-sm:11px;
+    --ease:cubic-bezier(.2,.7,.3,1);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:"Assistant","Segoe UI",system-ui,Arial,sans-serif;
+    background:radial-gradient(1200px 600px at 100% -10%,#eef3fb 0,var(--bg) 55%);
+    color:var(--ink); direction:rtl; font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.brand h1{font-family:"Rubik","Segoe UI",sans-serif;letter-spacing:-.01em}
+  .num,.tnum,td.totCell,.pchip .n,.kpi b{font-variant-numeric:tabular-nums}
+  ::selection{background:var(--brand-soft)}
+  .ic{width:1.15em;height:1.15em;flex:0 0 auto;vertical-align:-.18em;stroke-width:2}
+  .ic-sm{width:1em;height:1em}
+
+  /* header */
+  header.app{background:rgba(255,255,255,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:13px 24px;position:sticky;top:0;z-index:50;box-shadow:var(--sh-xs)}
+  .hrow{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:13px}
+  .logo{width:44px;height:44px;border-radius:13px;background:linear-gradient(140deg,#3b82f6,#1e40af);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 6px 16px rgba(30,64,175,.35)}
+  .logo .ic{width:24px;height:24px}
+  header.app h1{font-size:19px;margin:0;font-weight:700}
+  header.app .sub{font-size:12px;color:var(--muted);margin-top:1px;font-weight:500}
+  .toolbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-inline-start:auto}
+  .btn{font-family:inherit;font-size:13px;border:1px solid var(--line);background:var(--card);color:var(--ink2);padding:8px 13px;border-radius:10px;cursor:pointer;transition:background .18s var(--ease),border-color .18s,color .18s,box-shadow .18s;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;box-shadow:var(--sh-xs)}
+  .btn:hover{background:#f7faff;border-color:#d3deee;box-shadow:var(--sh)}
+  .btn:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
+  .btn.primary{background:linear-gradient(140deg,#3b82f6,#1e40af);color:#fff;border-color:transparent;box-shadow:0 4px 12px rgba(30,64,175,.28)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;box-shadow:none;border-color:transparent;color:var(--muted)}
+  .btn.ghost:hover{background:#eef3fa;color:var(--ink)}
+  .btn.danger:hover{background:var(--neg-bg);border-color:var(--neg-line);color:var(--neg)}
+  .sep{width:1px;height:26px;background:var(--line)}
+  select.sel{font-family:inherit;font-size:13px;padding:8px 30px 8px 11px;border-radius:10px;border:1px solid var(--line);background:var(--card) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234b5768' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>") no-repeat left .6rem center;color:var(--ink2);box-shadow:var(--sh-xs);cursor:pointer;-webkit-appearance:none;appearance:none}
+
+  /* surplus band */
+  .surplus{margin:18px 24px 0;background:linear-gradient(120deg,#fffaf0,#fff);border:1px solid var(--amber-line);border-radius:var(--r);box-shadow:var(--sh);padding:15px 18px}
+  .surplus .sh{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .surplus .sh .ttl{font-size:15px;font-weight:700;font-family:"Rubik",sans-serif;display:flex;align-items:center;gap:8px}
+  .surplus .sh .ttl .ic{color:var(--amber-strong)}
+  .surplus .sh .note{font-size:12.5px;color:var(--muted)}
+  .balance{margin-inline-start:auto;font-size:12.5px;font-weight:700;padding:6px 13px;border-radius:999px;display:inline-flex;align-items:center;gap:6px}
+  .balance.ok{background:var(--pos-bg);color:var(--pos)}
+  .balance.bad{background:var(--neg-bg);color:var(--neg)}
+  .poolChips{display:flex;gap:10px;flex-wrap:wrap}
+  .pchip{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--amber-line);border-radius:13px;padding:9px 14px 9px 12px;cursor:pointer;transition:transform .18s var(--ease),box-shadow .18s;box-shadow:var(--sh-xs)}
+  .pchip:hover{transform:translateY(-2px);box-shadow:var(--sh)}
+  .pchip:focus-visible{outline:2px solid var(--amber-strong);outline-offset:2px}
+  .pchip .n{font-size:24px;font-weight:800;color:var(--amber-strong);font-family:"Rubik",sans-serif;line-height:1}
+  .pchip .meta{display:flex;flex-direction:column;gap:1px}
+  .pchip .t{font-size:12.5px;font-weight:700;color:#8a5a10}
+  .pchip .go{font-size:10.5px;color:var(--amber);display:flex;align-items:center;gap:3px;opacity:.85}
+  .poolEmpty{color:var(--muted);font-size:13px;background:#fff;border:1px dashed var(--amber-line);border-radius:13px;padding:13px 15px;display:flex;align-items:center;gap:10px}
+  .poolEmpty .ic{color:var(--amber);width:20px;height:20px}
+
+  /* transfer bar */
+  .transferBar{margin:15px 24px 0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);padding:15px 18px;display:flex;gap:15px;align-items:flex-end;flex-wrap:wrap;position:sticky;top:71px;z-index:40}
+  .transferBar .fld{display:flex;flex-direction:column;gap:6px}
+  .transferBar label{font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.02em}
+  .transferBar select,.transferBar input{font-family:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fbfcfe;min-width:146px;transition:border-color .15s,box-shadow .15s}
+  .transferBar select{-webkit-appearance:none;appearance:none;padding-left:30px;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234b5768' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");background-repeat:no-repeat;background-position:left .6rem center}
+  .transferBar select:focus,.transferBar input:focus{outline:none;border-color:var(--brand2);background-color:#fff;box-shadow:0 0 0 3px var(--brand-soft)}
+  .transferBar input[type=number]{width:84px;min-width:0;text-align:center}
+  .arrow{align-self:center;color:#c3cddd;margin-bottom:8px}
+  .arrow .ic{width:22px;height:22px}
+  .transferBar .go{background:linear-gradient(140deg,#3b82f6,#1e40af);color:#fff;border:none;padding:12px 22px;border-radius:11px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 5px 14px rgba(30,64,175,.3);display:inline-flex;align-items:center;gap:7px;font-family:"Rubik",sans-serif}
+  .transferBar .go:hover{filter:brightness(1.07)}
+  .transferBar .go:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
+  .transferBar .hint{font-size:11.5px;color:var(--muted);align-self:center;max-width:200px;line-height:1.4}
+
+  /* layout */
+  .layout{display:flex;gap:18px;align-items:flex-start;padding:18px 24px 52px;flex-wrap:wrap}
+  .main{flex:1 1 720px;min-width:0;display:flex;flex-direction:column;gap:18px}
+  .side{flex:0 0 344px;display:flex;flex-direction:column;gap:18px;position:sticky;top:150px}
+  @media(max-width:1160px){.side{flex-basis:100%;position:static}}
+
+  .card,.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden}
+  .cardHead{display:flex;align-items:center;gap:11px;padding:15px 20px;flex-wrap:wrap}
+  .cardHead h2{margin:0;font-size:16.5px;font-weight:700;display:flex;align-items:center;gap:9px}
+  .cardHead h2 .ic{color:var(--brand);width:20px;height:20px}
+  .cardHead .desc{font-size:12px;color:var(--muted)}
+  .cardHead .spacer{margin-inline-start:auto}
+  .lock{font-size:11px;background:#eef2f8;color:#556173;padding:4px 10px;border-radius:8px;font-weight:700;display:inline-flex;align-items:center;gap:5px}
+
+  .tableWrap{overflow-x:auto;max-width:100%;border-top:1px solid var(--line2)}
+  table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+  table.grid th,table.grid td{border-bottom:1px solid var(--line2);border-inline-start:1px solid var(--line2);padding:0;text-align:center;white-space:nowrap}
+  table.grid thead th{position:sticky;top:0;z-index:5;background:#fbfcfe}
+  .catHead{color:#fff;padding:8px 8px;font-size:11.5px;font-weight:700;border-inline-start:2px solid #fff;font-family:"Rubik",sans-serif}
+  .typeHead{padding:9px 7px;font-weight:700;font-size:11.5px;min-width:76px;vertical-align:bottom;color:var(--ink2)}
+  .frameName{position:sticky;inset-inline-start:0;z-index:6;background:var(--card);font-weight:700;padding:11px 15px;text-align:start;min-width:108px;box-shadow:1px 0 0 var(--line);font-family:"Rubik",sans-serif;font-size:13.5px}
+  .frameName .fnm{display:inline-flex;align-items:center;gap:6px}
+  thead .frameName{z-index:8;background:#fbfcfe}
+  tr.frameRow{transition:background .12s}
+  tr.frameRow:hover td{background:#f7faff}
+  tr.combat .frameName{border-inline-end:3px solid var(--combat-bar)}
+  tr.combat .frameName .ic{color:var(--combat-bar)}
+  tr.combat td{background:var(--combat-bg)}
+  tr.combat:hover td{background:#ecf3ff}
+  tr.poolRow td{background:var(--amber-bg)!important;border-bottom:2px solid var(--amber-line)}
+  tr.poolRow .frameName{background:var(--amber-bg);color:#8a5a10;box-shadow:1px 0 0 var(--amber-line);border-inline-end:3px solid var(--amber-strong)}
+  tr.poolRow .frameName .ic{color:var(--amber-strong)}
+  tr.poolRow .num{color:var(--amber-strong)}
+
+  .cell{position:relative;padding:5px 3px;min-width:68px}
+  .cellInner{display:flex;align-items:center;justify-content:center;gap:3px}
+  .num{font-size:17px;font-weight:800;min-width:22px}
+  .num.zero{color:#cbd5e3;font-weight:600}
+  .stp{border:none;background:#eef2f9;color:#5a6577;width:23px;height:23px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s,background .15s,color .15s}
+  .stp .ic{width:14px;height:14px;stroke-width:2.6}
+  .cell:hover .stp{opacity:1}
+  .stp:hover{background:var(--brand);color:#fff}
+  .stp:focus-visible{opacity:1;outline:2px solid var(--brand2);outline-offset:1px}
+  .stp:disabled{opacity:.18;cursor:not-allowed}
+  .cell:hover .stp:disabled{opacity:.22}
+  .cellMeta{display:flex;gap:4px;justify-content:center;align-items:center;margin-top:2px;min-height:14px}
+  .delta{font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px}
+  .delta.pos{color:var(--pos);background:var(--pos-bg)}
+  .delta.neg{color:var(--neg);background:var(--neg-bg)}
+  .tchip{font-size:9px;font-weight:800;padding:1px 5px;border-radius:6px;background:var(--brand-soft);color:var(--brand-ink)}
+  .tchip.def{background:var(--neg-bg);color:var(--neg)} .tchip.sur{background:var(--pos-bg);color:var(--pos)}
+  .cell[draggable=true]{cursor:grab}
+  .cell.dropok{background:var(--brand-soft)!important;outline:2px solid var(--brand2);outline-offset:-2px}
+  .cell.dragging{opacity:.4}
+
+  tfoot td{background:#f6f9fd;font-weight:800}
+  tfoot .frameName{background:#eef2f8}
+  .totCur{font-size:15px} .totBase{font-size:10px;color:var(--muted);font-weight:600}
+  td.totCell.bad .totCur{color:var(--neg)}
+
+  /* flows summary */
+  #flowsCard .fhead{display:flex;align-items:center;gap:11px;padding:15px 20px;flex-wrap:wrap}
+  #flowsCard .fhead h2{margin:0;font-size:16.5px;font-weight:700;display:flex;align-items:center;gap:9px}
+  #flowsCard .fhead h2 .ic{color:var(--brand)}
+  #flowsCard .fstat{font-size:12.5px;color:var(--muted);font-weight:600}
+  #flowsCard .spacer{margin-inline-start:auto}
+  .flowsBody{border-top:1px solid var(--line2)}
+  table.flows{width:100%;border-collapse:collapse;font-size:13.5px}
+  table.flows th{background:#f6f9fd;color:var(--muted);font-size:11px;font-weight:700;text-align:start;padding:9px 16px;letter-spacing:.02em;border-bottom:1px solid var(--line2)}
+  table.flows td{padding:11px 16px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  table.flows tr:last-child td{border-bottom:none}
+  table.flows tr:hover td{background:#f9fbfe}
+  .fchip{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:13px;padding:4px 11px;border-radius:9px}
+  .fchip.from{background:var(--neg-bg);color:#b23636}
+  .fchip.to{background:var(--pos-bg);color:#136c34}
+  .fchip .ic{width:13px;height:13px}
+  .farrow{color:#b7c2d2;display:flex;justify-content:center}
+  .ftype{font-weight:600;color:var(--ink2)}
+  .fqty{font-weight:800;font-size:15px;font-family:"Rubik",sans-serif;text-align:center}
+  .fqty .u{font-size:10px;color:var(--muted);font-weight:600;margin-inline-start:2px}
+  .flowsEmpty{padding:30px 20px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.7}
+  .flowsEmpty .ic{width:30px;height:30px;color:#cbd5e3;margin-bottom:6px}
+
+  /* side panels */
+  .panel h3{margin:0;padding:15px 20px;font-size:15px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:9px;font-weight:700}
+  .panel h3 .ic{color:var(--brand);width:19px;height:19px}
+  .panel h3 .count{margin-inline-start:auto;font-size:12px;background:var(--brand-soft);color:var(--brand-ink);padding:3px 11px;border-radius:999px;font-weight:800;font-family:"Rubik",sans-serif}
+  .logActions{display:flex;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+  .logActions button{font-family:inherit;font-size:12px;border:1px solid var(--line);background:#fbfcfe;border-radius:9px;padding:8px 12px;cursor:pointer;font-weight:700;color:var(--ink2);display:inline-flex;align-items:center;gap:6px;transition:background .15s,border-color .15s,color .15s}
+  .logActions button:hover{background:var(--brand-soft);border-color:#cfdcf6;color:var(--brand-ink)}
+  .logList{max-height:320px;overflow-y:auto}
+  .logItem{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line2);font-size:12.5px}
+  .logItem:hover{background:#f9fbfe}
+  .logItem .txt{flex:1} .logItem .txt b{color:var(--brand-ink);font-weight:800}
+  .logItem .time{font-size:10px;color:var(--muted);margin-top:1px}
+  .logItem .del{border:none;background:transparent;color:#cbd5e3;cursor:pointer;padding:4px;border-radius:7px;display:inline-flex}
+  .logItem .del:hover{color:var(--neg);background:var(--neg-bg)}
+  .empty{padding:24px 18px;color:var(--muted);font-size:12.5px;text-align:center;line-height:1.7}
+
+  .sumList{max-height:320px;overflow-y:auto}
+  .sumItem{padding:11px 16px;border-bottom:1px solid var(--line2);font-size:12.5px}
+  .sumItem .fn{font-weight:700;display:flex;align-items:center;gap:7px;font-family:"Rubik",sans-serif}
+  .sumItem .fn .net{font-size:11px;padding:2px 10px;border-radius:8px;margin-inline-start:auto;font-weight:800}
+  .net.pos{background:var(--pos-bg);color:var(--pos)} .net.neg{background:var(--neg-bg);color:var(--neg)} .net.zero{background:#eef2f8;color:var(--muted)}
+  .sumItem .recv{color:var(--pos);margin-top:4px;display:flex;gap:5px} .sumItem .give{color:#b23636;margin-top:4px;display:flex;gap:5px}
+  .sumItem .recv .ic,.sumItem .give .ic{width:14px;height:14px;margin-top:2px}
+
+  /* targets */
+  #targetsPanel .tgHead{display:flex;align-items:center;gap:10px;padding:15px 20px;cursor:pointer;flex-wrap:wrap;user-select:none}
+  #targetsPanel .tgHead:hover{background:#fafcff}
+  #targetsPanel .tgHead h2{font-size:15px;margin:0;font-weight:700;display:flex;align-items:center;gap:9px}
+  #targetsPanel .tgHead h2 .ic{color:var(--brand);width:19px;height:19px}
+  #targetsPanel .tgHead .chev{color:var(--muted);transition:transform .2s}
+  #targetsPanel .tgHead.open .chev{transform:rotate(180deg)}
+  #targetsPanel .tgBody{padding:15px 20px;border-top:1px solid var(--line2)}
+  .tgControls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+  .tgControls select{font-family:inherit;padding:9px 30px 9px 11px;border:1px solid var(--line);border-radius:10px;background:#fbfcfe;-webkit-appearance:none;appearance:none}
+  .tgGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(162px,1fr));gap:10px}
+  .tgCell{border:1px solid var(--line);border-radius:12px;padding:11px;background:#fbfcfe}
+  .tgCell.combat{background:var(--combat-bg);border-color:#cfe0fb}
+  .tgCell .fn{font-weight:700;font-size:12.5px;margin-bottom:6px;font-family:"Rubik",sans-serif;display:flex;align-items:center;gap:5px}
+  .tgCell .fn .ic{width:13px;height:13px;color:var(--combat-bar)}
+  .tgCell .row{display:flex;align-items:center;gap:6px;font-size:12px}
+  .tgCell input{width:56px;text-align:center;font-family:inherit;padding:6px;border:1px solid var(--line);border-radius:8px}
+  .tgCell input:focus{outline:none;border-color:var(--brand2);box-shadow:0 0 0 3px var(--brand-soft)}
+  .tgCell .stat{font-size:11px;font-weight:800;padding:2px 8px;border-radius:7px;margin-inline-start:auto}
+  .stat.def{background:var(--neg-bg);color:var(--neg)} .stat.sur{background:var(--pos-bg);color:var(--pos)} .stat.ok{background:var(--pos-bg);color:var(--pos)}
+
+  .popover{position:fixed;z-index:100;background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:var(--sh-lg);padding:9px;min-width:200px;animation:pop .14s var(--ease)}
+  @keyframes pop{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+  .popover.hidden{display:none}
+  .popover .pt{font-size:11px;color:var(--muted);font-weight:800;padding:3px 8px 8px}
+  .popover button.opt{display:flex;width:100%;justify-content:space-between;align-items:center;gap:10px;border:none;background:#f6f9fd;margin-bottom:5px;padding:10px 12px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;color:var(--ink2);transition:background .14s,color .14s}
+  .popover button.opt:hover{background:var(--brand);color:#fff}
+  .popover button.opt.pool{background:var(--amber-bg);color:#8a5a10}
+  .popover button.opt.pool:hover{background:var(--amber-strong);color:#fff}
+  .popover button.opt .lbl{display:inline-flex;align-items:center;gap:7px}
+  .popover button.opt .lbl .ic{width:14px;height:14px}
+  .popover button.opt .c{opacity:.6;font-size:11px;font-variant-numeric:tabular-nums}
+  .popover .none{font-size:12px;color:var(--muted);padding:8px 10px}
+
+  .toast{position:fixed;bottom:24px;inset-inline-start:50%;transform:translateX(50%) translateY(8px);background:#0f172a;color:#fff;padding:13px 22px;border-radius:12px;font-weight:700;box-shadow:var(--sh-lg);z-index:200;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:82vw;text-align:center;display:flex;align-items:center;gap:9px}
+  .toast.show{opacity:1;transform:translateX(50%) translateY(0)}
+  .toast.err{background:#a83232} .toast.good{background:#127a3b}
+  .toast .ic{width:18px;height:18px}
+
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+  @media print{
+    .toolbar,.transferBar,.side,#targetsPanel,.stp,.logActions,.sel,.brand .sub{display:none!important}
+    body{background:#fff}.layout{padding:0 8px}.main{flex-basis:100%}
+    .card,.panel,.surplus{box-shadow:none;border:1px solid #bbb;break-inside:avoid}
+    header.app{position:static;backdrop-filter:none}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="hrow">
+    <div class="brand">
+      <div class="logo" id="logoBox"></div>
+      <div>
+        <h1>וויסות רכבים חטיבתי</h1>
+        <div class="sub">פיזור מחדש בין מסגרות · שימור מלאי אוטומטי · תיעוד תנועות חי</div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="btnExample" data-ic="shuffle">תרחיש דוגמה</button>
+      <button class="btn danger" id="btnReset" data-ic="reset">איפוס לבסיס</button>
+      <span class="sep"></span>
+      <select class="sel" id="savedSel"><option value="">— תרחישים שמורים —</option></select>
+      <button class="btn ghost" id="btnLoad">טען</button>
+      <button class="btn ghost" id="btnSave" data-ic="save">שמור</button>
+      <button class="btn ghost" id="btnDelSaved" data-ic="trash">מחק</button>
+      <span class="sep"></span>
+      <button class="btn primary" id="btnCsv" data-ic="download">CSV</button>
+      <button class="btn" id="btnPrint" data-ic="printer">PDF</button>
+    </div>
+  </div>
+</header>
+
+<div class="surplus" id="surplus"></div>
+<div class="transferBar" id="transferBar"></div>
+
+<div class="layout">
+  <div class="main">
+    <section class="card">
+      <div class="cardHead">
+        <h2 data-ic="layers">טבלת תרחיש וויסות</h2>
+        <span class="desc">גררו תא, לחצו +/−, או השתמשו בטופס ההעברה. שורת «מאגר עודפים» מרכזת את מה שפינו לחלוקה.</span>
+      </div>
+      <div class="tableWrap" id="scenarioTableWrap"></div>
+    </section>
+
+    <section class="card" id="flowsCard"></section>
+
+    <section class="panel" id="targetsPanel"></section>
+
+    <section class="card" id="baselineCard">
+      <div class="cardHead">
+        <h2 data-ic="lock">טבלת בסיס</h2>
+        <span class="lock" data-ic="lock">נעולה — מקור אמת</span>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnToggleBase">הצג / הסתר</button>
+      </div>
+      <div class="tableWrap" id="baselineTableWrap" style="display:none"></div>
+    </section>
+  </div>
+
+  <aside class="side">
+    <div class="panel">
+      <h3 data-ic="list">לוג תנועות <span class="count" id="logCount">0</span></h3>
+      <div class="logActions">
+        <button id="btnUndo" data-ic="reset">בטל אחרון</button>
+        <button id="btnClearLog" data-ic="trash">נקה הכל</button>
+      </div>
+      <div class="logList" id="logList"></div>
+    </div>
+    <div class="panel">
+      <h3 data-ic="chart">מאזן לפי מסגרת</h3>
+      <div class="sumList" id="sumList"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="popover hidden" id="popover"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- icons (Lucide, inline SVG) ---------- */
+const P={
+  truck:'<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  arrowLeft:'<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  printer:'<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+  reset:'<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+  save:'<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  trash:'<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  plus:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  minus:'<line x1="5" y1="12" x2="19" y2="12"/>',
+  target:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  chevron:'<polyline points="6 9 12 15 18 9"/>',
+  copy:'<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  check:'<polyline points="20 6 9 17 4 12"/>',
+  alert:'<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  layers:'<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+  lock:'<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  chart:'<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
+  shuffle:'<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>',
+  list:'<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+  zap:'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  route:'<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>',
+  arrowDown:'<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>'
+};
+function ic(name,cls){ return '<svg class="ic'+(cls?' '+cls:'')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(P[name]||'')+'</svg>'; }
+
+/* ---------- data ---------- */
+const DATA = JSON.parse(document.getElementById('data').textContent);
+const POOL = 'מאגר עודפים';
+const FRAMES = DATA.frames;
+const FRAMES_ALL = [POOL].concat(FRAMES);
+const COMBAT = new Set(DATA.combat);
+const CATS = DATA.categories;
+const CAT_NAMES = Object.keys(CATS);
+const TYPES = CAT_NAMES.flatMap(c=>CATS[c]);
+const CAT_IDX = {}; CAT_NAMES.forEach((c,i)=>CAT_IDX[c]=i);
+const TYPE_IDX = {}; TYPES.forEach((t,i)=>TYPE_IDX[t]=i);
+const FR_IDX = {}; FRAMES_ALL.forEach((f,i)=>FR_IDX[f]=i);
+
+const BASE={}; FRAMES_ALL.forEach(f=>{ BASE[f]={}; TYPES.forEach(t=>{ BASE[f][t]= f===POOL?0:((DATA.inventory[f]&&DATA.inventory[f][t])||0); }); });
+const BASE_TOTAL={}; TYPES.forEach(t=>BASE_TOTAL[t]=FRAMES.reduce((s,f)=>s+BASE[f][t],0));
+function freshScenario(){ const s={}; FRAMES_ALL.forEach(f=>{ s[f]={}; TYPES.forEach(t=>s[f][t]=BASE[f][t]); }); return s; }
+
+let state={ scenario:freshScenario(), log:[], targets:{} };
+let targetsOpen=false, tgType='האמר סיור', baseOpen=false;
+const LS='vr_state_v3', LS_SAVED='vr_saved_v3';
+
+function count(f,t){ return (state.scenario[f]&&state.scenario[f][t])||0; }
+function curTotal(t){ return FRAMES_ALL.reduce((s,f)=>s+count(f,t),0); }
+function surplus(t){ return count(POOL,t); }
+
+function save(){ try{ localStorage.setItem(LS,JSON.stringify({scenario:state.scenario,log:state.log,targets:state.targets})); }catch(e){} }
+function load(){ try{ const r=localStorage.getItem(LS); if(r){ const o=JSON.parse(r); if(o&&o.scenario){ FRAMES_ALL.forEach(f=>{o.scenario[f]=o.scenario[f]||{};TYPES.forEach(t=>{o.scenario[f][t]=+o.scenario[f][t]||0;});}); state.scenario=o.scenario; state.log=o.log||[]; state.targets=o.targets||{}; } } }catch(e){} }
+function savedScenarios(){ try{return JSON.parse(localStorage.getItem(LS_SAVED)||'{}');}catch(e){return {};} }
+function writeSaved(o){ try{localStorage.setItem(LS_SAVED,JSON.stringify(o));}catch(e){} }
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+let toastTimer; function toast(m,t){ const el=document.getElementById('toast'); el.innerHTML=(t==='err'?ic('alert'):t==='good'?ic('check'):'')+'<span>'+esc(m)+'</span>'; el.className='toast show'+(t?' '+t:''); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.className='toast',2600); }
+
+/* ---------- transfer engine (single source of mutation → conservation) ---------- */
+function transfer(type,from,to,qty,opts){
+  opts=opts||{}; qty=Math.floor(qty);
+  if(from===to){ if(!opts.silent) toast('מקור ויעד זהים','err'); return false; }
+  if(!(qty>0)){ if(!opts.silent) toast('כמות לא תקינה','err'); return false; }
+  if(count(from,type)<qty){ if(!opts.silent) toast('אין מספיק «'+type+'» ב־'+from+' (קיימים '+count(from,type)+'). שימור המלאי נשמר.','err'); return false; }
+  state.scenario[from][type]-=qty; state.scenario[to][type]+=qty;
+  if(opts.log!==false) state.log.push({id:'m'+Date.now()+Math.random().toString(36).slice(2,6),t:Date.now(),type,from,to,qty});
+  save(); return true;
+}
+function undoLast(){ if(!state.log.length){toast('אין תנועות','err');return;} const e=state.log[state.log.length-1];
+  if(transfer(e.type,e.to,e.from,e.qty,{log:false,silent:true})){ state.log.pop(); save(); renderAll(); toast('בוטלה: '+e.qty+' '+e.type,'good'); } else toast('לא ניתן לבטל','err'); }
+function deleteLogEntry(id){ const i=state.log.findIndex(e=>e.id===id); if(i<0)return; const e=state.log[i];
+  if(transfer(e.type,e.to,e.from,e.qty,{log:false,silent:true})){ state.log.splice(i,1); save(); renderAll(); } else toast('לא ניתן לבטל — הכלים הוזזו הלאה','err'); }
+
+/* ---------- netted flows: who ultimately gives whom what ---------- */
+function computeFlows(){
+  const SEP='|#|';
+  const m=new Map(); // key type|a|b (idx a<b) -> signed (+ => a→b)
+  state.log.forEach(e=>{ const i=FR_IDX[e.from], j=FR_IDX[e.to]; const a=i<j?e.from:e.to, b=i<j?e.to:e.from; const k=e.type+SEP+a+SEP+b; m.set(k,(m.get(k)||0)+(i<j?e.qty:-e.qty)); });
+  const out=[];
+  m.forEach((v,k)=>{ if(v===0)return; const [type,a,b]=k.split(SEP); out.push(v>0?{from:a,to:b,type,qty:v}:{from:b,to:a,type,qty:-v}); });
+  out.sort((x,y)=>FR_IDX[x.from]-FR_IDX[y.from]||FR_IDX[x.to]-FR_IDX[y.to]||TYPE_IDX[x.type]-TYPE_IDX[y.type]);
+  return out;
+}
+function flowsText(){ return computeFlows().map(f=>f.from+' נותן '+f.qty+' '+f.type+' ל־'+f.to).join('\n'); }
+
+/* ---------- surplus band ---------- */
+function renderSurplus(){
+  const el=document.getElementById('surplus');
+  const bad=TYPES.filter(t=>curTotal(t)!==BASE_TOTAL[t]);
+  const inPool=TYPES.filter(t=>surplus(t)>0);
+  let chips;
+  if(inPool.length){
+    chips='<div class="poolChips">'+inPool.map(t=>
+      '<button class="pchip" data-type="'+esc(t)+'" title="לחצו כדי לחלק מהמאגר"><span class="n">'+surplus(t)+'</span><span class="meta"><span class="t">'+esc(t)+'</span><span class="go">'+ic('arrowLeft')+'חלק מהמאגר</span></span></button>'
+    ).join('')+'</div>';
+  } else {
+    chips='<div class="poolEmpty">'+ic('inbox')+'<span>המאגר ריק. משכו כלים ממסגרת (או לחצו −) אל שורת «מאגר עודפים» כדי לפנות אותם לחלוקה — וכאן תמיד תראו כמה נותר לחלק מכל סוג.</span></div>';
+  }
+  const bal=bad.length? '<span class="balance bad">'+ic('alert')+'שימור הופר: '+esc(bad[0])+'</span>' : '<span class="balance ok">'+ic('check')+'מלאי מאוזן</span>';
+  el.innerHTML='<div class="sh"><span class="ttl">'+ic('zap')+'עודף לחלוקה</span><span class="note">כמה יש לך זמין כרגע מכל סוג רכב</span>'+bal+'</div>'+chips;
+  el.querySelectorAll('.pchip').forEach(c=>c.addEventListener('click',()=>presetTransfer(c.getAttribute('data-type'),POOL)));
+}
+
+/* ---------- transfer bar ---------- */
+function renderTransferBar(){
+  const el=document.getElementById('transferBar');
+  const typeOpts=CAT_NAMES.map(c=>'<optgroup label="'+esc(c)+'">'+CATS[c].map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('')+'</optgroup>').join('');
+  el.innerHTML=
+    '<div class="fld"><label>סוג רכב</label><select id="tfType" aria-label="סוג רכב">'+typeOpts+'</select></div>'+
+    '<div class="fld"><label>מ־ (נותן)</label><select id="tfFrom" aria-label="מסגרת מוסרת"></select></div>'+
+    '<span class="arrow">'+ic('arrowLeft')+'</span>'+
+    '<div class="fld"><label>ל־ (מקבל)</label><select id="tfTo" aria-label="מסגרת מקבלת"></select></div>'+
+    '<div class="fld"><label>כמות</label><input type="number" id="tfQty" min="1" value="1" aria-label="כמות"></div>'+
+    '<button class="go" id="tfGo">'+ic('route')+'בצע העברה</button>'+
+    '<span class="hint">אפשר גם: גרירת תא, +/− על תא, או לחיצה על עודף במאגר.</span>';
+  el.querySelector('#tfType').addEventListener('change',fillFrames);
+  fillFrames();
+  el.querySelector('#tfGo').addEventListener('click',()=>{ const t=el.querySelector('#tfType').value,f=el.querySelector('#tfFrom').value,to=el.querySelector('#tfTo').value,q=parseInt(el.querySelector('#tfQty').value); if(transfer(t,f,to,q)){ renderAll(); toast(q+' × '+t+' — מ'+f+' ל'+to,'good'); } });
+}
+function fillFrames(){
+  const el=document.getElementById('transferBar'); if(!el.querySelector('#tfType'))return;
+  const t=el.querySelector('#tfType').value, from=el.querySelector('#tfFrom'), to=el.querySelector('#tfTo'); const pf=from.value,pt=to.value;
+  const opt=f=>'<option value="'+esc(f)+'">'+esc(f)+' ('+count(f,t)+')</option>';
+  from.innerHTML=FRAMES_ALL.map(opt).join(''); to.innerHTML=FRAMES_ALL.map(opt).join('');
+  if(pf&&FRAMES_ALL.includes(pf))from.value=pf; if(pt&&FRAMES_ALL.includes(pt))to.value=pt;
+  if(to.value===from.value)to.value=FRAMES_ALL.find(f=>f!==from.value);
+}
+function presetTransfer(type,from){ const el=document.getElementById('transferBar'); el.querySelector('#tfType').value=type; fillFrames(); if(from&&FRAMES_ALL.includes(from))el.querySelector('#tfFrom').value=from; fillFrames(); const q=el.querySelector('#tfQty'); q.focus(); q.select(); el.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+
+/* ---------- tables ---------- */
+function headerRows(){
+  let h='<thead><tr><th class="frameName" rowspan="2">מסגרת</th>';
+  CAT_NAMES.forEach((c,i)=>h+='<th class="catHead" colspan="'+CATS[c].length+'" style="background:var(--cat'+i+'d)">'+esc(c)+'</th>');
+  h+='</tr><tr>'; CAT_NAMES.forEach((c,i)=>CATS[c].forEach(t=>h+='<th class="typeHead" style="background:var(--cat'+i+')">'+esc(t)+'</th>'));
+  return h+'</tr></thead>';
+}
+function fnLabel(f){ if(f===POOL) return '<span class="fnm">'+ic('inbox')+esc(POOL)+'</span>'; if(COMBAT.has(f)) return '<span class="fnm">'+ic('shield')+esc(f)+'</span>'; return esc(f); }
+function scenarioCell(f,t){
+  const n=count(f,t), d=n-BASE[f][t]; let meta='';
+  if(d!==0) meta+='<span class="delta '+(d>0?'pos':'neg')+'">'+(d>0?'+':'')+d+'</span>';
+  if(f!==POOL){ const tg=state.targets[f]&&state.targets[f][t]; if(tg!=null&&tg!==''){ const df=n-tg; meta+='<span class="tchip '+(df<0?'def':(df>0?'sur':''))+'">יעד '+tg+(df<0?' ('+df+')':'')+'</span>'; } }
+  return '<td class="cell" data-f="'+esc(f)+'" data-t="'+esc(t)+'" draggable="true">'+
+    '<div class="cellInner">'+
+      '<button class="stp" data-action="minus" data-f="'+esc(f)+'" data-t="'+esc(t)+'" '+(n<=0?'disabled':'')+' aria-label="הורד אחד">'+ic('minus')+'</button>'+
+      '<span class="num'+(n===0?' zero':'')+'">'+n+'</span>'+
+      '<button class="stp" data-action="plus" data-f="'+esc(f)+'" data-t="'+esc(t)+'" aria-label="הוסף אחד">'+ic('plus')+'</button>'+
+    '</div><div class="cellMeta">'+meta+'</div></td>';
+}
+function renderScenario(){
+  const w=document.getElementById('scenarioTableWrap'), sl=w.scrollLeft;
+  let h='<table class="grid">'+headerRows()+'<tbody>';
+  h+='<tr class="frameRow poolRow"><td class="frameName">'+fnLabel(POOL)+'</td>'+TYPES.map(t=>scenarioCell(POOL,t)).join('')+'</tr>';
+  FRAMES.forEach(f=>{ h+='<tr class="frameRow'+(COMBAT.has(f)?' combat':'')+'"><td class="frameName">'+fnLabel(f)+'</td>'+TYPES.map(t=>scenarioCell(f,t)).join('')+'</tr>'; });
+  h+='</tbody><tfoot><tr><td class="frameName">סה״כ / בסיס</td>';
+  TYPES.forEach(t=>{ const c=curTotal(t); h+='<td class="totCell'+(c!==BASE_TOTAL[t]?' bad':'')+'"><div class="totCur">'+c+'</div><div class="totBase">בסיס '+BASE_TOTAL[t]+'</div></td>'; });
+  h+='</tr></tfoot></table>'; w.innerHTML=h; w.scrollLeft=sl;
+}
+function renderBaseline(){
+  const w=document.getElementById('baselineTableWrap');
+  let h='<table class="grid">'+headerRows()+'<tbody>';
+  FRAMES.forEach(f=>{ h+='<tr class="frameRow'+(COMBAT.has(f)?' combat':'')+'"><td class="frameName">'+fnLabel(f)+'</td>'+TYPES.map(t=>{const n=BASE[f][t];return '<td class="cell"><div class="cellInner"><span class="num'+(n===0?' zero':'')+'">'+n+'</span></div></td>';}).join('')+'</tr>'; });
+  h+='</tbody><tfoot><tr><td class="frameName">סה״כ</td>'+TYPES.map(t=>'<td class="totCell"><div class="totCur">'+BASE_TOTAL[t]+'</div></td>').join('')+'</tr></tfoot></table>';
+  w.innerHTML=h;
+}
+
+/* ---------- flows summary ---------- */
+function renderFlows(){
+  const el=document.getElementById('flowsCard');
+  const fl=computeFlows();
+  const totalUnits=fl.reduce((s,f)=>s+f.qty,0);
+  const head='<div class="fhead"><h2>'+ic('route')+'סיכום הוויסות — מי מוסר למי</h2>'+
+    (fl.length?'<span class="fstat">'+fl.length+' תנועות · '+totalUnits+' כלים סה״כ</span>':'')+
+    '<span class="spacer"></span>'+
+    (fl.length?'<button class="btn" id="btnCopyFlows">'+ic('copy')+'העתק טקסט</button>':'')+'</div>';
+  let body;
+  if(!fl.length){
+    body='<div class="flowsBody"><div class="flowsEmpty">'+ic('route')+'<div>אין עדיין תנועות וויסות.<br>בצעו העברות והסיכום — מי מוסר למי, איזה סוג וכמה — ייבנה כאן אוטומטית.</div></div></div>';
+  } else {
+    body='<div class="flowsBody"><table class="flows"><thead><tr><th style="width:22%">מוסר</th><th style="width:5%"></th><th style="width:22%">מקבל</th><th style="width:36%">סוג רכב</th><th style="width:15%;text-align:center">כמות</th></tr></thead><tbody>'+
+      fl.map(f=>'<tr>'+
+        '<td><span class="fchip from">'+(f.from===POOL?ic('inbox'):COMBAT.has(f.from)?ic('shield'):'')+esc(f.from)+'</span></td>'+
+        '<td class="farrow">'+ic('arrowLeft')+'</td>'+
+        '<td><span class="fchip to">'+(f.to===POOL?ic('inbox'):COMBAT.has(f.to)?ic('shield'):'')+esc(f.to)+'</span></td>'+
+        '<td class="ftype">'+esc(f.type)+'</td>'+
+        '<td class="fqty">'+f.qty+'<span class="u">יח׳</span></td>'+
+      '</tr>').join('')+
+      '</tbody></table></div>';
+  }
+  el.innerHTML=head+body;
+  const cp=el.querySelector('#btnCopyFlows');
+  if(cp) cp.addEventListener('click',()=>{ const txt=flowsText(); const done=()=>toast('הסיכום הועתק ללוח','good');
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(()=>fallbackCopy(txt,done)); } else fallbackCopy(txt,done); });
+}
+function fallbackCopy(txt,cb){ const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');cb();}catch(e){toast('ההעתקה נכשלה','err');} ta.remove(); }
+
+/* ---------- log + per-frame balance ---------- */
+function renderLog(){
+  document.getElementById('logCount').textContent=state.log.length;
+  const el=document.getElementById('logList');
+  if(!state.log.length){ el.innerHTML='<div class="empty">אין תנועות עדיין.<br>כל העברה תתועד כאן אוטומטית.</div>'; return; }
+  el.innerHTML=state.log.slice().reverse().map(e=>{ const tm=new Date(e.t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+    return '<div class="logItem"><div class="txt"><b>'+e.qty+'</b> '+esc(e.type)+' — מ<b>'+esc(e.from)+'</b> ל<b>'+esc(e.to)+'</b><div class="time">'+tm+'</div></div><button class="del" data-del="'+e.id+'" aria-label="בטל תנועה">'+ic('x')+'</button></div>'; }).join('');
+}
+function renderSummary(){
+  const el=document.getElementById('sumList');
+  const agg={}; FRAMES_ALL.forEach(f=>agg[f]={recv:{},give:{},net:0});
+  state.log.forEach(e=>{ agg[e.to].recv[e.type]=(agg[e.to].recv[e.type]||0)+e.qty; agg[e.to].net+=e.qty; agg[e.from].give[e.type]=(agg[e.from].give[e.type]||0)+e.qty; agg[e.from].net-=e.qty; });
+  const active=FRAMES_ALL.filter(f=>agg[f].net!==0||Object.keys(agg[f].recv).length||Object.keys(agg[f].give).length);
+  if(!active.length){ el.innerHTML='<div class="empty">אין תנועות. המאזן יתעדכן לפי הלוג.</div>'; return; }
+  el.innerHTML=active.map(f=>{ const a=agg[f]; const nc=a.net>0?'pos':(a.net<0?'neg':'zero');
+    const recv=Object.entries(a.recv).map(([t,q])=>q+' '+t).join(' · ');
+    const give=Object.entries(a.give).map(([t,q])=>q+' '+t).join(' · ');
+    return '<div class="sumItem"><div class="fn">'+(f===POOL?ic('inbox'):COMBAT.has(f)?ic('shield'):'')+esc(f)+'<span class="net '+nc+'">'+(a.net>0?'+':'')+a.net+'</span></div>'+(recv?'<div class="recv">'+ic('arrowDown')+'<span>מקבל: '+esc(recv)+'</span></div>':'')+(give?'<div class="give">'+ic('arrowLeft')+'<span>נותן: '+esc(give)+'</span></div>':'')+'</div>'; }).join('');
+}
+
+/* ---------- targets ---------- */
+function renderTargets(){
+  const el=document.getElementById('targetsPanel');
+  const typeOpts=CAT_NAMES.map(c=>'<optgroup label="'+esc(c)+'">'+CATS[c].map(t=>'<option value="'+esc(t)+'"'+(t===tgType?' selected':'')+'>'+esc(t)+'</option>').join('')+'</optgroup>').join('');
+  let body='';
+  if(targetsOpen){
+    let grid='';
+    FRAMES.forEach(f=>{ const n=count(f,tgType), tg=(state.targets[f]&&state.targets[f][tgType]); let stat='';
+      if(tg!=null&&tg!==''){ const d=n-tg; stat=d<0?'<span class="stat def">חוסר '+(-d)+'</span>':(d>0?'<span class="stat sur">עודף '+d+'</span>':'<span class="stat ok">מאוזן</span>'); }
+      grid+='<div class="tgCell'+(COMBAT.has(f)?' combat':'')+'"><div class="fn">'+(COMBAT.has(f)?ic('shield'):'')+esc(f)+'</div><div class="row">נוכחי <b>'+n+'</b> · יעד <input type="number" min="0" data-tg="'+esc(f)+'" value="'+(tg!=null?tg:'')+'" placeholder="—" aria-label="יעד ל'+esc(f)+'">'+stat+'</div></div>'; });
+    body='<div class="tgBody"><div class="tgControls"><label style="font-weight:700">סוג רכב:</label><select id="tgTypeSel" aria-label="בחר סוג רכב ליעד">'+typeOpts+'</select>'+
+      '<button class="btn" id="tgPreset">'+ic('target')+'יעד לדוגמה (8/8/8/8/8/6)</button><button class="btn danger" id="tgClear">'+ic('trash')+'נקה יעדים לסוג זה</button></div><div class="tgGrid">'+grid+'</div></div>';
+  }
+  el.innerHTML='<div class="tgHead'+(targetsOpen?' open':'')+'" id="tgHeadToggle"><h2>'+ic('target')+'יעדים (אופציונלי)</h2><span class="desc" style="font-size:12px;margin-inline-start:auto">חיווי חוסר/עודף מול יעד — לא כופה ולא משנה מלאי</span><span class="chev">'+ic('chevron')+'</span></div>'+body;
+  el.querySelector('#tgHeadToggle').addEventListener('click',()=>{targetsOpen=!targetsOpen;renderTargets();});
+  if(targetsOpen){
+    el.querySelector('#tgTypeSel').addEventListener('change',e=>{tgType=e.target.value;renderTargets();});
+    el.querySelectorAll('input[data-tg]').forEach(inp=>inp.addEventListener('change',e=>{ const f=e.target.getAttribute('data-tg'),v=e.target.value; state.targets[f]=state.targets[f]||{}; if(v==='')delete state.targets[f][tgType]; else state.targets[f][tgType]=parseInt(v); save(); renderTargets(); renderScenario(); }));
+    el.querySelector('#tgPreset').addEventListener('click',()=>{ const p={'7020':8,'8110':8,'8111':8,'גדס"ר':8,'גדס"מ':8,'מפח"ט':6,'פלת"צ':5}; tgType='האמר סיור'; Object.keys(p).forEach(f=>{state.targets[f]=state.targets[f]||{};state.targets[f]['האמר סיור']=p[f];}); save(); renderTargets(); renderScenario(); toast('נטענו יעדי דוגמה להאמר סיור','good'); });
+    el.querySelector('#tgClear').addEventListener('click',()=>{ FRAMES.forEach(f=>{if(state.targets[f])delete state.targets[f][tgType];}); save(); renderTargets(); renderScenario(); });
+  }
+}
+
+/* ---------- +/- chooser ---------- */
+function closePopover(){ const p=document.getElementById('popover'); p.className='popover hidden'; p.innerHTML=''; }
+function openChooser(anchor,f,t,mode){
+  const p=document.getElementById('popover');
+  const others=FRAMES_ALL.filter(x=>x!==f);
+  const list=mode==='plus'?others.filter(x=>count(x,t)>0):others;
+  const title=mode==='plus'?'הוסף 1 «'+t+'» ל־'+f+' — מאיפה לקחת?':'הורד 1 «'+t+'» מ־'+f+' — לאן לתת?';
+  let html='<div class="pt">'+esc(title)+'</div>';
+  if(!list.length) html+='<div class="none">אין מסגרת מתאימה'+(mode==='plus'?' עם מלאי':'')+'.</div>';
+  else list.forEach(x=>html+='<button class="opt'+(x===POOL?' pool':'')+'" data-x="'+esc(x)+'"><span class="lbl">'+(x===POOL?ic('inbox'):COMBAT.has(x)?ic('shield'):'')+esc(x)+'</span><span class="c">'+count(x,t)+'</span></button>');
+  p.innerHTML=html; p.className='popover';
+  const r=anchor.getBoundingClientRect(); p.style.top=(r.bottom+6)+'px'; p.style.left=Math.max(8,r.left-84)+'px';
+  const pr=p.getBoundingClientRect(); if(pr.right>innerWidth-8)p.style.left=(innerWidth-8-pr.width)+'px'; if(pr.bottom>innerHeight-8)p.style.top=(r.top-pr.height-6)+'px';
+  p.querySelectorAll('button.opt').forEach(b=>b.addEventListener('click',ev=>{ ev.stopPropagation(); const x=b.getAttribute('data-x'); const ok=mode==='plus'?transfer(t,x,f,1):transfer(t,f,x,1); if(ok){ closePopover(); renderAll(); toast('1 '+t+' — מ'+(mode==='plus'?x:f)+' ל'+(mode==='plus'?f:x),'good'); } }));
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('#popover')&&!e.target.closest('.stp')) closePopover(); });
+
+/* ---------- scenario interactions ---------- */
+function bindScenario(){
+  const w=document.getElementById('scenarioTableWrap');
+  w.addEventListener('click',e=>{ const b=e.target.closest('[data-action]'); if(!b)return; e.stopPropagation(); const a=b.getAttribute('data-action'),f=b.getAttribute('data-f'),t=b.getAttribute('data-t'); if(a==='plus')openChooser(b,f,t,'plus'); else if(a==='minus')openChooser(b,f,t,'minus'); });
+  let drag=null;
+  w.addEventListener('dragstart',e=>{ const c=e.target.closest('.cell[draggable=true]'); if(!c)return; drag={f:c.getAttribute('data-f'),t:c.getAttribute('data-t')}; c.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; try{e.dataTransfer.setData('text/plain','x');}catch(x){} });
+  w.addEventListener('dragend',()=>{ w.querySelectorAll('.dragging,.dropok').forEach(c=>c.classList.remove('dragging','dropok')); drag=null; });
+  w.addEventListener('dragover',e=>{ const c=e.target.closest('.cell[draggable=true]'); if(!c||!drag)return; if(c.getAttribute('data-t')===drag.t&&c.getAttribute('data-f')!==drag.f){ e.preventDefault(); c.classList.add('dropok'); } });
+  w.addEventListener('dragleave',e=>{ const c=e.target.closest('.cell'); if(c)c.classList.remove('dropok'); });
+  w.addEventListener('drop',e=>{ const c=e.target.closest('.cell[draggable=true]'); if(!c||!drag)return; e.preventDefault(); const to=c.getAttribute('data-f'),t=c.getAttribute('data-t'),from=drag.f; if(t!==drag.t||to===from)return; const av=count(from,t); if(av<=0){toast('אין כלים להעברה מ־'+from,'err');return;} let q=prompt('כמה «'+t+'» להעביר מ־'+from+' ל־'+to+'?  (זמין: '+av+')','1'); if(q==null)return; q=parseInt(q); if(transfer(t,from,to,q)){ renderAll(); toast(q+' × '+t+' — מ'+from+' ל'+to,'good'); } });
+}
+document.getElementById('logList').addEventListener('click',e=>{ const b=e.target.closest('[data-del]'); if(b)deleteLogEntry(b.getAttribute('data-del')); });
+
+/* ---------- toolbar ---------- */
+function refreshSavedSel(){ const s=document.getElementById('savedSel'),o=savedScenarios(),n=Object.keys(o); s.innerHTML='<option value="">— תרחישים שמורים ('+n.length+') —</option>'+n.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join(''); }
+document.getElementById('btnReset').addEventListener('click',()=>{ if(!confirm('לאפס את התרחיש חזרה לבסיס? כל הלוג יימחק.'))return; state.scenario=freshScenario(); state.log=[]; save(); renderAll(); toast('אופס לבסיס','good'); });
+document.getElementById('btnExample').addEventListener('click',()=>{ if(!confirm('לטעון תרחיש דוגמה? (מאפס נוכחי) — גדס"ר מחלק 14 האמרי סיור: 2→7020, 2→8110, 2→8111, 1→גדס"מ, 2→מפח"ט, 5→פלת"צ.'))return; state.scenario=freshScenario(); state.log=[]; [['7020',2],['8110',2],['8111',2],['גדס"מ',1],['מפח"ט',2],['פלת"צ',5]].forEach(([to,q])=>transfer('האמר סיור','גדס"ר',to,q)); save(); renderAll(); toast('נטען תרחיש הדוגמה','good'); });
+document.getElementById('btnSave').addEventListener('click',()=>{ const n=prompt('שם לתרחיש:','תרחיש '+new Date().toLocaleString('he-IL')); if(!n)return; const o=savedScenarios(); o[n]={scenario:state.scenario,log:state.log,targets:state.targets}; writeSaved(o); refreshSavedSel(); toast('נשמר: '+n,'good'); });
+document.getElementById('btnLoad').addEventListener('click',()=>{ const n=document.getElementById('savedSel').value; if(!n){toast('בחרו תרחיש','err');return;} const s=savedScenarios()[n]; if(!s)return; if(!confirm('לטעון «'+n+'»? הנוכחי יוחלף.'))return; state.scenario=JSON.parse(JSON.stringify(s.scenario)); FRAMES_ALL.forEach(f=>{state.scenario[f]=state.scenario[f]||{};TYPES.forEach(t=>{state.scenario[f][t]=+state.scenario[f][t]||0;});}); state.log=s.log||[]; state.targets=s.targets||{}; save(); renderAll(); toast('נטען: '+n,'good'); });
+document.getElementById('btnDelSaved').addEventListener('click',()=>{ const n=document.getElementById('savedSel').value; if(!n){toast('בחרו תרחיש','err');return;} if(!confirm('למחוק «'+n+'»?'))return; const o=savedScenarios(); delete o[n]; writeSaved(o); refreshSavedSel(); toast('נמחק','good'); });
+document.getElementById('btnUndo').addEventListener('click',undoLast);
+document.getElementById('btnClearLog').addEventListener('click',()=>{ if(!state.log.length){toast('הלוג ריק','err');return;} if(!confirm('לנקות לוג ולהחזיר לבסיס?'))return; state.scenario=freshScenario(); state.log=[]; save(); renderAll(); toast('נוקה','good'); });
+document.getElementById('btnToggleBase').addEventListener('click',()=>{ baseOpen=!baseOpen; document.getElementById('baselineTableWrap').style.display=baseOpen?'block':'none'; });
+document.getElementById('btnPrint').addEventListener('click',()=>window.print());
+document.getElementById('btnCsv').addEventListener('click',exportCSV);
+
+function exportCSV(){
+  const rows=[['וויסות רכבים — תרחיש'],['מסגרת',...TYPES]];
+  FRAMES_ALL.forEach(f=>rows.push([f,...TYPES.map(t=>count(f,t))]));
+  rows.push(['סה"כ',...TYPES.map(t=>curTotal(t))],['בסיס',...TYPES.map(t=>BASE_TOTAL[t])],[],['עודף במאגר',...TYPES.map(t=>surplus(t))],[]);
+  rows.push(['סיכום הוויסות — מי מוסר למי'],['מוסר','מקבל','סוג רכב','כמות']);
+  computeFlows().forEach(f=>rows.push([f.from,f.to,f.type,f.qty]));
+  rows.push([],['דלתא מול בסיס'],['מסגרת',...TYPES]);
+  FRAMES.forEach(f=>rows.push([f,...TYPES.map(t=>{const d=count(f,t)-BASE[f][t];return d>0?'+'+d:d;})]));
+  rows.push([],['לוג תנועות'],['#','כמות','סוג','מ־','ל־','זמן']);
+  state.log.forEach((e,i)=>rows.push([i+1,e.qty,e.type,e.from,e.to,new Date(e.t).toLocaleString('he-IL')]));
+  const csv='﻿'+rows.map(r=>r.map(c=>{const s=String(c==null?'':c);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',')).join('\r\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); a.download='וויסות-רכבים-'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click(); a.remove(); toast('CSV יוצא','good');
+}
+
+/* ---------- init ---------- */
+function paintStaticIcons(){
+  document.getElementById('logoBox').innerHTML=ic('truck');
+  document.querySelectorAll('[data-ic]').forEach(el=>{ el.insertAdjacentHTML('afterbegin',ic(el.getAttribute('data-ic'))); });
+}
+function renderAll(){ renderScenario(); renderSurplus(); renderFlows(); renderLog(); renderSummary(); renderTargets(); fillFrames(); }
+
+load(); paintStaticIcons(); renderTransferBar(); renderBaseline(); bindScenario(); refreshSavedSel(); renderAll();
+})();
+</script>
+</body>
+</html>
