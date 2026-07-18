@@ -269,6 +269,7 @@ function defaultState(){
   const q={}; QUARTERS.forEach(k=> q[k]=emptyQuarter());
   return {
     activeQuarter:'Q3',
+    cumulative:false,
     config:{
       goals:{ floors:{Q1:0,Q2:0,Q3:0,Q4:0,Q5:0,Q6:0,Q7:0,Q8:0,Q9:0},
         techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0 },
@@ -284,7 +285,7 @@ function defaultState(){
     quarters:q,
     scenarios:[],
     decisions:[],
-    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[] },
+    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-5.6'}, chat:[] },
     meta:{lastEditor:'', lastEdited:0},
   };
 }
@@ -397,12 +398,18 @@ function go(id){
 }
 function renderQuarterSelect(){
   const sel=$('#quarterSelect'); sel.innerHTML='';
+  const cum=document.createElement('option'); cum.value='CUM'; cum.textContent='מצטבר (הכול)'; if(S.cumulative)cum.selected=true; sel.appendChild(cum);
   QUARTERS.forEach(q=>{ const o=document.createElement('option'); o.value=q;
-    o.textContent=q+(S.quarters[q].entered?' ✓':''); if(q===S.activeQuarter)o.selected=true; sel.appendChild(o); });
-  sel.onchange=()=>{ S.activeQuarter=sel.value; save(); go(currentPage); };
+    o.textContent=q+(S.quarters[q].entered?' ✓':''); if(!S.cumulative&&q===S.activeQuarter)o.selected=true; sel.appendChild(o); });
+  sel.onchange=()=>{
+    if(sel.value==='CUM'){ S.cumulative=true; } else { S.cumulative=false; S.activeQuarter=sel.value; }
+    save(); go(currentPage);
+  };
 }
-function renderQBox(){ $('#qboxNow').textContent=S.activeQuarter;
+function renderQBox(){ $('#qboxNow').textContent=S.cumulative?'מצטבר':S.activeQuarter;
   $('#qboxEdit').textContent=relTime(S.meta.lastEdited)+(S.meta.lastEditor?(' · '+S.meta.lastEditor):''); }
+function enteredQuarters(){ return QUARTERS.filter(q=>S.quarters[q].entered); }
+function latestEntered(){ const e=enteredQuarters(); return e.length?e[e.length-1]:null; }
 
 /* =========================================================================
    DETERMINISTIC ENGINE  (F4 cash-flow, F3 alerts, scoring proxy)
@@ -488,6 +495,7 @@ const PAGE_RENDER = {};
 
 /* ----- DASHBOARD (F3) ----- */
 PAGE_RENDER.dashboard = (c)=>{
+  if(S.cumulative){ renderCumulativeDashboard(c); return; }
   const q=S.activeQuarter, Q=S.quarters[q];
   if(!Q.entered){
     c.innerHTML=emptyBlock(IC('inbox'),'רבעון '+q+' עדיין ריק','העלה את דוח התוצאות הרבעוני כדי לראות תמונת מצב, נורות ומגמות.',
@@ -541,6 +549,69 @@ function autoBriefing(q){
   else out.push(`ההקרנה הנוכחית שומרת על הרצפות עד Q9.`);
   if((Q.operational.rd||0)===0) out.push(`מו״פ אופס ברבעון זה — בדוק מול קנס העקביות ומגמת המתחרים.`);
   return out;
+}
+
+/* Cumulative (all-quarters) dashboard: flows summed, stocks at latest entered. */
+function renderCumulativeDashboard(c){
+  const ent=enteredQuarters();
+  if(!ent.length){
+    c.innerHTML=emptyBlock(IC('inbox'),'אין נתונים מצטברים','קלוט לפחות רבעון אחד כדי לראות תמונה מצטברת.',
+      `<button class="btn primary" onclick="go('ingest')">מעבר לקליטת דוח</button>`); return;
+  }
+  const last=latestEntered();
+  const sum=k=> ent.reduce((a,q)=>a+(S.quarters[q].financial[k]||0),0);
+  const totalProfit=sum('netProfit'), totalRevenue=sum('revenue');
+  const lastFin=S.quarters[last].financial, lastOp=S.quarters[last].operational;
+  const totalRD=ent.reduce((a,q)=>a+(S.quarters[q].operational.rd||0),0);
+  const avgMargin=totalRevenue>0?(totalProfit/totalRevenue*100):null;
+  c.innerHTML=`
+    <div class="card pad" style="margin-bottom:18px;border-inline-start:4px solid var(--accent)">
+      <div class="between"><h3>${IC('lineChart')} תמונה מצטברת — ${ent[0]}–${last}</h3><span class="tag b">${ent.length} רבעונים</span></div>
+      <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">
+        <li>רווח נקי מצטבר: <b class="num">${fmt(totalProfit)}</b> · מחזור מצטבר: <b class="num">${fmt(totalRevenue)}</b>${avgMargin!==null?` · שולי רווח ממוצע: <b class="num">${avgMargin.toFixed(1)}%</b>`:''}.</li>
+        <li>מזומן מאוחד נוכחי (${last}): <b class="num">${fmt(unifiedCashOf(last))}</b> · רווחים צבורים: <b class="num">${fmt(lastFin.retainedEarnings)}</b>.</li>
+        <li>השקעת מו״פ מצטברת: <b class="num">${fmt(totalRD)}</b> · רמות טכנולוגיה נוכחיות: <b>X ${lastOp.techX} / Y ${lastOp.techY}</b>.</li>
+      </ul>
+    </div>
+    <h3 style="margin:6px 0 12px">מדדי-על מצטברים</h3>
+    <div class="kpis" style="margin-bottom:22px">
+      ${kpi('רווח נקי מצטבר',fmt(totalProfit),'')}
+      ${kpi('מחזור מצטבר',fmt(totalRevenue),'')}
+      ${kpi('מזומן נוכחי',fmt(unifiedCashOf(last)),'')}
+      ${kpi('רווחים צבורים',fmt(lastFin.retainedEarnings),'')}
+      ${kpi('מו״פ מצטבר',fmt(totalRD),'')}
+      ${kpi('חוב נוכחי',fmt(lastFin.loans),'')}
+      ${kpi('רמות X / Y',`${lastOp.techX} / ${lastOp.techY}`,'')}
+      ${kpi('שולי רווח',avgMargin!==null?avgMargin.toFixed(1)+'%':'—','')}
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="ch"><h3>${IC('trendUp')} מגמת מזומן מאוחד לאורך המשחק</h3></div>
+      <div class="cb"><canvas id="trendChart" height="210"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="ch"><h3>${IC('clipboard')} סיכום רבעוני</h3><span class="small muted">זרימות מצטברות, יתרות לפי רבעון</span></div>
+      <div class="cb" style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>רווח נקי</th><th>מחזור</th><th>חוב</th><th>מו״פ</th><th>רמות X/Y</th></tr></thead>
+          <tbody>
+            ${ent.map(q=>{ const f=S.quarters[q].financial, o=S.quarters[q].operational; return `<tr>
+              <td><b>${q}</b></td>
+              <td class="num">${fmt(unifiedCashOf(q))}</td>
+              <td class="num" style="${f.netProfit<0?'color:var(--red)':''}">${fmt(f.netProfit)}</td>
+              <td class="num">${fmt(f.revenue)}</td>
+              <td class="num">${fmt(f.loans)}</td>
+              <td class="num">${fmt(o.rd)}</td>
+              <td class="num">${o.techX} / ${o.techY}</td></tr>`; }).join('')}
+            <tr style="background:rgba(61,111,224,.08)">
+              <td><b>סה״כ / נוכחי</b></td><td class="num"><b>${fmt(unifiedCashOf(last))}</b></td>
+              <td class="num"><b>${fmt(totalProfit)}</b></td>
+              <td class="num"><b>${fmt(totalRevenue)}</b></td>
+              <td class="num">${fmt(lastFin.loans)}</td><td class="num"><b>${fmt(totalRD)}</b></td><td class="num">${lastOp.techX} / ${lastOp.techY}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  drawTrend($('#trendChart'));
 }
 function kpi(label,val,delta){ return `<div class="kpi"><div class="l">${label}</div><div class="v num">${val}</div>${delta}</div>`; }
 function deltaTag(now,prev){ if(prev===null||prev===undefined)return ''; const d=now-prev; if(!isFinite(d))return '';
@@ -1220,7 +1291,7 @@ function renderContracts(){
    ========================================================================= */
 const AI_PROVIDERS={
   anthropic:{ label:'Anthropic (Claude)', short:'Claude', keyLS:'intopia_ai_key_anthropic', defModel:'claude-sonnet-5', keyHint:'sk-ant-...' },
-  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-4o', keyHint:'sk-...' },
+  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-5.6', keyHint:'sk-...' },
 };
 function aiProvider(){ const p=S.ai&&S.ai.provider; return AI_PROVIDERS[p]?p:'anthropic'; }
 function getApiKey(prov){ prov=prov||aiProvider(); try{
@@ -1387,7 +1458,7 @@ function updateProviderHints(){
   note.textContent = prov==='openai'
     ? 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-platform.openai.com. הקריאה ישירה מהדפדפן.'
     : 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-console.anthropic.com.';
-  mh.textContent = prov==='openai' ? 'למשל gpt-4o / gpt-4o-mini / gpt-4.1' : 'למשל claude-sonnet-5 / claude-opus-4-8';
+  mh.textContent = prov==='openai' ? 'למשל gpt-5.6 / gpt-4o / gpt-4o-mini' : 'למשל claude-sonnet-5 / claude-opus-4-8';
 }
 window.aiProviderSwitch=()=>{
   const nv=$('#aiProvider').value;
