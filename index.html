@@ -1661,8 +1661,40 @@ $('#btnSync').onclick=()=>{
       </ol>
       <div style="color:var(--amber)">${IC('warn')} test mode פתוח לקריאה/כתיבה — למשחק כיתתי סביר; לאבטחה מלאה הגדר rules + auth.</div>
     </details>`,
-    `${getSyncCfg()?'<button class="btn danger" onclick="disconnectSyncUI()">נתק</button>':''}<button class="btn primary" onclick="saveSyncCfg()">התחבר</button>`);
+    `${getSyncCfg()?`<button class="btn danger" onclick="disconnectSyncUI()">נתק</button><button class="btn" onclick="copyShareLink()">${IC('share')} העתק לינק שיתוף</button>`:''}<button class="btn primary" onclick="saveSyncCfg()">התחבר</button>`);
 };
+function buildShareLink(url,room){
+  const base=location.origin+location.pathname;
+  return base+'#room='+encodeURIComponent(room)+'&db='+encodeURIComponent(url);
+}
+window.copyShareLink=()=>{
+  const cfg=getSyncCfg()||{};
+  const url=($('#syncUrl')?.value||cfg.url||'').trim(), room=($('#syncRoom')?.value||cfg.room||'').trim();
+  if(!url||!room){ toast('התחבר קודם (URL + קוד חדר)','r'); return; }
+  const link=buildShareLink(url,room);
+  const done=()=>toast('לינק השיתוף הועתק — שלח לצוות ✓','g');
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(link).then(done).catch(()=>showShareLink(link)); }
+  else showShareLink(link);
+};
+function showShareLink(link){
+  openModal('לינק שיתוף לחלל העבודה', `
+    <div class="small muted" style="margin-bottom:8px">שלח את הלינק לצוות — לחיצה עליו תחבר אותם אוטומטית לאותו מצב שמור:</div>
+    <input class="f" value="${esc(link)}" onclick="this.select()" readonly>
+    <div class="small muted" style="margin-top:8px">${IC('warn')} כל מי שיש לו את הלינק יכול לצפות ולערוך את נתוני הצוות.</div>`, '');
+}
+function applyShareLink(){
+  try{
+    const h=location.hash||''; if(!/(?:room|db)=/.test(h)) return false;
+    const params=new URLSearchParams(h.replace(/^#/,''));
+    const db=params.get('db'), room=params.get('room');
+    if(db&&room){ const existing=getSyncCfg()||{};
+      setSyncCfg({url:db, room:room, name:existing.name||'', auth:existing.auth||''});
+      try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){ location.hash=''; } // clean the URL
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 window.saveSyncCfg=()=>{
   const cfg={url:$('#syncUrl').value.trim(), room:$('#syncRoom').value.trim(), name:$('#syncName').value.trim(), auth:$('#syncAuth').value.trim()};
   if(!cfg.url||!cfg.room){ toast('נדרשים URL וקוד חדר','r'); return; }
@@ -1679,11 +1711,14 @@ window.disconnectSyncUI=()=>{ disconnectSync(); setSyncCfg(null); setSyncDot('va
 /* ---------- Boot ---------- */
 window.go=go;
 function boot(){
-  load(); renderNav(); renderQuarterSelect(); renderQBox(); go('dashboard');
+  load();
+  const joined=applyShareLink();
+  renderNav(); renderQuarterSelect(); renderQBox(); go('dashboard');
   const ver=$('#appVer'); if(ver) ver.textContent=APP_VERSION;
   document.title=`Group 8 — EMBA 41 — TAU · INTOPIA ${APP_VERSION}`;
   window.addEventListener('resize',()=>{ if(currentPage==='dashboard')drawTrend($('#trendChart')); });
   if(getSyncCfg()) connectSync();
+  if(joined) setTimeout(()=>toast('התחברת לחלל העבודה המשותף של הצוות ✓','g'),400);
 }
 boot();
 </script>
