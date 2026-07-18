@@ -206,6 +206,7 @@ canvas{display:block;max-width:100%}
       רבעון פעיל: <b id="qboxNow">—</b><br>
       עודכן לאחרונה: <span id="qboxEdit" class="muted">—</span>
     </div>
+    <div style="text-align:center;font-size:10px;color:var(--muted2);letter-spacing:.6px;margin-top:8px">INTOPIA War Room · <span id="appVer"></span></div>
   </aside>
 
   <div class="main">
@@ -238,6 +239,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
+const APP_VERSION = 'v5.6';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'home',   name:'מטה (Home)',  cur:'USD'},
@@ -1607,6 +1609,8 @@ window.disconnectSyncUI=()=>{ disconnectSync(); setSyncCfg(null); setSyncDot('va
 window.go=go;
 function boot(){
   load(); renderNav(); renderQuarterSelect(); renderQBox(); go('dashboard');
+  const ver=$('#appVer'); if(ver) ver.textContent=APP_VERSION;
+  document.title=`Group 8 — EMBA 41 — TAU · INTOPIA ${APP_VERSION}`;
   window.addEventListener('resize',()=>{ if(currentPage==='dashboard')drawTrend($('#trendChart')); });
   if(getSyncCfg()) connectSync();
 }
