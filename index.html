@@ -232,7 +232,8 @@ const REGIONS  = [
   {id:'brazil', name:'ברזיל',       cur:'BRL'},
 ];
 const PERSONAS = ['CEO','CFO','COO','CMO','R&D/מודיעין'];
-const FX = {USD:1, EUR:1.08, BRL:0.20}; // display-only USD-equivalent rates (editable in params later)
+const FX_DEFAULT = {USD:1, EUR:1.08, BRL:0.20}; // fallback USD-equivalent rates
+function fxRate(cur){ const fx=(S&&S.config&&S.config.params&&S.config.params.fx)||FX_DEFAULT; return fx[cur]!==undefined?fx[cur]:(FX_DEFAULT[cur]||1); }
 
 /* ---------- Persistence ---------- */
 const LS_KEY = 'intopia_warroom_v1';
@@ -262,11 +263,13 @@ function defaultState(){
         tax:{home:34, europe:30, brazil:25},
         interest:{bank:10, supplierCredit:11, h4:12, securities:6},
         productionPay:[100,0],
+        fx:{USD:1, EUR:1.08, BRL:0.20},
       },
     },
     quarters:q,
     scenarios:[],
     decisions:[],
+    ai:{ model:'claude-sonnet-5', chat:[] },
     meta:{lastEditor:'', lastEdited:0},
   };
 }
@@ -315,6 +318,7 @@ const PAGES = [
   {id:'ingest',    ic:'📥', name:'קליטת דוח', sub:'העלאה, חילוץ ואימות נתונים', sec:'ניתוח'},
   {id:'cashflow',  ic:'💧', name:'תזרים',     sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'ניתוח'},
   {id:'intel',     ic:'🔭', name:'מודיעין',   sub:'מתחרים, מגמות והמלצות MR', sec:'ניתוח'},
+  {id:'ai',        ic:'🤖', name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'החלטה'},
   {id:'sim',       ic:'🎛️', name:'סימולטור',  sub:'תרחישים, מנופים והשוואה', sec:'החלטה'},
   {id:'export',    ic:'📤', name:'ייצוא הזנה', sub:'גיליון הזנה + צ׳ק-ליסט הגשה', sec:'החלטה'},
   {id:'journal',   ic:'📓', name:'יומן החלטות', sub:'החלטות, רציונל ומאשרים', sec:'החלטה'},
@@ -350,7 +354,7 @@ function renderQBox(){ $('#qboxNow').textContent=S.activeQuarter; $('#qboxEdit')
    ========================================================================= */
 function unifiedCashOf(q){
   const fin=S.quarters[q].financial; let sum=0;
-  REGIONS.forEach(r=> sum += (fin.cash[r.id]||0)*(FX[r.cur]||1)); return sum;
+  REGIONS.forEach(r=> sum += (fin.cash[r.id]||0)*fxRate(r.cur)); return sum;
 }
 function inventoryValue(q){ return S.quarters[q].operational.inventory.reduce((a,i)=>a+(i.qty||0)*(i.cost||0),0); }
 
@@ -373,7 +377,7 @@ function projectCashflow(baseQuarter, leversByQuarter){
     const loans=S.quarters[baseQuarter].financial.loans||0;
     bal.home -= loans*(p.interest.bank/100)/4;
     const cashByRegion={...bal};
-    let unified=0; REGIONS.forEach(r=> unified += cashByRegion[r.id]*(FX[r.cur]||1));
+    let unified=0; REGIONS.forEach(r=> unified += cashByRegion[r.id]*fxRate(r.cur));
     const floor=S.config.goals.floors[q]||0;
     out.push({q,cashByRegion,unified,floor,breach:unified<floor,distance:unified-floor});
   }
@@ -1037,9 +1041,20 @@ function goalTab(t){
           <div class="src">אשראי ספקים נצפה ~8.5–13% — לאמת מדוחות (שאלה פתוחה #2).</div>
         </div>
       </div>
+      <div class="card">
+        <div class="ch"><h3>💱 שערי המרה למאוחד (שווי-USD)</h3></div>
+        <div class="cb">
+          <div class="small muted" style="margin-bottom:10px">המזומן המאוחד מחושב כסכום כל האזורים לפי השערים כאן. עדכן לשער האמיתי מדוח ה-Currency.</div>
+          <div class="row" style="gap:10px">
+            ${['USD','EUR','BRL'].map(cur=>`<div class="field" style="flex:1"><label class="fl">1 ${cur} = ? USD</label><input class="f" type="number" step="0.001" value="${(p.fx&&p.fx[cur])!==undefined?p.fx[cur]:(FX_DEFAULT[cur]||1)}" oninput="setFx('${cur}',this.value)"></div>`).join('')}
+          </div>
+          <div class="src">ברירת מחדל: USD=1, EUR=1.08, BRL=0.20 — ערכים להמחשה, לאמת מהדוח.</div>
+        </div>
+      </div>
     </div>`;
   }
 }
+window.setFx=(cur,val)=>{ S.config.params.fx=S.config.params.fx||{...FX_DEFAULT}; S.config.params.fx[cur]=parseFloat(val)||0; save(true); };
 window.setGoal=(path,val)=>{ const parts=path.split('.'); let o=S.config.goals; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=parseFloat(val)||0; save(true); };
 window.setParam=(path,val)=>{ const parts=path.split('.'); let o=S.config.params; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=parseFloat(val)||0; save(true); };
 window.setCollection=(r,k,val)=>{ S.config.params.collection[r][k]=parseFloat(val)||0; save(true); };
@@ -1061,6 +1076,202 @@ function renderContracts(){
     <td><button class="x" onclick="delContract('${c.id}')">✕</button></td>
   </tr>`).join('')}</tbody></table>`;
 }
+
+/* =========================================================================
+   AI LAYER (F7) — data-anchored chat + council mode
+   Bring-your-own Anthropic API key (stored locally, NOT in the backup file).
+   All numbers are computed by the deterministic engine and passed in as facts;
+   the model interprets and cites — it never invents figures.
+   ========================================================================= */
+const AI_KEY_LS='intopia_ai_key';
+function getApiKey(){ try{ return localStorage.getItem(AI_KEY_LS)||''; }catch(e){ return ''; } }
+function setApiKey(k){ try{ k?localStorage.setItem(AI_KEY_LS,k):localStorage.removeItem(AI_KEY_LS); }catch(e){} }
+function aiModel(){ return (S.ai&&S.ai.model)||'claude-sonnet-5'; }
+
+/* Build a compact, labelled factual snapshot the model must ground on. */
+function buildAIContext(){
+  const q=S.activeQuarter, Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals;
+  const L=[];
+  L.push(`# הקשר נתונים — חברה 8, רבעון פעיל ${q}`);
+  L.push(`## מצב פיננסי (רבעון ${q})`);
+  REGIONS.forEach(r=> L.push(`- מזומן ${r.name}: ${fmt(f.cash[r.id]||0)} ${r.cur}  [מקור: רבעון ${q}/מזומן/${r.id}]`));
+  L.push(`- מזומן מאוחד (שווי-USD, שערים מהקונפיגורציה): ${fmt(unifiedCashOf(q))}  [מחושב במנוע]`);
+  L.push(`- רווח נקי: ${fmt(f.netProfit)} · מחזור: ${fmt(f.revenue)} · רווחים צבורים: ${fmt(f.retainedEarnings)}`);
+  L.push(`- הלוואות/חוב: ${fmt(f.loans)} · אשראי ספקים: ${fmt(f.supplierCredit)} · A/P: ${fmt(f.ap)} · A/R: ${fmt(f.ar)}`);
+  if(f.roe) L.push(`- ROE: ${f.roe}% · ROS: ${f.ros}%`);
+  L.push(`## תפעול`);
+  L.push(`- רמות טכנולוגיה: X=${op.techX}, Y=${op.techY} · מפעלים=${op.factories} · משרדים=${op.offices} · Max Producible=${op.maxProducible} · מו״פ=${fmt(op.rd)}`);
+  if(op.inventory.length) L.push(`- מלאי: ${op.inventory.map(i=>`${i.product||'?'}${i.grade?'/'+i.grade:''} כמות ${fmt(i.qty)} עלות ${fmt(i.cost)} מחיר ${i.price>0?fmt(i.price):'⚠️ אין מחיר'}`).join(' ; ')}`);
+  L.push(`## יעדים (קונפיגורציית הצוות)`);
+  L.push(`- רצפת מזומן ${q}: ${fmt(g.floors[q]||0)} · יעדי טכנולוגיה X=${g.techXTarget} Y=${g.techYTarget} · תקרת חוב=${fmt(g.debtCeiling)}`);
+  const alerts=computeAlerts(q);
+  L.push(`## נורות פעילות (${alerts.length})`);
+  alerts.forEach(a=> L.push(`- [${a.level==='red'?'אדום':'כתום'}] ${a.title}: ${a.desc.replace(/<[^>]+>/g,'')}`));
+  const proj=projectCashflow(q,null);
+  L.push(`## הקרנת תזרים (מנוע דטרמיניסטי, מצב "כפי שהוא")`);
+  proj.forEach(p=> L.push(`- ${p.q}: מזומן מאוחד ${fmt(p.unified)} · רצפה ${fmt(p.floor)} · ${p.breach?'שבירה':'תקין'} (מרחק ${fmt(p.distance)})`));
+  if(S.scenarios.length){ L.push(`## תרחישים שמורים`);
+    S.scenarios.forEach(sc=>{ const sp=scoreProxy(sc.levers); L.push(`- "${sc.name}": מזומן סופי ${fmt(sp.endCash)} · שבירות ${sp.breaches} · פרוקסי ציון ${sp.value.toFixed(0)}`); }); }
+  return L.join('\n');
+}
+const AI_SYSTEM = `אתה יועץ אנליטי לצוות ניהול בסימולציית העסקים INTOPIA (חברה 8). ענֵה בעברית עסקית ישירה, RTL.
+כללי ברזל:
+1. עוגן-נתונים בלבד: בסס כל טענה אך ורק על "הקשר הנתונים" שסופק, על חוקי המשחק המפורשים, ועל הנחות שתצהיר עליהן. אל תמציא מספרים.
+2. ציטוט: לכל טענה מספרית ציין מקור (רבעון/שדה או "מחושב במנוע"). אם נתון חסר — אמור "לא ידוע / לא נקלט" במפורש.
+3. כנות אפיסטמית: הבחן בין מאומת / משוחזר / אומדן. אומדנים הצג כטווח, לא כנקודה. סמן "לא מכויל" כשאין בסיס.
+4. חישוביות: אל תבצע אריתמטיקה מורכבת "בראש" — התבסס על המספרים המחושבים שסופקו. אם נדרש חישוב שלא סופק, אמור זאת והצע להריץ בסימולטור.
+5. תמציתיות: תשובות קצרות וממוקדות-החלטה. בלי מילוי.`;
+
+async function callClaude(messages, system, opts={}){
+  const key=getApiKey();
+  if(!key) throw new Error('NO_KEY');
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'content-type':'application/json',
+      'x-api-key':key,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true',
+    },
+    body:JSON.stringify({ model:aiModel(), max_tokens:opts.max_tokens||1200, system, messages }),
+  });
+  if(!res.ok){ let msg=res.status+' '+res.statusText; try{ const j=await res.json(); if(j.error&&j.error.message)msg=j.error.message; }catch(e){}
+    throw new Error(msg); }
+  const data=await res.json();
+  return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+}
+
+const COUNCIL=[
+  {name:'קונטרריאן', brief:'תוקף את ההנחה המרכזית, מחפש את מה שהצוות מפספס והסיכון הנסתר.'},
+  {name:'עקרונות ראשונים', brief:'מפרק לחוקי היסוד של המשחק (תזרים, מסים, גבייה) ובונה מחדש מאפס.'},
+  {name:'אקספנסיוניסט', brief:'ממקסם צמיחה, נתח שוק ופוטנציאל Q7–Q9 גם בסיכון מחושב.'},
+  {name:'אאוטסיידר', brief:'פרספקטיבה זרה לתעשייה — מה שחקן לא-שגרתי היה עושה כאן.'},
+  {name:'אקזקיוטור', brief:'ממוקד ביצוע: מה ההזנה הקונקרטית, מה הצ׳ק-ליסט, מה יכול להישבר.'},
+];
+
+/* ----- AI PAGE ----- */
+PAGE_RENDER.ai = (c)=>{
+  const hasKey=!!getApiKey();
+  c.innerHTML=`
+    <div class="between" style="margin-bottom:16px">
+      <div class="small muted">צ׳אט מעוגן בנתוני רבעון <b>${S.activeQuarter}</b>. המספרים מחושבים במנוע; ה-AI מפרש ומצטט.</div>
+      <div class="row">
+        <span class="tag ${hasKey?'g':'a'}">${hasKey?'API מחובר':'לא מחובר'}</span>
+        <button class="btn sm" onclick="openAISettings()">⚙️ הגדרות AI</button>
+        <button class="btn sm danger" onclick="clearChat()">נקה שיחה</button>
+      </div>
+    </div>
+    ${!hasKey? `<div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--amber)">
+      <b>נדרש מפתח Anthropic API</b>
+      <div class="small muted" style="margin-top:6px">האפליקציה משתמשת ב-Claude ישירות מהדפדפן (bring-your-own-key). המפתח נשמר מקומית בלבד ואינו נכלל בגיבוי. לחצו "הגדרות AI" כדי להזין מפתח.</div>
+    </div>`:''}
+    <div class="grid" style="grid-template-columns:1fr;gap:16px">
+      <div class="card">
+        <div class="ch"><h3>💬 צ׳אט אנליטי</h3><span class="small muted">מודל: ${esc(aiModel())}</span></div>
+        <div class="cb"><div id="chatLog" style="max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px"></div>
+          <div class="row" style="gap:8px;margin-top:14px">
+            <input class="f" id="chatInput" placeholder="למשל: למה הרווח באירופה ירד? מה עלות ההון של H4?" style="flex:1" onkeydown="if(event.key==='Enter')sendChat()">
+            <button class="btn primary" id="chatSend" onclick="sendChat()">שלח</button>
+          </div>
+          <div class="row" style="gap:6px;margin-top:10px">
+            <span class="small muted">מהיר:</span>
+            <button class="btn sm ghost" onclick="quickAsk('סכם את המצב הפיננסי הנוכחי ואת שלוש הפעולות הדחופות ביותר')">תדריך מצב</button>
+            <button class="btn sm ghost" onclick="quickAsk('מה הסיכון התזרימי הגדול ביותר עד Q9 וכיצד למנוע אותו?')">סיכון תזרים</button>
+            <button class="btn sm ghost" onclick="quickAsk('בהינתן הנורות הפעילות, מה הייתה החלטת הרבעון שאתה ממליץ עליה?')">המלצת רבעון</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>🏛️ מצב מועצה — 5 פרספקטיבות</h3><span class="tag b">F7.2</span></div>
+        <div class="cb">
+          <div class="small muted" style="margin-bottom:10px">5 יועצים מנתחים מהלך במקביל, ביקורת עמיתים אנונימית, וסינתזה לפסק דין. (עד ~90 שניות, 6 קריאות API)</div>
+          <div class="row" style="gap:8px">
+            <input class="f" id="councilQ" placeholder="השאלה/המהלך לדיון — למשל: לצאת מברזיל ב-Q5?" style="flex:1">
+            <button class="btn primary" id="councilRun" onclick="runCouncil()">כנס מועצה</button>
+          </div>
+          <div id="councilOut" style="margin-top:16px"></div>
+        </div>
+      </div>
+    </div>`;
+  renderChatLog();
+};
+function renderChatLog(){
+  const box=$('#chatLog'); if(!box)return;
+  const chat=(S.ai&&S.ai.chat)||[];
+  if(!chat.length){ box.innerHTML=`<div class="small muted" style="padding:12px 0">אין הודעות עדיין. שאל שאלה אנליטית — התשובה תתבסס על נתוני הרבעון עם ציטוט מקור.</div>`; return; }
+  box.innerHTML=chat.map(m=>{
+    const me=m.role==='user';
+    return `<div style="align-self:${me?'flex-start':'stretch'};max-width:${me?'80%':'100%'};background:${me?'var(--panel2)':'linear-gradient(180deg,var(--panel),var(--bg2))'};border:1px solid var(--line);border-radius:12px;padding:11px 14px">
+      <div class="small" style="color:${me?'var(--accent2)':'var(--purple)'};font-weight:700;margin-bottom:4px">${me?'אתה':'🤖 יועץ'}</div>
+      <div style="line-height:1.6;white-space:pre-wrap">${esc(m.content)}</div></div>`;
+  }).join('');
+  box.scrollTop=box.scrollHeight;
+}
+window.openAISettings=()=>{
+  openModal('הגדרות AI',`
+    <div class="field"><label class="fl">מפתח Anthropic API</label>
+      <input class="f" id="aiKey" type="password" value="${esc(getApiKey())}" placeholder="sk-ant-..."></div>
+    <div class="small muted" style="margin:-4px 0 12px">נשמר ב-localStorage של הדפדפן בלבד, ואינו נכלל בקובץ הגיבוי. השג מפתח ב-console.anthropic.com.</div>
+    <div class="field"><label class="fl">מזהה מודל</label>
+      <input class="f" id="aiModelInput" value="${esc(aiModel())}" placeholder="claude-sonnet-5">
+      <div class="small muted" style="margin-top:5px">ניתן לשנות בהתאם למה שזמין במפתח שלך (למשל claude-sonnet-5 / claude-opus-4-8).</div></div>
+    <div class="small" style="color:var(--amber)">⚠️ אבטחה: הרצה ישירות מהדפדפן חושפת את המפתח למי שיש לו גישה למכשיר. השתמש במפתח ייעודי עם תקציב מוגבל.</div>`,
+    `<button class="btn primary" onclick="saveAISettings()">שמור</button>`);
+};
+window.saveAISettings=()=>{ setApiKey($('#aiKey').value.trim()); S.ai.model=$('#aiModelInput').value.trim()||'claude-sonnet-5'; save(); closeModal(); toast('הגדרות AI נשמרו ✓','g'); go('ai'); };
+window.clearChat=()=>{ S.ai.chat=[]; save(); renderChatLog(); };
+window.quickAsk=(q)=>{ const el=$('#chatInput'); if(el){ el.value=q; sendChat(); } };
+window.sendChat=async()=>{
+  const input=$('#chatInput'); const q=(input.value||'').trim(); if(!q)return;
+  if(!getApiKey()){ openAISettings(); return; }
+  S.ai.chat=S.ai.chat||[]; S.ai.chat.push({role:'user',content:q}); save(); input.value=''; renderChatLog();
+  const btn=$('#chatSend'); btn.disabled=true; btn.textContent='...';
+  const thinking={role:'assistant',content:'⏳ מנתח…'}; S.ai.chat.push(thinking); renderChatLog();
+  try{
+    const ctx=buildAIContext();
+    const history=S.ai.chat.filter(m=>m.content!=='⏳ מנתח…').map(m=>({role:m.role,content:m.content}));
+    // prepend context to the latest user turn
+    history[history.length-1]={role:'user',content:ctx+'\n\n---\nשאלה: '+q};
+    const answer=await callClaude(history, AI_SYSTEM);
+    S.ai.chat[S.ai.chat.length-1]={role:'assistant',content:answer};
+  }catch(e){
+    S.ai.chat[S.ai.chat.length-1]={role:'assistant',content:aiErr(e)};
+  }
+  save(); renderChatLog(); btn.disabled=false; btn.textContent='שלח';
+};
+function aiErr(e){
+  if(e.message==='NO_KEY') return '⚠️ לא הוגדר מפתח API. פתח "הגדרות AI".';
+  return '⚠️ שגיאת API: '+e.message+'\n(בדוק מפתח, מזהה מודל, ומכסת שימוש. אם מופיע CORS — ודא שה-header לגישה ישירה מהדפדפן פעיל.)';
+}
+window.runCouncil=async()=>{
+  const q=($('#councilQ').value||'').trim(); if(!q)return;
+  if(!getApiKey()){ openAISettings(); return; }
+  const out=$('#councilOut'); const btn=$('#councilRun'); btn.disabled=true; btn.textContent='מכנס…';
+  out.innerHTML=`<div class="chip">⏳ שלב 1/3 — 5 יועצים מנתחים במקביל…</div>`;
+  const ctx=buildAIContext();
+  try{
+    // Stage 1: independent analyses (parallel)
+    const analyses=await Promise.all(COUNCIL.map(async(p)=>{
+      const sys=AI_SYSTEM+`\n\nאתה ממלא את הפרסונה "${p.name}": ${p.brief} נתח מזווית זו בלבד, 3–5 משפטים, ממוקד.`;
+      const txt=await callClaude([{role:'user',content:ctx+'\n\n---\nהמהלך לדיון: '+q}], sys, {max_tokens:700});
+      return {name:p.name, txt};
+    }));
+    out.innerHTML=`<div class="chip">⏳ שלב 2/3 — ביקורת עמיתים…</div>`;
+    // Stage 3: synthesis (anonymized)
+    const anon=analyses.map((a,i)=>`יועץ ${i+1}:\n${a.txt}`).join('\n\n');
+    const synSys=AI_SYSTEM+`\n\nאתה יו״ר המועצה. קיבלת 5 ניתוחים אנונימיים. בצע ביקורת עמיתים קצרה, אתר הסכמות ומחלוקות, והכרע לפסק דין מעשי: המלצה, נימוק, וסיכון עיקרי. פורמט: "פסק דין" + "נימוק" + "מה לבדוק בסימולטור".`;
+    const verdict=await callClaude([{role:'user',content:ctx+'\n\nהמהלך: '+q+'\n\nהניתוחים:\n'+anon}], synSys, {max_tokens:900});
+    out.innerHTML=`
+      <div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--purple)">
+        <div class="between"><b>⚖️ פסק דין המועצה</b><span class="tag b">סינתזה</span></div>
+        <div style="margin-top:8px;line-height:1.7;white-space:pre-wrap">${esc(verdict)}</div>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+        ${analyses.map(a=>`<div class="card pad"><b style="color:var(--purple)">${esc(a.name)}</b><div class="small" style="margin-top:6px;line-height:1.6;white-space:pre-wrap">${esc(a.txt)}</div></div>`).join('')}
+      </div>`;
+  }catch(e){ out.innerHTML=`<div class="tag r">${esc(aiErr(e))}</div>`; }
+  btn.disabled=false; btn.textContent='כנס מועצה';
+};
 
 /* ---------- Shared UI helpers ---------- */
 function emptyBlock(ic,title,desc,actions=''){ return `<div class="card"><div class="empty"><div class="ic">${ic}</div><h3 style="margin-bottom:6px">${title}</h3><div class="muted" style="max-width:420px;margin:0 auto 16px">${desc}</div>${actions}</div></div>`; }
