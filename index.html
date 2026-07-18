@@ -282,7 +282,7 @@ function defaultState(){
     quarters:q,
     scenarios:[],
     decisions:[],
-    ai:{ model:'claude-sonnet-5', chat:[] },
+    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[] },
     meta:{lastEditor:'', lastEdited:0},
   };
 }
@@ -1216,10 +1216,18 @@ function renderContracts(){
    All numbers are computed by the deterministic engine and passed in as facts;
    the model interprets and cites — it never invents figures.
    ========================================================================= */
-const AI_KEY_LS='intopia_ai_key';
-function getApiKey(){ try{ return localStorage.getItem(AI_KEY_LS)||''; }catch(e){ return ''; } }
-function setApiKey(k){ try{ k?localStorage.setItem(AI_KEY_LS,k):localStorage.removeItem(AI_KEY_LS); }catch(e){} }
-function aiModel(){ return (S.ai&&S.ai.model)||'claude-sonnet-5'; }
+const AI_PROVIDERS={
+  anthropic:{ label:'Anthropic (Claude)', short:'Claude', keyLS:'intopia_ai_key_anthropic', defModel:'claude-sonnet-5', keyHint:'sk-ant-...' },
+  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-4o', keyHint:'sk-...' },
+};
+function aiProvider(){ const p=S.ai&&S.ai.provider; return AI_PROVIDERS[p]?p:'anthropic'; }
+function getApiKey(prov){ prov=prov||aiProvider(); try{
+  let k=localStorage.getItem(AI_PROVIDERS[prov].keyLS)||'';
+  if(!k && prov==='anthropic'){ const legacy=localStorage.getItem('intopia_ai_key'); if(legacy){ localStorage.setItem(AI_PROVIDERS.anthropic.keyLS,legacy); localStorage.removeItem('intopia_ai_key'); k=legacy; } }
+  return k;
+}catch(e){ return ''; } }
+function setApiKey(prov,k){ try{ k?localStorage.setItem(AI_PROVIDERS[prov].keyLS,k):localStorage.removeItem(AI_PROVIDERS[prov].keyLS); }catch(e){} }
+function aiModel(prov){ prov=prov||aiProvider(); const m=S.ai&&S.ai.models&&S.ai.models[prov]; return m||AI_PROVIDERS[prov].defModel; }
 
 /* Build a compact, labelled factual snapshot the model must ground on. */
 function buildAIContext(){
@@ -1255,9 +1263,22 @@ const AI_SYSTEM = `אתה יועץ אנליטי לצוות ניהול בסימו
 4. חישוביות: אל תבצע אריתמטיקה מורכבת "בראש" — התבסס על המספרים המחושבים שסופקו. אם נדרש חישוב שלא סופק, אמור זאת והצע להריץ בסימולטור.
 5. תמציתיות: תשובות קצרות וממוקדות-החלטה. בלי מילוי.`;
 
-async function callClaude(messages, system, opts={}){
-  const key=getApiKey();
+async function callLLM(messages, system, opts={}){
+  const prov=aiProvider(), key=getApiKey(prov);
   if(!key) throw new Error('NO_KEY');
+  const readErr=async(res)=>{ let msg=res.status+' '+res.statusText; try{ const j=await res.json(); if(j.error&&j.error.message)msg=j.error.message; }catch(e){} return msg; };
+  if(prov==='openai'){
+    const res=await fetch('https://api.openai.com/v1/chat/completions',{
+      method:'POST',
+      headers:{ 'content-type':'application/json', 'Authorization':'Bearer '+key },
+      body:JSON.stringify({ model:aiModel(), max_tokens:opts.max_tokens||1200,
+        messages:[{role:'system',content:system},...messages] }),
+    });
+    if(!res.ok) throw new Error(await readErr(res));
+    const data=await res.json();
+    return ((data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||'').trim();
+  }
+  // Anthropic (default)
   const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{
@@ -1268,8 +1289,7 @@ async function callClaude(messages, system, opts={}){
     },
     body:JSON.stringify({ model:aiModel(), max_tokens:opts.max_tokens||1200, system, messages }),
   });
-  if(!res.ok){ let msg=res.status+' '+res.statusText; try{ const j=await res.json(); if(j.error&&j.error.message)msg=j.error.message; }catch(e){}
-    throw new Error(msg); }
+  if(!res.ok) throw new Error(await readErr(res));
   const data=await res.json();
   return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
 }
@@ -1284,23 +1304,24 @@ const COUNCIL=[
 
 /* ----- AI PAGE ----- */
 PAGE_RENDER.ai = (c)=>{
-  const hasKey=!!getApiKey();
+  const prov=aiProvider(), hasKey=!!getApiKey();
   c.innerHTML=`
     <div class="between" style="margin-bottom:16px">
       <div class="small muted">צ׳אט מעוגן בנתוני רבעון <b>${S.activeQuarter}</b>. המספרים מחושבים במנוע; ה-AI מפרש ומצטט.</div>
       <div class="row">
+        <span class="tag b">${AI_PROVIDERS[prov].short}</span>
         <span class="tag ${hasKey?'g':'a'}">${hasKey?'API מחובר':'לא מחובר'}</span>
         <button class="btn sm" onclick="openAISettings()">${IC('settings')} הגדרות AI</button>
         <button class="btn sm danger" onclick="clearChat()">נקה שיחה</button>
       </div>
     </div>
     ${!hasKey? `<div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--amber)">
-      <b>נדרש מפתח Anthropic API</b>
-      <div class="small muted" style="margin-top:6px">האפליקציה משתמשת ב-Claude ישירות מהדפדפן (bring-your-own-key). המפתח נשמר מקומית בלבד ואינו נכלל בגיבוי. לחצו "הגדרות AI" כדי להזין מפתח.</div>
+      <b>נדרש מפתח API — Anthropic (Claude) או OpenAI (GPT)</b>
+      <div class="small muted" style="margin-top:6px">האפליקציה פונה לספק ה-AI ישירות מהדפדפן (bring-your-own-key). המפתח נשמר מקומית בלבד ואינו נכלל בגיבוי. לחצו "הגדרות AI" כדי לבחור ספק ולהזין מפתח.</div>
     </div>`:''}
     <div class="grid" style="grid-template-columns:1fr;gap:16px">
       <div class="card">
-        <div class="ch"><h3>${IC('message')} צ׳אט אנליטי</h3><span class="small muted">מודל: ${esc(aiModel())}</span></div>
+        <div class="ch"><h3>${IC('message')} צ׳אט אנליטי</h3><span class="small muted">${AI_PROVIDERS[prov].short} · ${esc(aiModel())}</span></div>
         <div class="cb"><div id="chatLog" style="max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px"></div>
           <div class="row" style="gap:8px;margin-top:14px">
             <input class="f" id="chatInput" placeholder="למשל: למה הרווח באירופה ירד? מה עלות ההון של H4?" style="flex:1" onkeydown="if(event.key==='Enter')sendChat()">
@@ -1340,18 +1361,50 @@ function renderChatLog(){
   }).join('');
   box.scrollTop=box.scrollHeight;
 }
+let _aiPrevProvider=null;
 window.openAISettings=()=>{
+  const prov=aiProvider(); _aiPrevProvider=prov;
   openModal('הגדרות AI',`
-    <div class="field"><label class="fl">מפתח Anthropic API</label>
-      <input class="f" id="aiKey" type="password" value="${esc(getApiKey())}" placeholder="sk-ant-..."></div>
-    <div class="small muted" style="margin:-4px 0 12px">נשמר ב-localStorage של הדפדפן בלבד, ואינו נכלל בקובץ הגיבוי. השג מפתח ב-console.anthropic.com.</div>
+    <div class="field"><label class="fl">ספק בינה מלאכותית</label>
+      <select class="f" id="aiProvider" onchange="aiProviderSwitch()">
+        ${Object.entries(AI_PROVIDERS).map(([k,v])=>`<option value="${k}" ${k===prov?'selected':''}>${v.label}</option>`).join('')}
+      </select></div>
+    <div class="field"><label class="fl">מפתח API</label>
+      <input class="f" id="aiKey" type="password" value="${esc(getApiKey(prov))}" placeholder="${AI_PROVIDERS[prov].keyHint}"></div>
+    <div class="small muted" style="margin:-4px 0 12px" id="keyNote"></div>
     <div class="field"><label class="fl">מזהה מודל</label>
-      <input class="f" id="aiModelInput" value="${esc(aiModel())}" placeholder="claude-sonnet-5">
-      <div class="small muted" style="margin-top:5px">ניתן לשנות בהתאם למה שזמין במפתח שלך (למשל claude-sonnet-5 / claude-opus-4-8).</div></div>
+      <input class="f" id="aiModelInput" value="${esc(aiModel(prov))}" placeholder="${AI_PROVIDERS[prov].defModel}">
+      <div class="small muted" style="margin-top:5px" id="modelHint"></div></div>
     <div class="small" style="color:var(--amber)">${IC('warn')} אבטחה: הרצה ישירות מהדפדפן חושפת את המפתח למי שיש לו גישה למכשיר. השתמש במפתח ייעודי עם תקציב מוגבל.</div>`,
     `<button class="btn primary" onclick="saveAISettings()">שמור</button>`);
+  updateProviderHints();
 };
-window.saveAISettings=()=>{ setApiKey($('#aiKey').value.trim()); S.ai.model=$('#aiModelInput').value.trim()||'claude-sonnet-5'; save(); closeModal(); toast('הגדרות AI נשמרו ✓','g'); go('ai'); };
+function updateProviderHints(){
+  const prov=$('#aiProvider').value;
+  const note=$('#keyNote'), mh=$('#modelHint'); if(!note)return;
+  note.textContent = prov==='openai'
+    ? 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-platform.openai.com. הקריאה ישירה מהדפדפן.'
+    : 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-console.anthropic.com.';
+  mh.textContent = prov==='openai' ? 'למשל gpt-4o / gpt-4o-mini / gpt-4.1' : 'למשל claude-sonnet-5 / claude-opus-4-8';
+}
+window.aiProviderSwitch=()=>{
+  const nv=$('#aiProvider').value;
+  if(_aiPrevProvider && _aiPrevProvider!==nv){ setApiKey(_aiPrevProvider,$('#aiKey').value.trim());
+    S.ai.models=S.ai.models||{}; S.ai.models[_aiPrevProvider]=$('#aiModelInput').value.trim()||AI_PROVIDERS[_aiPrevProvider].defModel; }
+  _aiPrevProvider=nv;
+  $('#aiKey').value=getApiKey(nv);
+  $('#aiKey').placeholder=AI_PROVIDERS[nv].keyHint;
+  $('#aiModelInput').value=aiModel(nv);
+  $('#aiModelInput').placeholder=AI_PROVIDERS[nv].defModel;
+  updateProviderHints();
+};
+window.saveAISettings=()=>{
+  const prov=$('#aiProvider').value;
+  S.ai.provider=prov; S.ai.models=S.ai.models||{};
+  S.ai.models[prov]=$('#aiModelInput').value.trim()||AI_PROVIDERS[prov].defModel;
+  setApiKey(prov,$('#aiKey').value.trim());
+  save(); closeModal(); toast('הגדרות AI נשמרו','g'); go('ai');
+};
 window.clearChat=()=>{ S.ai.chat=[]; save(); renderChatLog(); };
 window.quickAsk=(q)=>{ const el=$('#chatInput'); if(el){ el.value=q; sendChat(); } };
 window.sendChat=async()=>{
@@ -1365,7 +1418,7 @@ window.sendChat=async()=>{
     const history=S.ai.chat.filter(m=>m.content!=='מנתח…').map(m=>({role:m.role,content:m.content}));
     // prepend context to the latest user turn
     history[history.length-1]={role:'user',content:ctx+'\n\n---\nשאלה: '+q};
-    const answer=await callClaude(history, AI_SYSTEM);
+    const answer=await callLLM(history, AI_SYSTEM);
     S.ai.chat[S.ai.chat.length-1]={role:'assistant',content:answer};
   }catch(e){
     S.ai.chat[S.ai.chat.length-1]={role:'assistant',content:aiErr(e)};
@@ -1386,14 +1439,14 @@ window.runCouncil=async()=>{
     // Stage 1: independent analyses (parallel)
     const analyses=await Promise.all(COUNCIL.map(async(p)=>{
       const sys=AI_SYSTEM+`\n\nאתה ממלא את הפרסונה "${p.name}": ${p.brief} נתח מזווית זו בלבד, 3–5 משפטים, ממוקד.`;
-      const txt=await callClaude([{role:'user',content:ctx+'\n\n---\nהמהלך לדיון: '+q}], sys, {max_tokens:700});
+      const txt=await callLLM([{role:'user',content:ctx+'\n\n---\nהמהלך לדיון: '+q}], sys, {max_tokens:700});
       return {name:p.name, txt};
     }));
     out.innerHTML=`<div class="chip">${IC('clock')} שלב 2/3 — ביקורת עמיתים…</div>`;
     // Stage 3: synthesis (anonymized)
     const anon=analyses.map((a,i)=>`יועץ ${i+1}:\n${a.txt}`).join('\n\n');
     const synSys=AI_SYSTEM+`\n\nאתה יו״ר המועצה. קיבלת 5 ניתוחים אנונימיים. בצע ביקורת עמיתים קצרה, אתר הסכמות ומחלוקות, והכרע לפסק דין מעשי: המלצה, נימוק, וסיכון עיקרי. פורמט: "פסק דין" + "נימוק" + "מה לבדוק בסימולטור".`;
-    const verdict=await callClaude([{role:'user',content:ctx+'\n\nהמהלך: '+q+'\n\nהניתוחים:\n'+anon}], synSys, {max_tokens:900});
+    const verdict=await callLLM([{role:'user',content:ctx+'\n\nהמהלך: '+q+'\n\nהניתוחים:\n'+anon}], synSys, {max_tokens:900});
     out.innerHTML=`
       <div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--purple)">
         <div class="between"><b>${IC('scale')} פסק דין המועצה</b><span class="tag b">סינתזה</span></div>
