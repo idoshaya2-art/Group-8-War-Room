@@ -207,7 +207,9 @@ canvas{display:block;max-width:100%}
         <label>רבעון</label>
         <select id="quarterSelect"></select>
       </div>
-      <button class="btn sm ghost" id="btnExportData" title="גיבוי נתונים">⬇︎ גיבוי</button>
+      <button class="btn sm ghost" id="btnExportData" title="הורדת גיבוי נתונים (JSON)">⬇︎ גיבוי</button>
+      <button class="btn sm ghost" id="btnImportData" title="שחזור מגיבוי / טעינת מצב מהצוות">⬆︎ שחזור</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
     </div>
     <div class="content" id="content"></div>
   </div>
@@ -565,8 +567,11 @@ function setupDrop(){
   ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hover');}));
   drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)handleFile(f); });
 }
+function xlsxReady(){ return typeof XLSX!=='undefined' && XLSX && XLSX.read; }
 function handleFile(file){
-  const info=$('#sheetInfo'); info.innerHTML=`<div class="chip">⏳ מנתח ${esc(file.name)}…</div>`;
+  const info=$('#sheetInfo');
+  if(!xlsxReady()){ info.innerHTML=`<div class="tag r">ספריית קריאת האקסל לא נטענה (אין חיבור אינטרנט?). ניתן להזין את נתוני הרבעון ידנית בטופס למטה.</div>`; return; }
+  info.innerHTML=`<div class="chip">⏳ מנתח ${esc(file.name)}…</div>`;
   const reader=new FileReader();
   reader.onload=e=>{
     try{
@@ -789,7 +794,7 @@ PAGE_RENDER.sim = (c)=>{
   renderScenarios();
 };
 function renderScenarios(){
-  const area=$('#scenarioArea');
+  const area=$('#scenarioArea'); if(!area)return;
   if(!S.scenarios.length){ area.innerHTML=`<div class="card"><div class="cb">${emptyBlockInline('🎛️','אין תרחישים','צור תרחיש כדי לתכנן מנופים ולהשוות תוצאות.')}</div></div>`; return; }
   const base=S.activeQuarter;
   const cmp=S.scenarios.map(sc=>{ const sp=scoreProxy(sc.levers); return {sc,endCash:sp.endCash,breaches:sp.breaches,score:sp.value}; });
@@ -923,6 +928,7 @@ function renderChecklist(box,targetQ,sc){
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">✅ מוכן להגשה</span>':'⚠️ יש פריטים פתוחים לפני Submit'}</div>`;
 }
 window.downloadInputSheet=(targetQ)=>{
+  if(!xlsxReady()){ toast('ספריית האקסל לא נטענה — נסה שוב עם חיבור אינטרנט','r'); return; }
   const sc=selectedExportScenario(); const rows=buildInputRows(targetQ,sc);
   const aoa=[['טופס','פעולה','ערך','הערה','בוצע?'],...rows.map(r=>[r.form,r.action,r.value,r.note,''])];
   const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new();
@@ -1066,11 +1072,44 @@ function openModal(title,body,footer){
 }
 window.closeModal=()=>{ $('#modalRoot').innerHTML=''; };
 
-/* ---------- Data backup ---------- */
+/* ---------- Data backup / restore ---------- */
 $('#btnExportData').onclick=()=>{
+  const stamp=new Date().toISOString().slice(0,10);
   const blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='intopia_backup.json'; a.click();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`intopia_backup_${stamp}.json`; a.click();
   toast('גיבוי נתונים הורד ✓','g');
+};
+$('#btnImportData').onclick=()=> $('#importFile').click();
+$('#importFile').onchange=e=>{
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    let incoming;
+    try{ incoming=JSON.parse(ev.target.result); }
+    catch(err){ toast('קובץ לא תקין — לא JSON','r'); return; }
+    if(!incoming || !incoming.quarters || !incoming.config){ toast('הקובץ אינו גיבוי אינטופיה תקין','r'); return; }
+    const qCount=Object.values(incoming.quarters).filter(q=>q&&q.entered).length;
+    openModal('שחזור מגיבוי', `
+      <div class="small" style="line-height:1.7">פעולה זו <b style="color:var(--red)">תחליף</b> את כל הנתונים הנוכחיים בתוכן הקובץ:
+      <div class="chip" style="margin-top:10px">${esc(file.name)}</div>
+      <ul style="padding-inline-start:20px;margin:12px 0 0">
+        <li>רבעונים שנקלטו: <b>${qCount}</b></li>
+        <li>תרחישים: <b>${(incoming.scenarios||[]).length}</b></li>
+        <li>החלטות ביומן: <b>${(incoming.decisions||[]).length}</b></li>
+      </ul>
+      <div class="muted" style="margin-top:10px">מומלץ להוריד גיבוי של המצב הנוכחי לפני שחזור.</div></div>`,
+      `<button class="btn primary" onclick="doImport()">החלף והמשך</button>`);
+    window._pendingImport=incoming;
+  };
+  reader.readAsText(file);
+  e.target.value=''; // allow re-selecting same file
+};
+window.doImport=()=>{
+  const incoming=window._pendingImport; if(!incoming)return;
+  S=deepMerge(defaultState(), incoming);
+  save(); closeModal();
+  renderNav(); renderQuarterSelect(); renderQBox(); go('dashboard');
+  toast('הנתונים שוחזרו מהגיבוי ✓','g'); window._pendingImport=null;
 };
 
 /* ---------- Boot ---------- */
