@@ -210,6 +210,7 @@ canvas{display:block;max-width:100%}
       <button class="btn sm ghost" id="btnExportData" title="הורדת גיבוי נתונים (JSON)">⬇︎ גיבוי</button>
       <button class="btn sm ghost" id="btnImportData" title="שחזור מגיבוי / טעינת מצב מהצוות">⬆︎ שחזור</button>
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+      <button class="btn sm ghost" id="btnSync" title="סנכרון צוותי"><span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span> סנכרון</button>
     </div>
     <div class="content" id="content"></div>
   </div>
@@ -289,9 +290,10 @@ function deepMerge(base, over){
 }
 let saveTimer=null;
 function save(silent){
-  S.meta.lastEdited=Date.now();
+  if(!sync.applying){ S.meta.lastEdited=Date.now(); if(sync.cfg&&sync.cfg.name) S.meta.lastEditor=sync.cfg.name; }
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{ try{ localStorage.setItem(LS_KEY,JSON.stringify(S)); }catch(e){ toast('שגיאת שמירה: '+e.message,'r'); } },120);
+  if(sync.connected && !sync.applying) schedulePush();
   if(!silent) renderQBox();
 }
 
@@ -347,7 +349,8 @@ function renderQuarterSelect(){
     o.textContent=q+(S.quarters[q].entered?' ✓':''); if(q===S.activeQuarter)o.selected=true; sel.appendChild(o); });
   sel.onchange=()=>{ S.activeQuarter=sel.value; save(); go(currentPage); };
 }
-function renderQBox(){ $('#qboxNow').textContent=S.activeQuarter; $('#qboxEdit').textContent=relTime(S.meta.lastEdited); }
+function renderQBox(){ $('#qboxNow').textContent=S.activeQuarter;
+  $('#qboxEdit').textContent=relTime(S.meta.lastEdited)+(S.meta.lastEditor?(' · '+S.meta.lastEditor):''); }
 
 /* =========================================================================
    DETERMINISTIC ENGINE  (F4 cash-flow, F3 alerts, scoring proxy)
@@ -1323,11 +1326,106 @@ window.doImport=()=>{
   toast('הנתונים שוחזרו מהגיבוי ✓','g'); window._pendingImport=null;
 };
 
+/* =========================================================================
+   TEAM SYNC (F9) — live shared state via Firebase Realtime Database (REST).
+   Bring-your-own backend: config stored locally, NOT in the JSON backup.
+   Model: last-write-wins with a "who edited last" indicator (F9.2). Suited to
+   the classroom turn-based workflow; not a CRDT. Fully optional — the app
+   works entirely offline without it.
+   ========================================================================= */
+const SYNC_LS='intopia_sync_cfg';
+const sync={ cfg:null, es:null, connected:false, applying:false, clientId:uid(), lastPushedAt:0, pushTimer:null };
+function getSyncCfg(){ try{ const r=localStorage.getItem(SYNC_LS); return r?JSON.parse(r):null; }catch(e){ return null; } }
+function setSyncCfg(c){ try{ c?localStorage.setItem(SYNC_LS,JSON.stringify(c)):localStorage.removeItem(SYNC_LS); }catch(e){} sync.cfg=c; }
+function syncUrl(cfg){ return `${(cfg.url||'').replace(/\/+$/,'')}/rooms/${encodeURIComponent(cfg.room||'')}.json${cfg.auth?('?auth='+encodeURIComponent(cfg.auth)):''}`; }
+function setSyncDot(color,title){ const d=$('#syncDot'); if(d){ d.style.background=color; d.parentElement.title=title||'סנכרון צוותי'; } }
+
+function connectSync(){
+  const cfg=getSyncCfg(); sync.cfg=cfg;
+  if(!cfg||!cfg.url||!cfg.room){ setSyncDot('var(--muted2)','לא מחובר'); return; }
+  disconnectSync();
+  try{
+    const es=new EventSource(syncUrl(cfg));
+    es.addEventListener('put', onSyncEvent);
+    es.addEventListener('patch', onSyncEvent);
+    es.onopen=()=>{ sync.connected=true; setSyncDot('var(--green)','מסונכרן — '+cfg.room); };
+    es.onerror=()=>{ setSyncDot('var(--amber)','מתחבר מחדש…'); };
+    sync.es=es; sync.connected=true;
+  }catch(e){ setSyncDot('var(--red)','שגיאת חיבור'); }
+}
+function disconnectSync(){ if(sync.es){ try{ sync.es.close(); }catch(e){} sync.es=null; } sync.connected=false; }
+function onSyncEvent(e){
+  let msg; try{ msg=JSON.parse(e.data); }catch(err){ return; }
+  if(!msg) return;
+  if(msg.path==='/'){ if(msg.data) applyRemote(msg.data); }
+  else { fetchRemoteAndApply(); } // nested patch — refetch whole room
+}
+function fetchRemoteAndApply(){
+  const cfg=sync.cfg; if(!cfg)return;
+  fetch(syncUrl(cfg)).then(r=>r.json()).then(d=>{ if(d)applyRemote(d); }).catch(()=>{});
+}
+function applyRemote(remote){
+  if(!remote||!remote.quarters||!remote.config) return;
+  // ignore our own echo
+  if(remote.meta && remote.meta.syncOrigin===sync.clientId && remote.meta.lastEdited===sync.lastPushedAt) return;
+  sync.applying=true;
+  S=deepMerge(defaultState(), remote);
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
+  sync.applying=false;
+  renderNav(); renderQuarterSelect(); renderQBox();
+  if(currentPage) go(currentPage);
+  setSyncDot('var(--green)','עודכן ע״י '+(remote.meta&&remote.meta.lastEditor||'צוות'));
+}
+function schedulePush(){ clearTimeout(sync.pushTimer); sync.pushTimer=setTimeout(pushSync,400); }
+function pushSync(){
+  const cfg=sync.cfg; if(!sync.connected||!cfg) return;
+  S.meta.syncOrigin=sync.clientId; sync.lastPushedAt=S.meta.lastEdited;
+  fetch(syncUrl(cfg),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(S)})
+    .then(r=>{ if(!r.ok) setSyncDot('var(--red)','שגיאת כתיבה ('+r.status+')'); else setSyncDot('var(--green)','מסונכרן'); })
+    .catch(()=>setSyncDot('var(--amber)','אין חיבור'));
+}
+$('#btnSync').onclick=()=>{
+  const cfg=getSyncCfg()||{url:'',room:'',auth:'',name:''};
+  openModal('סנכרון צוותי (F9)',`
+    <div class="small muted" style="margin-bottom:12px">מצב משותף חי לכל הצוות דרך Firebase Realtime Database (חינם). ההגדרות נשמרות מקומית בלבד ואינן נכללות בגיבוי.
+    כל שינוי אצל חבר צוות אחד מתעדכן אצל כולם. מודל: "העריכה האחרונה מנצחת" + סימון מי ערך אחרון.</div>
+    <div class="field"><label class="fl">Firebase Database URL</label>
+      <input class="f" id="syncUrl" value="${esc(cfg.url)}" placeholder="https://your-project-default-rtdb.firebaseio.com"></div>
+    <div class="row" style="gap:10px">
+      <div class="field" style="flex:1"><label class="fl">קוד חדר צוות</label><input class="f" id="syncRoom" value="${esc(cfg.room)}" placeholder="company8"></div>
+      <div class="field" style="flex:1"><label class="fl">השם שלך</label><input class="f" id="syncName" value="${esc(cfg.name)}" placeholder="עידו (COO)"></div>
+    </div>
+    <div class="field"><label class="fl">Auth secret (אופציונלי)</label><input class="f" id="syncAuth" type="password" value="${esc(cfg.auth)}" placeholder="למסד מאובטח בלבד"></div>
+    <details class="small muted"><summary style="cursor:pointer">איך מקימים? (3 דקות)</summary>
+      <ol style="padding-inline-start:18px;line-height:1.8;margin:8px 0 0">
+        <li>console.firebase.google.com ← Add project</li>
+        <li>Build ← Realtime Database ← Create ← Start in test mode</li>
+        <li>העתק את ה-URL לשדה למעלה, בחר קוד חדר משותף, ולחץ התחבר</li>
+        <li>כל הצוות מזין אותו URL + אותו קוד חדר</li>
+      </ol>
+      <div style="color:var(--amber)">⚠️ test mode פתוח לקריאה/כתיבה — למשחק כיתתי סביר; לאבטחה מלאה הגדר rules + auth.</div>
+    </details>`,
+    `${getSyncCfg()?'<button class="btn danger" onclick="disconnectSyncUI()">נתק</button>':''}<button class="btn primary" onclick="saveSyncCfg()">התחבר</button>`);
+};
+window.saveSyncCfg=()=>{
+  const cfg={url:$('#syncUrl').value.trim(), room:$('#syncRoom').value.trim(), name:$('#syncName').value.trim(), auth:$('#syncAuth').value.trim()};
+  if(!cfg.url||!cfg.room){ toast('נדרשים URL וקוד חדר','r'); return; }
+  setSyncCfg(cfg); closeModal();
+  // pull existing room state first, then connect + push if room empty
+  fetch(syncUrl(cfg)).then(r=>r.json()).then(d=>{
+    if(d&&d.quarters){ applyRemote(d); toast('התחבר — מצב הצוות נטען ✓','g'); }
+    else { connectSync(); pushSync(); toast('התחבר — חדר חדש נוצר ✓','g'); return; }
+    connectSync();
+  }).catch(e=>{ toast('שגיאת חיבור: '+e.message,'r'); setSyncDot('var(--red)','שגיאה'); });
+};
+window.disconnectSyncUI=()=>{ disconnectSync(); setSyncCfg(null); setSyncDot('var(--muted2)','לא מחובר'); closeModal(); toast('הסנכרון נותק'); };
+
 /* ---------- Boot ---------- */
 window.go=go;
 function boot(){
   load(); renderNav(); renderQuarterSelect(); renderQBox(); go('dashboard');
   window.addEventListener('resize',()=>{ if(currentPage==='dashboard')drawTrend($('#trendChart')); });
+  if(getSyncCfg()) connectSync();
 }
 boot();
 </script>
