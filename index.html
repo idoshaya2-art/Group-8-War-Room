@@ -112,7 +112,7 @@ table.tbl th{text-align:start;color:var(--muted);font-weight:700;font-size:12px;
 table.tbl td{padding:8px 10px;border-bottom:1px solid var(--line)}
 table.tbl tr:hover td{background:rgba(255,255,255,.02)}
 table.tbl input.f{padding:5px 7px}
-table.tbl.wide{width:max-content;max-width:none}
+td.num,th.num{display:table-cell}  /* .num must not turn table cells into inline-blocks (breaks column layout) */
 table.tbl.wide td,table.tbl.wide th{white-space:nowrap;font-size:12px;padding:5px 8px}
 .scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .scrollx::-webkit-scrollbar{height:8px}
