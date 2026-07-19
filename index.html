@@ -520,7 +520,7 @@ PAGE_RENDER.dashboard = (c)=>{
       ${kpi('מחזור',fmt(fin.revenue),'')}
       ${kpi('רווחים צבורים',fmt(fin.retainedEarnings),'')}
       ${kpi('חוב',fmt(fin.loans),'')}
-      ${kpi('רמות CHIP / PC',`${op.techX} / ${op.techY}`,'')}
+      ${kpi('רמות Chip / Computer',`${op.techX} / ${op.techY}`,'')}
       ${kpi('ROE',fin.roe?fin.roe+'%':'—','')}
       ${kpi('ROS',fin.ros?fin.ros+'%':'—','')}
     </div>
@@ -583,7 +583,7 @@ function renderCumulativeDashboard(c){
       ${kpi('רווחים צבורים',fmt(lastFin.retainedEarnings),'')}
       ${kpi('מו״פ מצטבר',fmt(totalRD),'')}
       ${kpi('חוב נוכחי',fmt(lastFin.loans),'')}
-      ${kpi('רמות CHIP / PC',`${lastOp.techX} / ${lastOp.techY}`,'')}
+      ${kpi('רמות Chip / Computer',`${lastOp.techX} / ${lastOp.techY}`,'')}
       ${kpi('שולי רווח',avgMargin!==null?avgMargin.toFixed(1)+'%':'—','')}
     </div>
     <div class="card" style="margin-bottom:18px">
@@ -594,7 +594,7 @@ function renderCumulativeDashboard(c){
       <div class="ch"><h3>${IC('clipboard')} סיכום רבעוני</h3><span class="small muted">זרימות מצטברות, יתרות לפי רבעון</span></div>
       <div class="cb" style="overflow-x:auto">
         <table class="tbl">
-          <thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>רווח נקי</th><th>מחזור</th><th>חוב</th><th>מו״פ</th><th>CHIP/PC</th></tr></thead>
+          <thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>רווח נקי</th><th>מחזור</th><th>חוב</th><th>מו״פ</th><th>Chip/Comp</th></tr></thead>
           <tbody>
             ${ent.map(q=>{ const f=S.quarters[q].financial, o=S.quarters[q].operational; return `<tr>
               <td><b>${q}</b></td>
@@ -758,7 +758,7 @@ function extractIncome(rows,scan,f){
   // Revenue = consumer sales (standard + deluxe), consolidated
   const consumer=sumRows(rows,/^CONSUMER$/,IS_COL.cons); if(findRow(rows,/^CONSUMER$/)){ scan.revenue=consumer; f.push('מחזור (מכירות צרכן)'); }
   const rdChip=cell(rows,/^R & D NEW CHIP/,IS_COL.cons)||0, rdPc=cell(rows,/^R & D NEW PC/,IS_COL.cons)||0;
-  if(findRow(rows,/R & D NEW/)){ scan.rd=rdChip+rdPc; f.push('מו״פ (CHIP+PC)'); }
+  if(findRow(rows,/R & D NEW/)){ scan.rd=rdChip+rdPc; f.push('מו״פ (Chip+Computer)'); }
 }
 /* Management Info layout: US chip=1 pc=3, EC/EU chip=4 pc=6, BRAZIL chip=7 pc=9 (single-value rows use the chip column). */
 const MG_MAIN=[1,4,7], MG_PC=[3,6,9];
@@ -768,14 +768,14 @@ function extractMgmt(rows,scan,f){
   const plants=sumCols(/^PLANTS BUILT AND BUILDING/,MG_MAIN); if(plants!==null){ scan.factories=plants; f.push('מפעלים'); }
   const offices=sumCols(/REG.? SALES OFFICES/,MG_MAIN); if(offices!==null){ scan.offices=offices; f.push('משרדים'); }
   const ownChip=maxCols(/^MAX.? OWNED GRADE/,MG_MAIN), ownPc=maxCols(/^MAX.? OWNED GRADE/,MG_PC);
-  if(ownChip!==null){ scan.techX=ownChip; scan.techY=ownPc; f.push('רמות CHIP/PC'); }
+  if(ownChip!==null){ scan.techX=ownChip; scan.techY=ownPc; f.push('רמות Chip/Computer'); }
   const prod=maxCols(/^MAX.? PRODUCIBLE GRADE/,MG_MAIN); if(prod!==null){ scan.maxProducible=prod; f.push('Max Producible'); }
   // Ending inventory -> items (only where units>0)
   const inv=[];
   const addInv=(re,gradeLabel)=>{ const r=findRow(rows,re); if(!r)return;
     REGIONS.filter(x=>x.id!=='hq').forEach((reg,idx)=>{ const units=parseNumber(r[MG_MAIN[idx]])||0, pcUnits=parseNumber(r[MG_PC[idx]])||0;
-      if(units>0) inv.push({product:`CHIP ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:units,cost:0,price:0});
-      if(pcUnits>0) inv.push({product:`PC ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:pcUnits,cost:0,price:0}); }); };
+      if(units>0) inv.push({product:`Chip ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:units,cost:0,price:0});
+      if(pcUnits>0) inv.push({product:`Computer ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:pcUnits,cost:0,price:0}); }); };
   addInv(/^STANDARD UNITS/,'Standard'); addInv(/^DELUXE UNITS/,'Deluxe');
   if(inv.length){ scan.inventory=inv; f.push('מלאי סגירה'); }
 }
@@ -847,8 +847,8 @@ function renderVerifyForm(box){
       <div>
         <h4 style="margin-bottom:10px;color:var(--accent2)">${IC('building')} תפעול וטכנולוגיה</h4>
         <div class="row" style="gap:8px">
-          <div class="field" style="flex:1"><label class="fl">רמת CHIP</label>${nInput('operational.techX',op.techX)}</div>
-          <div class="field" style="flex:1"><label class="fl">רמת PC</label>${nInput('operational.techY',op.techY)}</div>
+          <div class="field" style="flex:1"><label class="fl">רמת Chip (X)</label>${nInput('operational.techX',op.techX)}</div>
+          <div class="field" style="flex:1"><label class="fl">רמת Computer (Y)</label>${nInput('operational.techY',op.techY)}</div>
         </div>
         <div class="row" style="gap:8px">
           <div class="field" style="flex:1"><label class="fl">מפעלים</label>${nInput('operational.factories',op.factories)}</div>
@@ -1175,8 +1175,8 @@ function goalTab(t){
         <div class="ch"><h3>${IC('target')} יעדי סוף-משחק</h3></div>
         <div class="cb">
           <div class="row" style="gap:10px">
-            <div class="field" style="flex:1"><label class="fl">יעד רמת CHIP</label><input class="f" type="number" value="${g.techXTarget}" oninput="setGoal('techXTarget',this.value)"></div>
-            <div class="field" style="flex:1"><label class="fl">יעד רמת PC</label><input class="f" type="number" value="${g.techYTarget}" oninput="setGoal('techYTarget',this.value)"></div>
+            <div class="field" style="flex:1"><label class="fl">יעד רמת Chip (X)</label><input class="f" type="number" value="${g.techXTarget}" oninput="setGoal('techXTarget',this.value)"></div>
+            <div class="field" style="flex:1"><label class="fl">יעד רמת Computer (Y)</label><input class="f" type="number" value="${g.techYTarget}" oninput="setGoal('techYTarget',this.value)"></div>
           </div>
           <div class="field"><label class="fl">תקרת חוב</label><input class="f" type="number" value="${g.debtCeiling}" oninput="setGoal('debtCeiling',this.value)"></div>
           <div class="field"><label class="fl">יעד מלאי סוף-משחק</label><input class="f" type="number" value="${g.endInventoryTarget}" oninput="setGoal('endInventoryTarget',this.value)"></div>
