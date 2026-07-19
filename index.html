@@ -137,6 +137,11 @@ td.num,th.num{display:table-cell}  /* .num must not turn table cells into inline
 .act .at b{font-size:14.5px}
 .act .at p{margin:5px 0 0;color:var(--muted);font-size:13.5px;line-height:1.55}
 .act .form{display:inline-flex;align-items:center;gap:5px;margin-top:7px;background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:3px 9px;font-size:12px;font-weight:700;color:var(--accent2)}
+.act .dep{margin-top:8px;font-size:12.5px;color:var(--amber);background:rgba(217,164,65,.08);border-radius:7px;padding:6px 9px;line-height:1.5}
+.depchain{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.depnode{background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:700}
+.depnode.here{border-color:var(--accent);color:var(--accent2);box-shadow:0 0 0 1px var(--accent) inset}
+.deparrow{color:var(--muted2);font-weight:800;font-size:15px}
 table.tbl.wide td,table.tbl.wide th{white-space:nowrap;font-size:12px;padding:5px 8px}
 .scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .scrollx::-webkit-scrollbar{height:8px}
@@ -795,16 +800,49 @@ PAGE_RENDER.plan = (c)=>{
       <div class="between"><h3>${IC('clipboard')} תוכנית פעולה ל-${targetQ}</h3><span class="tag ${reds?'r':'b'}">${items.length} פעולות${reds?` · ${reds} דחופות`:''}</span></div>
       <div class="small muted" style="margin-top:6px">מבוסס על נתוני ${q}, ההקרנה, המודיעין והיעדים. כל פעולה מציינת <b>מה לעשות</b>, <b>למה</b>, ו<b>איזה טופס להזין</b> (H=ייצור · A=מחיר/פרסום · W=מו״פ/מימון/העברות).</div>
     </div>
+    ${renderDependencies(q,targetQ)}
     ${items.map((it,i)=>`<div class="act ${it.level}">
       <div class="an">${i+1}</div>
       <div class="at"><b>${it.title}</b><p>${it.detail}</p>
         ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
+        ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
         ${it.action?`<button class="btn sm" style="margin-top:8px;margin-inline-start:8px" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
       </div></div>`).join('')}
     <div class="card pad" style="margin-top:6px"><div class="small muted">אחרי שתחליט: הרץ את התרחיש ב<b>סימולטור</b>, ייצא <b>גיליון הזנה</b> ל-${targetQ}, ותעד ב<b>יומן ההחלטות</b>.</div>
       <div class="row" style="margin-top:10px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('zap')} מיקסום Q9</button></div>
     </div>`;
 };
+/* Decision-dependency layer: the canonical INTOPIA decision chain + the
+   cross-decision prerequisites that are relevant to the current state, so the
+   team sequences moves in the right order (and accounts for time lags). */
+function renderDependencies(q,targetQ){
+  const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals;
+  const noSales=(f.revenue||0)===0;
+  const wantHigherGrade = g.techXTarget>op.techX || g.techYTarget>op.techY;
+  // where are we in the chain? (no sales => still upstream at production)
+  const chain=[
+    {n:'מו״פ (W1)', here:wantHigherGrade},
+    {n:'דרגת מוצר'},
+    {n:'ייצור (H)', here:noSales},
+    {n:'תמחור+פרסום (A)'},
+    {n:'מכירה'},
+    {n:'גבייה מדורגת'},
+    {n:'מזומן'},
+  ];
+  const deps=[];
+  deps.push({t:'מו״פ ⟵ קודם לדרגה גבוהה', d:'החלטת מו״פ (W1) נספרת רבעון קדימה — רק אחרי שהדרגה מוכנה אפשר לייצר ולמכור אותה. למכירת דרגה גבוהה יותר, המו״פ חייב להקדים ברבעון (או יותר).'});
+  deps.push({t:'ייצור ⟵ קודם לתמחור/מכירה', d:'תמחור ופרסום (A) שווים משהו רק אם קיים מלאי. קבע ייצור (H) קודם — "אין מלאי / אין מחיר = אין מכירה".'});
+  deps.push({t:'קיבולת ⟵ מגבילה נפח ייצור', d:`הייצור חסום בקיבולת המפעלים (${op.factories} כרגע). הרחבת קיבולת (בניית מפעל, השקעה) אורכת זמן — ההשקעה חייבת להקדים את הרבעון שבו רוצים את הנפח.`});
+  deps.push({t:'רצפת מזומן ⟵ מגבילה כל הוצאה', d:`כל ההוצאות (מו״פ, ייצור, פרסום, מפעל, העברות) כפופות לרצפה${f.consolidated?` — מזומן נוכחי ${fmt(f.consolidated)} CHF`:''}. ודא מימון (W3) לפני התחייבות להוצאות גדולות.`});
+  deps.push({t:'גבייה מדורגת ⟵ קובעת עיתוי מזומן', d:'הכנסה ממכירה נכנסת מדורג לפי לוח הגבייה האזורי (למשל ברזיל 30/30/40). החלטת מכירה היום משפיעה על המזומן ברבעונים הבאים — לא מיד. תזמן מול הרצפות.'});
+  REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0) deps.push({t:`העברה ⟵ נדרשת לפני פעילות ב${r.name}`,d:`גירעון מטבע ב${r.name}. העברה (W2) מאזור עודף חייבת להתבצע לפני/עם ההזנה, אחרת פעולות באזור ייכשלו.`}); });
+  return `<div class="card" style="margin-bottom:16px"><div class="ch"><h3>${IC('sliders')} תלויות ורצף החלטות</h3><span class="small muted">קבל את ההחלטות בסדר הנכון</span></div>
+    <div class="cb">
+      <div class="depchain">${chain.map((x,i)=>`<span class="depnode ${x.here?'here':''}">${x.n}</span>${i<chain.length-1?'<span class="deparrow">⟵</span>':''}`).join('')}</div>
+      <div class="small muted" style="margin-top:8px">כל שלב תלוי בקודמו. הנקודה המודגשת = היכן שאתה נמצא כעת בשרשרת.</div>
+      <ul style="padding-inline-start:20px;line-height:1.85;margin:12px 0 0">${deps.map(d=>`<li><b>${d.t}</b> — ${d.d}</li>`).join('')}</ul>
+    </div></div>`;
+}
 function buildActionPlan(q,targetQ){
   const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals, out=[];
   const proj=projectCashflow(q,null); const brk=proj.find(x=>x.breach);
@@ -812,7 +850,8 @@ function buildActionPlan(q,targetQ){
   const us=comps.find(x=>x.num===OUR_CO);
   // 1. Cash floor risk
   if(brk) out.push({level:'red',title:'סכנת שבירת רצפת מזומן',form:'W3 (מימון/הלוואה)',
-    detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`});
+    detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`,
+    dep:`ההחלטה חייבת להתקבל <b>רבעון-שניים לפני</b> ${brk.q} — מימון וצמצום הוצאות משפיעים על המזומן קדימה, לא רטרואקטיבית.`});
   // 2. Negative currency
   REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0) out.push({level:'red',title:`גירעון מטבע — ${r.name}`,form:'W2 (העברות בין-אזוריות)',
     detail:`יתרה שלילית ${fmt(f.cash[r.id])} ${r.cur}. העבר מזומן מאזור עודף או צמצם פעילות באזור זה לפני ההזנה.`}); });
@@ -820,6 +859,7 @@ function buildActionPlan(q,targetQ){
   if((f.revenue||0)===0){
     out.push({level:'amber',title:'עדיין לא מוכרים — התחל לייצר הכנסה',form:'H1–H3 (ייצור) + A1–A3 (מחיר/פרסום)',
       detail:`המחזור ב-${q} הוא 0 בעוד המזומן נשחק (רווח נקי ${fmt(f.netProfit)}). ב-${targetQ} הזן <b>ייצור</b> לכל אזור (טפסי H) ו<b>מחיר+פרסום</b> (טפסי A). הרץ קודם בסימולטור כדי לוודא שהרצפות נשמרות.`,
+      dep:`סדר ההחלטות: (1) ייצור H קודם — אין מלאי = אין מכירה; (2) אז תמחור/פרסום A; (3) למכירת דרגה גבוהה — מו״פ W1 חייב להיות מוכן מרבעון קודם; (4) ההכנסה נכנסת מדורג (לוח גבייה אזורי).`,
       action:"go('sim')",actionLabel:'תכנן בסימולטור'});
   }
   // 4. Net loss burn
@@ -837,11 +877,13 @@ function buildActionPlan(q,targetQ){
   if(comps.length){ const chipLeaders=[...comps].filter(x=>x.num!==OUR_CO&&x.rdChip>0).sort((a,b)=>b.rdChip-a.rdChip).slice(0,2);
     const ourRd=(op.rd||0), avgRd=comps.reduce((a,x)=>a+((x.rdChip||0)+(x.rdPc||0)),0)/comps.length*1000; // MR74 in 000s
     if(chipLeaders.length) out.push({level:'info',title:'לחץ טכנולוגי — החלטת מו״פ',form:'W1 (מו״פ)',
-      detail:`חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות בהשקעת מו״פ ב-Chip. ${ourRd>=avgRd?'אתה מעל ממוצע השוק — שמור על הקצב':'אתה מתחת לממוצע — סיכון לפיגור בדרגה'}. החלט על מו״פ ל-${targetQ} בטופס W1.`});
+      detail:`חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות בהשקעת מו״פ ב-Chip. ${ourRd>=avgRd?'אתה מעל ממוצע השוק — שמור על הקצב':'אתה מתחת לממוצע — סיכון לפיגור בדרגה'}. החלט על מו״פ ל-${targetQ} בטופס W1.`,
+      dep:`מו״פ היום ⟵ הדרגה זמינה לייצור ומכירה רק ברבעון הבא. השקעה זו מקדימה ומאפשרת את החלטות הייצור/התמחור של הדרגה הגבוהה.`});
   }
   // 7. Tech targets
   if(g.techXTarget>op.techX || g.techYTarget>op.techY) out.push({level:'info',title:'פער מול יעד הדרגה',form:'W1 (מו״פ)',
-    detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, היעד ${g.techXTarget}/${g.techYTarget}. כדי למכור דרגות גבוהות יותר (מרווח גבוה) — השקע במו״פ עד להשגת הדרגה.`});
+    detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, היעד ${g.techXTarget}/${g.techYTarget}. כדי למכור דרגות גבוהות יותר (מרווח גבוה) — השקע במו״פ עד להשגת הדרגה.`,
+    dep:`שרשרת: מו״פ ⟵ דרגה ⟵ ייצור הדרגה החדשה ⟵ תמחור פרמיום. כל שלב תלוי בקודם; תכנן את המו״פ מספיק מוקדם כדי שהדרגה תבשיל בזמן.`});
   // 8. Contracts at risk
   S.config.contracts.forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
     const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
