@@ -113,7 +113,10 @@ table.tbl td{padding:8px 10px;border-bottom:1px solid var(--line)}
 table.tbl tr:hover td{background:rgba(255,255,255,.02)}
 table.tbl input.f{padding:5px 7px}
 table.tbl.wide{width:max-content;max-width:none}
-table.tbl.wide td,table.tbl.wide th{white-space:nowrap}
+table.tbl.wide td,table.tbl.wide th{white-space:nowrap;font-size:12px;padding:5px 8px}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scrollx::-webkit-scrollbar{height:8px}
+.scrollx::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
 
 /* KPI */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
@@ -602,7 +605,7 @@ function renderCumulativeDashboard(c){
     <div class="card">
       <div class="ch"><h3>${IC('clipboard')} סיכום רבעוני</h3><span class="small muted">זרימות מצטברות, יתרות לפי רבעון</span></div>
       <div class="cb" style="overflow-x:auto">
-        <table class="tbl">
+        <table class="tbl wide">
           <thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>רווח נקי</th><th>מחזור</th><th>חוב</th><th>מו״פ</th><th>Chip/Comp</th></tr></thead>
           <tbody>
             ${ent.map(q=>{ const f=S.quarters[q].financial, o=S.quarters[q].operational; return `<tr>
@@ -955,7 +958,7 @@ PAGE_RENDER.cashflow = (c)=>{
     <div class="card">
       <div class="ch"><h3>פירוק לפי רבעון ואזור</h3><span class="small muted">רצפות ממסך היעדים</span></div>
       <div class="cb" style="overflow-x:auto">
-        <table class="tbl">
+        <table class="tbl wide">
           <thead><tr><th>רבעון</th>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד</th><th>רצפה</th><th>מרחק</th><th>סטטוס</th></tr></thead>
           <tbody>
             <tr style="background:rgba(79,140,255,.06)"><td><b>${q} (בסיס)</b></td>${REGIONS.map(r=>`<td class="num">${fmt(S.quarters[q].financial.cash[r.id]||0)}</td>`).join('')}<td class="num"><b>${fmt(unifiedCashOf(q))}</b></td><td class="num">${fmt(S.config.goals.floors[q]||0)}</td><td class="num">${fmt(unifiedCashOf(q)-(S.config.goals.floors[q]||0))}</td><td>—</td></tr>
@@ -1050,7 +1053,7 @@ function renderCompetitors(comps,fmtK){
       <div class="ch"><h3>${IC('landmark')} מאזן ורו״ה של המתחרים</h3><span class="small muted">מ-MR74 · ב-000 CHF · חברה 8 = אנחנו</span></div>
       <div class="cb" style="overflow-x:auto">
         <table class="tbl wide"><thead><tr>
-          <th>חברה</th><th>מזומן</th><th>ני״ע</th><th>מפעלים</th><th>הלוואות בנק</th><th>רווחים צבורים</th><th>רווח נקי</th><th>מו״פ Chip</th><th>מו״פ Comp</th><th>מחקרי שוק</th>
+          <th>חברה</th><th>מזומן</th><th>ני״ע</th><th>מפעלים</th><th>חוב בנק</th><th>רו״צ</th><th>רווח נקי</th><th>מו״פ Chip</th><th>מו״פ Comp</th><th>מחקרי</th>
         </tr></thead>
         <tbody>${comps.map(c=>{ const me=c.num===OUR_CO; return `<tr style="${me?'background:rgba(61,111,224,.12)':''}">
           <td><b>${me?'חברה 8 ★':'חברה '+c.num}</b></td>
