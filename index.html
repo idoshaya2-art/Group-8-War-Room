@@ -1536,7 +1536,7 @@ async function callLLM(messages, system, opts={}){
     const res=await fetch('https://api.openai.com/v1/chat/completions',{
       method:'POST',
       headers:{ 'content-type':'application/json', 'Authorization':'Bearer '+key },
-      body:JSON.stringify({ model:aiModel(), max_tokens:opts.max_tokens||1200,
+      body:JSON.stringify({ model:aiModel(), max_completion_tokens:opts.max_tokens||1200,
         messages:[{role:'system',content:system},...messages] }),
     });
     if(!res.ok) throw new Error(await readErr(res));
