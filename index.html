@@ -242,12 +242,13 @@ canvas{display:block;max-width:100%}
 const APP_VERSION = 'v5.6';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
-  {id:'home',   name:'מטה (Home)',  cur:'USD'},
-  {id:'europe', name:'אירופה',      cur:'EUR'},
-  {id:'brazil', name:'ברזיל',       cur:'BRL'},
+  {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
+  {id:'europe', name:'אירופה (EC/EU)',      cur:'EUR'},
+  {id:'brazil', name:'ברזיל',               cur:'BRL'},
+  {id:'hq',     name:'מטה (ליכטנשטיין)',    cur:'CHF'},
 ];
 const PERSONAS = ['CEO','CFO','COO','CMO','R&D/מודיעין'];
-const FX_DEFAULT = {USD:1, EUR:1.08, BRL:0.20}; // fallback USD-equivalent rates
+const FX_DEFAULT = {USD:1, EUR:1.08, BRL:0.20, CHF:1.10}; // fallback USD-equivalent rates (manual mode only)
 function fxRate(cur){ const fx=(S&&S.config&&S.config.params&&S.config.params.fx)||FX_DEFAULT; return fx[cur]!==undefined?fx[cur]:(FX_DEFAULT[cur]||1); }
 
 /* ---------- Persistence ---------- */
@@ -258,8 +259,8 @@ function emptyQuarter(){
   return {
     entered:false,
     financial:{
-      cash:{}, retainedEarnings:0, netProfit:0, revenue:0, roe:0, roi:0, ros:0,
-      ap:0, ar:0, supplierCredit:0, loans:0,
+      cash:{}, consolidated:0, retainedEarnings:0, netProfit:0, revenue:0, grossMargin:0, roe:0, roi:0, ros:0,
+      ap:0, ar:0, supplierCredit:0, loans:0, securities:0,
     },
     operational:{ inventory:[], techX:0, techY:0, maxProducible:0, factories:0, offices:0, rd:0 },
     marketIntel:[],
@@ -275,11 +276,11 @@ function defaultState(){
         techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0 },
       contracts:[],
       params:{
-        collection:{ home:[100,0,0], europe:[50,20,30], brazil:[30,30,40] },
-        tax:{home:34, europe:30, brazil:25},
+        collection:{ us:[100,0,0], europe:[50,20,30], brazil:[30,30,40], hq:[100,0,0] },
+        tax:{us:34, europe:30, brazil:25, hq:0},
         interest:{bank:10, supplierCredit:11, h4:12, securities:6},
         productionPay:[100,0],
-        fx:{USD:1, EUR:1.08, BRL:0.20},
+        fx:{USD:1, EUR:1.08, BRL:0.20, CHF:1.10},
       },
     },
     quarters:q,
@@ -415,8 +416,9 @@ function latestEntered(){ const e=enteredQuarters(); return e.length?e[e.length-
    DETERMINISTIC ENGINE  (F4 cash-flow, F3 alerts, scoring proxy)
    ========================================================================= */
 function unifiedCashOf(q){
-  const fin=S.quarters[q].financial; let sum=0;
-  REGIONS.forEach(r=> sum += (fin.cash[r.id]||0)*fxRate(r.cur)); return sum;
+  const fin=S.quarters[q].financial;
+  if(fin.consolidated) return fin.consolidated; // authoritative figure from the report (CHF)
+  let sum=0; REGIONS.forEach(r=> sum += (fin.cash[r.id]||0)*fxRate(r.cur)); return sum;
 }
 function inventoryValue(q){ return S.quarters[q].operational.inventory.reduce((a,i)=>a+(i.qty||0)*(i.cost||0),0); }
 
@@ -437,7 +439,7 @@ function projectCashflow(baseQuarter, leversByQuarter){
     });
     pipeline.filter(x=>x.q===q).forEach(x=> bal[x.region]+=x.amount);
     const loans=S.quarters[baseQuarter].financial.loans||0;
-    bal.home -= loans*(p.interest.bank/100)/4;
+    bal.hq -= loans*(p.interest.bank/100)/4;
     const cashByRegion={...bal};
     let unified=0; REGIONS.forEach(r=> unified += cashByRegion[r.id]*fxRate(r.cur));
     const floor=S.config.goals.floors[q]||0;
@@ -518,7 +520,7 @@ PAGE_RENDER.dashboard = (c)=>{
       ${kpi('מחזור',fmt(fin.revenue),'')}
       ${kpi('רווחים צבורים',fmt(fin.retainedEarnings),'')}
       ${kpi('חוב',fmt(fin.loans),'')}
-      ${kpi('רמות X / Y',`${op.techX} / ${op.techY}`,'')}
+      ${kpi('רמות CHIP / PC',`${op.techX} / ${op.techY}`,'')}
       ${kpi('ROE',fin.roe?fin.roe+'%':'—','')}
       ${kpi('ROS',fin.ros?fin.ros+'%':'—','')}
     </div>
@@ -581,7 +583,7 @@ function renderCumulativeDashboard(c){
       ${kpi('רווחים צבורים',fmt(lastFin.retainedEarnings),'')}
       ${kpi('מו״פ מצטבר',fmt(totalRD),'')}
       ${kpi('חוב נוכחי',fmt(lastFin.loans),'')}
-      ${kpi('רמות X / Y',`${lastOp.techX} / ${lastOp.techY}`,'')}
+      ${kpi('רמות CHIP / PC',`${lastOp.techX} / ${lastOp.techY}`,'')}
       ${kpi('שולי רווח',avgMargin!==null?avgMargin.toFixed(1)+'%':'—','')}
     </div>
     <div class="card" style="margin-bottom:18px">
@@ -592,7 +594,7 @@ function renderCumulativeDashboard(c){
       <div class="ch"><h3>${IC('clipboard')} סיכום רבעוני</h3><span class="small muted">זרימות מצטברות, יתרות לפי רבעון</span></div>
       <div class="cb" style="overflow-x:auto">
         <table class="tbl">
-          <thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>רווח נקי</th><th>מחזור</th><th>חוב</th><th>מו״פ</th><th>רמות X/Y</th></tr></thead>
+          <thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>רווח נקי</th><th>מחזור</th><th>חוב</th><th>מו״פ</th><th>CHIP/PC</th></tr></thead>
           <tbody>
             ${ent.map(q=>{ const f=S.quarters[q].financial, o=S.quarters[q].operational; return `<tr>
               <td><b>${q}</b></td>
@@ -718,44 +720,91 @@ function handleFile(file){
 }
 function matchSheet(name){ const n=name.toLowerCase();
   if(/balance/.test(n))return'balance'; if(/income|profit|p&l/.test(n))return'income';
-  if(/manag|mgmt|info/.test(n))return'mgmt'; if(/curren|fx|cash/.test(n))return'currency';
-  if(/^mr|market research|mr\d/.test(n))return'mr'; return null; }
+  if(/manag|mgmt|info/.test(n))return'mgmt'; if(/curren|fx/.test(n))return'currency';
+  if(/^mr\b|market research|mr\s*\d/.test(n))return'mr'; return null; }
 function parseNumber(v){
-  if(typeof v==='number')return v; if(typeof v!=='string')return null;
+  if(typeof v==='number')return isNaN(v)?null:v; if(typeof v!=='string')return null;
   const neg=/^\(.*\)$/.test(v.trim());
   const cleaned=v.replace(/[(),\s€$₪R]/g,''); if(cleaned===''||isNaN(cleaned))return null;
   let n=parseFloat(cleaned); if(neg)n=-Math.abs(n); return n;
 }
+/* Normalize a row label: uppercase, strip a leading digit artifact ("0TOTAL..."), collapse spaces. */
+function normLabel(s){ return String(s==null?'':s).toUpperCase().replace(/^[^A-Z(]+/,'').replace(/\s+/g,' ').trim(); }
+function rowsOf(ws){ return XLSX.utils.sheet_to_json(ws,{header:1,defval:''}); }
+function findRow(rows,re){ return rows.find(r=> re.test(normLabel(r&&r[0]))); }
+function findRows(rows,re){ return rows.filter(r=> re.test(normLabel(r&&r[0]))); }
+
+/* Balance Sheet / Income Statement share the column layout:
+   col0=label, US=2, EC/EU=4, BRAZIL=6, LIECHTENSTEIN(HQ)=7, CONSOLIDATED=8. */
+const IS_COL={us:2,europe:4,brazil:6,hq:7,cons:8};
+function cell(rows,re,col){ const r=findRow(rows,re); return r?parseNumber(r[col]):null; }
+function sumRows(rows,re,col){ return findRows(rows,re).reduce((a,r)=>{ const n=parseNumber(r[col]); return a+(n||0); },0); }
+
+function extractBalance(rows,scan,f){
+  const cashRow=findRow(rows,/^CASH$/);
+  if(cashRow){ scan.cash={}; REGIONS.forEach(r=>{ const v=parseNumber(cashRow[IS_COL[r.id]]); if(v!==null)scan.cash[r.id]=v; });
+    const cons=parseNumber(cashRow[IS_COL.cons]); if(cons!==null)scan.consolidated=cons; f.push('מזומן לפי אזור + מאוחד'); }
+  const ar=sumRows(rows,/^A\/R PERIOD/,IS_COL.cons); if(findRow(rows,/^A\/R PERIOD/)){ scan.ar=ar; f.push('A/R'); }
+  const ap=sumRows(rows,/^A\/P PERIOD/,IS_COL.cons); if(findRow(rows,/^A\/P PERIOD/)){ scan.ap=ap; f.push('A/P'); }
+  const sc=cell(rows,/^SUPPLIER CREDIT/,IS_COL.cons); if(sc!==null){ scan.supplierCredit=sc; f.push('אשראי ספקים'); }
+  const area=cell(rows,/^AREA BANK LOANS/,IS_COL.cons)||0, bank=cell(rows,/^BANK LOANS PAYABLE/,IS_COL.cons)||0, bonds=cell(rows,/^LONG.?TERM BONDS/,IS_COL.cons)||0;
+  if(findRow(rows,/BANK LOANS/)){ scan.loans=area+bank+bonds; f.push('הלוואות'); }
+  const re=cell(rows,/^RETAINED EARNINGS/,IS_COL.cons); if(re!==null){ scan.retainedEarnings=re; f.push('רווחים צבורים'); }
+  const sec=cell(rows,/^GOVERNMENT SECURITIES/,IS_COL.cons); if(sec!==null){ scan.securities=sec; }
+}
+function extractIncome(rows,scan,f){
+  const ne=cell(rows,/^NET EARNINGS$/,IS_COL.cons); if(ne!==null){ scan.netProfit=ne; f.push('רווח נקי'); }
+  const gm=cell(rows,/^TOTAL GROSS MARGIN/,IS_COL.cons); if(gm!==null) scan.grossMargin=gm;
+  // Revenue = consumer sales (standard + deluxe), consolidated
+  const consumer=sumRows(rows,/^CONSUMER$/,IS_COL.cons); if(findRow(rows,/^CONSUMER$/)){ scan.revenue=consumer; f.push('מחזור (מכירות צרכן)'); }
+  const rdChip=cell(rows,/^R & D NEW CHIP/,IS_COL.cons)||0, rdPc=cell(rows,/^R & D NEW PC/,IS_COL.cons)||0;
+  if(findRow(rows,/R & D NEW/)){ scan.rd=rdChip+rdPc; f.push('מו״פ (CHIP+PC)'); }
+}
+/* Management Info layout: US chip=1 pc=3, EC/EU chip=4 pc=6, BRAZIL chip=7 pc=9 (single-value rows use the chip column). */
+const MG_MAIN=[1,4,7], MG_PC=[3,6,9];
+function extractMgmt(rows,scan,f){
+  const sumCols=(re,cols)=>{ const r=findRow(rows,re); if(!r)return null; return cols.reduce((a,c)=>a+(parseNumber(r[c])||0),0); };
+  const maxCols=(re,cols)=>{ const r=findRow(rows,re); if(!r)return null; return Math.max(...cols.map(c=>parseNumber(r[c])||0)); };
+  const plants=sumCols(/^PLANTS BUILT AND BUILDING/,MG_MAIN); if(plants!==null){ scan.factories=plants; f.push('מפעלים'); }
+  const offices=sumCols(/REG.? SALES OFFICES/,MG_MAIN); if(offices!==null){ scan.offices=offices; f.push('משרדים'); }
+  const ownChip=maxCols(/^MAX.? OWNED GRADE/,MG_MAIN), ownPc=maxCols(/^MAX.? OWNED GRADE/,MG_PC);
+  if(ownChip!==null){ scan.techX=ownChip; scan.techY=ownPc; f.push('רמות CHIP/PC'); }
+  const prod=maxCols(/^MAX.? PRODUCIBLE GRADE/,MG_MAIN); if(prod!==null){ scan.maxProducible=prod; f.push('Max Producible'); }
+  // Ending inventory -> items (only where units>0)
+  const inv=[];
+  const addInv=(re,gradeLabel)=>{ const r=findRow(rows,re); if(!r)return;
+    REGIONS.filter(x=>x.id!=='hq').forEach((reg,idx)=>{ const units=parseNumber(r[MG_MAIN[idx]])||0, pcUnits=parseNumber(r[MG_PC[idx]])||0;
+      if(units>0) inv.push({product:`CHIP ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:units,cost:0,price:0});
+      if(pcUnits>0) inv.push({product:`PC ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:pcUnits,cost:0,price:0}); }); };
+  addInv(/^STANDARD UNITS/,'Standard'); addInv(/^DELUXE UNITS/,'Deluxe');
+  if(inv.length){ scan.inventory=inv; f.push('מלאי סגירה'); }
+}
+function extractCurrency(rows,scan){
+  const er=findRow(rows,/^EXCHANGE RATE/); // US EC/EU BRAZIL LIECHT (units per CHF)
+  if(er){ scan.gameRates={us:parseNumber(er[1]),europe:parseNumber(er[2]),brazil:parseNumber(er[3]),hq:parseNumber(er[4])}; }
+}
+
 function parseWorkbook(wb){
-  let found=[], mrCount=0; const scan={};
+  const scan={}; let mrCount=0; const found=[];
   wb.SheetNames.forEach(sn=>{
-    const type=matchSheet(sn); const ws=wb.Sheets[sn];
-    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    if(type==='mr'){ mrCount++; ingestMR(sn,rows); }
-    rows.forEach(r=>{
-      for(let i=0;i<r.length;i++){
-        const cell=String(r[i]).toLowerCase().trim();
-        const numAt=(j)=>{ for(let k=j+1;k<r.length;k++){ const v=parseNumber(r[k]); if(v!==null)return v; } return null; };
-        const setOnce=(k,v)=>{ if(v!==null&&scan[k]===undefined){scan[k]=v;found.push(k);} };
-        if(/net profit|net income|רווח נקי/.test(cell)) setOnce('netProfit',numAt(i));
-        if(/revenue|total sales|מחזור|הכנסות/.test(cell)) setOnce('revenue',numAt(i));
-        if(/retained/.test(cell)) setOnce('retainedEarnings',numAt(i));
-        if(/loan|debt|הלוואה|חוב/.test(cell)) setOnce('loans',numAt(i));
-        if(/accounts payable|a\/p|ספקים/.test(cell)) setOnce('ap',numAt(i));
-        if(/accounts receivable|a\/r|לקוחות/.test(cell)) setOnce('ar',numAt(i));
-        if(/supplier credit|אשראי ספק/.test(cell)) setOnce('supplierCredit',numAt(i));
-        if(/home.*cash|cash.*home|מטה/.test(cell)) setOnce('cash_home',numAt(i));
-        if(/europe|אירופ/.test(cell)) setOnce('cash_europe',numAt(i));
-        if(/brazil|ברזיל/.test(cell)) setOnce('cash_brazil',numAt(i));
-      }
-    });
+    const type=matchSheet(sn); const ws=wb.Sheets[sn]; if(!ws)return;
+    const rows=rowsOf(ws);
+    if(type==='mr'){ mrCount++; ingestMR(sn,rows); return; }
+    if(type==='balance') extractBalance(rows,scan,found);
+    else if(type==='income') extractIncome(rows,scan,found);
+    else if(type==='mgmt') extractMgmt(rows,scan,found);
+    else if(type==='currency') extractCurrency(rows,scan);
   });
-  return {scan,mrCount,summary:`${found.length} שדות מזוהים`,applied:found};
+  const uniq=[...new Set(found)];
+  return {scan,mrCount,summary: uniq.length? uniq.join(' · ') : 'לא זוהו שדות מוכרים — בדוק שהקובץ הוא דוח INTOPIA', applied:uniq};
 }
 function applyParsed({scan}){
-  const f=S.quarters[S.activeQuarter].financial;
-  ['netProfit','revenue','retainedEarnings','loans','ap','ar','supplierCredit'].forEach(k=>{ if(scan[k]!==undefined)f[k]=scan[k]; });
-  ['home','europe','brazil'].forEach(r=>{ if(scan['cash_'+r]!==undefined)f.cash[r]=scan['cash_'+r]; });
+  const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
+  if(scan.cash){ REGIONS.forEach(r=>{ if(scan.cash[r.id]!==undefined) f.cash[r.id]=scan.cash[r.id]; }); }
+  ['consolidated','netProfit','revenue','grossMargin','retainedEarnings','loans','ap','ar','supplierCredit','securities'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) f[k]=scan[k]; });
+  ['techX','techY','maxProducible','factories','offices','rd'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) op[k]=scan[k]; });
+  if(scan.inventory&&scan.inventory.length) op.inventory=scan.inventory;
+  if(scan.gameRates) S.config.params.gameRates=scan.gameRates;
   save();
 }
 function ingestMR(sheetName,rows){
@@ -774,6 +823,7 @@ function renderVerifyForm(box){
       <div>
         <h4 style="margin-bottom:10px;color:var(--accent2)">${IC('wallet')} מזומן לפי אזור</h4>
         ${REGIONS.map(r=>`<div class="field"><label class="fl">${r.name} <span class="num">(${r.cur})</span></label>${nInput('financial.cash.'+r.id,f.cash[r.id])}</div>`).join('')}
+        <div class="field"><label class="fl">מזומן מאוחד <span class="num">(CHF)</span> — מהדוח</label>${nInput('financial.consolidated',f.consolidated)}</div>
       </div>
       <div>
         <h4 style="margin-bottom:10px;color:var(--accent2)">${IC('lineChart')} רווח והפסד</h4>
@@ -797,8 +847,8 @@ function renderVerifyForm(box){
       <div>
         <h4 style="margin-bottom:10px;color:var(--accent2)">${IC('building')} תפעול וטכנולוגיה</h4>
         <div class="row" style="gap:8px">
-          <div class="field" style="flex:1"><label class="fl">רמת X</label>${nInput('operational.techX',op.techX)}</div>
-          <div class="field" style="flex:1"><label class="fl">רמת Y</label>${nInput('operational.techY',op.techY)}</div>
+          <div class="field" style="flex:1"><label class="fl">רמת CHIP</label>${nInput('operational.techX',op.techX)}</div>
+          <div class="field" style="flex:1"><label class="fl">רמת PC</label>${nInput('operational.techY',op.techY)}</div>
         </div>
         <div class="row" style="gap:8px">
           <div class="field" style="flex:1"><label class="fl">מפעלים</label>${nInput('operational.factories',op.factories)}</div>
@@ -1125,8 +1175,8 @@ function goalTab(t){
         <div class="ch"><h3>${IC('target')} יעדי סוף-משחק</h3></div>
         <div class="cb">
           <div class="row" style="gap:10px">
-            <div class="field" style="flex:1"><label class="fl">יעד רמת X</label><input class="f" type="number" value="${g.techXTarget}" oninput="setGoal('techXTarget',this.value)"></div>
-            <div class="field" style="flex:1"><label class="fl">יעד רמת Y</label><input class="f" type="number" value="${g.techYTarget}" oninput="setGoal('techYTarget',this.value)"></div>
+            <div class="field" style="flex:1"><label class="fl">יעד רמת CHIP</label><input class="f" type="number" value="${g.techXTarget}" oninput="setGoal('techXTarget',this.value)"></div>
+            <div class="field" style="flex:1"><label class="fl">יעד רמת PC</label><input class="f" type="number" value="${g.techYTarget}" oninput="setGoal('techYTarget',this.value)"></div>
           </div>
           <div class="field"><label class="fl">תקרת חוב</label><input class="f" type="number" value="${g.debtCeiling}" oninput="setGoal('debtCeiling',this.value)"></div>
           <div class="field"><label class="fl">יעד מלאי סוף-משחק</label><input class="f" type="number" value="${g.endInventoryTarget}" oninput="setGoal('endInventoryTarget',this.value)"></div>
@@ -1593,7 +1643,13 @@ const SYNC_LS='intopia_sync_cfg';
 const sync={ cfg:null, es:null, connected:false, applying:false, clientId:uid(), lastPushedAt:0, pushTimer:null };
 function getSyncCfg(){ try{ const r=localStorage.getItem(SYNC_LS); return r?JSON.parse(r):null; }catch(e){ return null; } }
 function setSyncCfg(c){ try{ c?localStorage.setItem(SYNC_LS,JSON.stringify(c)):localStorage.removeItem(SYNC_LS); }catch(e){} sync.cfg=c; }
-function syncUrl(cfg){ return `${(cfg.url||'').replace(/\/+$/,'')}/rooms/${encodeURIComponent(cfg.room||'')}.json${cfg.auth?('?auth='+encodeURIComponent(cfg.auth)):''}`; }
+function normalizeDbUrl(u){
+  u=(u||'').trim(); if(!u) return '';
+  u=u.replace(/^http:\/\//i,'https://');                 // Firebase is https-only
+  if(!/^https:\/\//i.test(u)) u='https://'+u.replace(/^\/+/,''); // add scheme if missing
+  try{ const x=new URL(u); return 'https://'+x.host; }catch(e){ return u.replace(/\/+$/,''); } // keep host only
+}
+function syncUrl(cfg){ return `${normalizeDbUrl(cfg.url)}/rooms/${encodeURIComponent(cfg.room||'')}.json${cfg.auth?('?auth='+encodeURIComponent(cfg.auth)):''}`; }
 function setSyncDot(color,title){ const d=$('#syncDot'); if(d){ d.style.background=color; d.parentElement.title=title||'סנכרון צוותי'; } }
 
 function connectSync(){
@@ -1665,7 +1721,7 @@ $('#btnSync').onclick=()=>{
 };
 function buildShareLink(url,room){
   const base=location.origin+location.pathname;
-  return base+'#room='+encodeURIComponent(room)+'&db='+encodeURIComponent(url);
+  return base+'#room='+encodeURIComponent(room)+'&db='+encodeURIComponent(normalizeDbUrl(url));
 }
 window.copyShareLink=()=>{
   const cfg=getSyncCfg()||{};
@@ -1688,7 +1744,7 @@ function applyShareLink(){
     const params=new URLSearchParams(h.replace(/^#/,''));
     const db=params.get('db'), room=params.get('room');
     if(db&&room){ const existing=getSyncCfg()||{};
-      setSyncCfg({url:db, room:room, name:existing.name||'', auth:existing.auth||''});
+      setSyncCfg({url:normalizeDbUrl(db), room:room, name:existing.name||'', auth:existing.auth||''});
       try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){ location.hash=''; } // clean the URL
       return true;
     }
@@ -1696,15 +1752,26 @@ function applyShareLink(){
   return false;
 }
 window.saveSyncCfg=()=>{
-  const cfg={url:$('#syncUrl').value.trim(), room:$('#syncRoom').value.trim(), name:$('#syncName').value.trim(), auth:$('#syncAuth').value.trim()};
+  const url=normalizeDbUrl($('#syncUrl').value);
+  const cfg={url, room:$('#syncRoom').value.trim(), name:$('#syncName').value.trim(), auth:$('#syncAuth').value.trim()};
   if(!cfg.url||!cfg.room){ toast('נדרשים URL וקוד חדר','r'); return; }
+  if(!/firebaseio\.com$|firebasedatabase\.app$/i.test(url)){
+    toast('כתובת לא נראית כמו Realtime Database (צריכה להסתיים ב-firebaseio.com או firebasedatabase.app)','r'); return;
+  }
   setSyncCfg(cfg); closeModal();
   // pull existing room state first, then connect + push if room empty
-  fetch(syncUrl(cfg)).then(r=>r.json()).then(d=>{
+  fetch(syncUrl(cfg)).then(r=>{
+    if(!r.ok) throw new Error('סטטוס '+r.status+' — בדוק את חוקי ה-Database (Rules: read/write=true)');
+    return r.json();
+  }).then(d=>{
     if(d&&d.quarters){ applyRemote(d); toast('התחבר — מצב הצוות נטען ✓','g'); }
     else { connectSync(); pushSync(); toast('התחבר — חדר חדש נוצר ✓','g'); return; }
     connectSync();
-  }).catch(e=>{ toast('שגיאת חיבור: '+e.message,'r'); setSyncDot('var(--red)','שגיאה'); });
+  }).catch(e=>{
+    const net=/failed to fetch|networkerror|load failed/i.test(e.message);
+    toast('שגיאת חיבור: '+(net?'לא ניתן להגיע לכתובת. ודא https://, שזו Realtime Database, ושאין חוסם פרסומות':e.message),'r');
+    setSyncDot('var(--red)','שגיאה');
+  });
 };
 window.disconnectSyncUI=()=>{ disconnectSync(); setSyncCfg(null); setSyncDot('var(--muted2)','לא מחובר'); closeModal(); toast('הסנכרון נותק'); };
 
