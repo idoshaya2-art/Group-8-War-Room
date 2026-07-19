@@ -549,7 +549,7 @@ PAGE_RENDER.dashboard = (c)=>{
 function autoBriefing(q){
   const Q=S.quarters[q], out=[]; const cash=unifiedCashOf(q);
   const prevQ=qIndex(q)>0?QUARTERS[qIndex(q)-1]:null;
-  out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> (שווי-USD מוערך).`);
+  out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> ${Q.financial.consolidated?'(מאוחד מהדוח, CHF)':'(שווי-USD מוערך)'}.`);
   if(prevQ&&S.quarters[prevQ].entered){ const d=cash-unifiedCashOf(prevQ);
     out.push(`שינוי מול ${prevQ}: <b class="num">${d>=0?'+':''}${fmt(d)}</b> ${d>=0?IC('trendUp'):IC('trendDown')}.`); }
   const reds=computeAlerts(q).filter(a=>a.level==='red');
@@ -997,10 +997,45 @@ PAGE_RENDER.intel = (c)=>{
     ${comps.length? renderCompetitors(comps,fmtK) : `<div class="card"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}
     ${renderMarketShare(mi)}
     <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--purple)">
-      <div class="between"><h3>${IC('search')} ממליץ MR</h3><span class="tag b">F5.3</span></div>
-      <div class="small muted" style="margin:8px 0">MR74/17/28 חינמיים — נצל תמיד. ${IC('lock')} MR17&28 מראה יחידות <u>שנמכרו</u> בפועל, לא רמות טכנולוגיה. לרמות טכנולוגיה של מתחרים — רכוש מחקר ייעודי לפני החלטת מו״פ.</div>
+      <div class="between"><h3>${IC('search')} תובנות והמלצות מודיעין</h3><span class="tag b">F5.3</span></div>
+      ${comps.length? `<ul style="padding-inline-start:20px;line-height:1.9;margin:10px 0 0">${intelInsights(comps,mi).map(i=>`<li>${i}</li>`).join('')}</ul>`
+        : `<div class="small muted" style="margin:8px 0">קלוט דוח עם MR 74 כדי לקבל תובנות מבוססות-נתונים על המתחרים.</div>`}
     </div>`;
 };
+/* Data-driven competitive insights + MR purchase recommendations from MR74/MR17&28. */
+function intelInsights(comps,mi){
+  const out=[]; const us=comps.find(c=>c.num===OUR_CO); if(!us) return out;
+  const sorted=(key,dir=1)=>[...comps].filter(c=>c[key]!=null).sort((a,b)=>(b[key]-a[key])*dir);
+  const rankOf=(arr)=>arr.findIndex(c=>c.num===OUR_CO)+1;
+  const n=comps.length;
+  // Retained earnings position (= 50% of final score)
+  const reRank=rankOf(sorted('retainedEarnings')); const reLeader=sorted('retainedEarnings')[0];
+  out.push(`ברווחים צבורים אנחנו במקום <b>${reRank}/${n}</b> (המוביל: חברה ${reLeader.num} עם ${fmt(reLeader.retainedEarnings)}). זה 50% מהציון הסופי — ${reRank>n/2?'<span style="color:var(--amber)">פער לסגור: להאיץ מכירות ורווחיות</span>':'עמדה טובה, לשמר'}.`);
+  // Cash war-chest
+  const cashRank=rankOf(sorted('cash'));
+  out.push(`במזומן אנחנו במקום <b>${cashRank}/${n}</b> (${fmt(us.cash)}) — ${cashRank<=3?'יתרון להשקעה אגרסיבית בייצור/פרסום כשמתחילות המכירות':'לשמור על נזילות מול הרצפות'}.`);
+  // R&D pressure by product
+  const rdChipLeaders=sorted('rdChip').filter(c=>c.num!==OUR_CO && c.rdChip>0).slice(0,2);
+  const rdPcLeaders=sorted('rdPc').filter(c=>c.num!==OUR_CO && c.rdPc>0).slice(0,2);
+  if(rdChipLeaders.length) out.push(`לחץ טכנולוגי ב-<b>Chip</b>: חברות ${rdChipLeaders.map(c=>c.num+' ('+fmt(c.rdChip)+')').join(', ')} משקיעות במו״פ Chip — שקול להדביק כדי לא לפגר בדרגה.`);
+  if(rdPcLeaders.length) out.push(`לחץ טכנולוגי ב-<b>Computer</b>: חברות ${rdPcLeaders.map(c=>c.num+' ('+fmt(c.rdPc)+')').join(', ')} משקיעות במו״פ Computer.`);
+  // Our own R&D vs field
+  const avgRd=comps.reduce((a,c)=>a+((c.rdChip||0)+(c.rdPc||0)),0)/n; const ourRd=(us.rdChip||0)+(us.rdPc||0);
+  out.push(`מו״פ שלנו ${fmt(ourRd)} מול ממוצע השוק ${fmt(Math.round(avgRd))} — ${ourRd>=avgRd?'מעל הממוצע, שומר על קצב טכנולוגי':'<span style="color:var(--amber)">מתחת לממוצע — סיכון לפיגור בדרגה</span>'}.`);
+  // Aggressive intel gatherers
+  const mrLeaders=sorted('marketResearch').filter(c=>c.num!==OUR_CO && c.marketResearch>0).slice(0,2);
+  if(mrLeaders.length) out.push(`חברות ${mrLeaders.map(c=>c.num).join(', ')} רוכשות הכי הרבה מחקרי שוק — הן אוספות עלינו מודיעין; שמור על גמישות ואל תשדר כוונות.`);
+  // Debt exposure of rivals (opportunity)
+  const highDebt=sorted('bankLoans').filter(c=>c.num!==OUR_CO).slice(0,1)[0];
+  if(highDebt&&highDebt.bankLoans>us.bankLoans*1.5) out.push(`חברה ${highDebt.num} ממונפת מאוד (הלוואות ${fmt(highDebt.bankLoans)}) — פגיעה לתחרות מחירים אם נלחץ.`);
+  // Market share (if sales exist)
+  if((mi.sales||[]).length){ const byCo={}; mi.sales.forEach(s=>byCo[s.company]=(byCo[s.company]||0)+s.units);
+    const total=Object.values(byCo).reduce((a,b)=>a+b,0)||1; const ourShare=(byCo[OUR_CO]||0)/total*100;
+    out.push(`נתח השוק שלנו ${ourShare.toFixed(1)}% — ${ourShare<10?'<span style="color:var(--red)">נמוך, בחן מחיר/פרסום</span>':'מבוסס'}.`);
+  } else { out.push(`אין עדיין נתוני מכירות (MR17&28) — נצל את החלון להיערכות לפני שהמתחרים תופסים שוק.`); }
+  out.push(`${IC('lock')} הבחנה: MR17&28 מראה יחידות <u>שנמכרו</u>, לא דרגות טכנולוגיה. לדרגות מתחרים — רכוש מחקר ייעודי לפני החלטת מו״פ גדולה.`);
+  return out;
+}
 function renderCompetitors(comps,fmtK){
   const rank=(key,dir=1)=>{ const s=[...comps].filter(c=>c[key]!=null).sort((a,b)=>(b[key]-a[key])*dir); return s; };
   const cashRank=rank('cash'); const reRank=rank('retainedEarnings');
@@ -1321,8 +1356,8 @@ function goalTab(t){
   if(t==='max'){
     const base=S.activeQuarter, op=S.quarters[base].operational;
     const ready=S.quarters[base].entered;
-    const cap=op.maxProducible||0;
     const invCost=op.inventory.length?(op.inventory.reduce((a,i)=>a+(i.cost||0),0)/op.inventory.length):0;
+    const defRd=op.rd||0;
     body.innerHTML=`
     <div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--amber)">
       <div class="between"><h3>${IC('zap')} MAX — מיקסום תוצאת סיום Q9</h3><span class="tag a">אופטימיזציה</span></div>
@@ -1337,12 +1372,13 @@ function goalTab(t){
         <div class="ch"><h3>אילוצים ותשומות</h3></div>
         <div class="cb">
           <div class="row" style="gap:10px">
-            <div class="field" style="flex:1"><label class="fl">קיבולת ייצור (Max Producible)</label><input class="f" type="number" id="maxCap" value="${cap}" placeholder="הזן קיבולת"></div>
-            <div class="field" style="flex:1"><label class="fl">עלות יח׳ ממוצעת</label><input class="f" type="number" id="maxCost" value="${Math.round(invCost)||''}" placeholder="מהמלאי"></div>
+            <div class="field" style="flex:1"><label class="fl">קיבולת ייצור (יח׳/רבעון)</label><input class="f" type="number" id="maxCap" value="" placeholder="למשל 10000"></div>
+            <div class="field" style="flex:1"><label class="fl">עלות יח׳ ממוצעת</label><input class="f" type="number" id="maxCost" value="${Math.round(invCost)||''}" placeholder="למשל 10"></div>
           </div>
+          <div class="field"><label class="fl">מו״פ לרבעון (לפי יעדי הטכנולוגיה)</label><input class="f" type="number" id="maxRd" value="${defRd}" placeholder="0"></div>
           <div class="small muted" style="line-height:1.7">
-            רצפות מזומן ושערי מטבע נלקחים מהקונפיגורציה. הנחת מודל: נמכרת מלוא הקיבולת המיוצרת
-            (חסם עליון תכנוני — לא תחזית ביקוש מכוילת). שנֵה כאן להרצת תרחישי קיבולת שונים.
+            <b>קיבולת = יחידות לרבעון</b> (לא "Max Producible Grade" מהדוח — זו רמת דרגה, לא כמות). המנוע מניח מכירת מלוא הקיבולת (חסם עליון תכנוני, לא תחזית ביקוש).
+            <b>מו״פ אינו ממוקסם</b> כי המנוע אינו ממדל את תשואת המו״פ — קבע אותו לפי יעדי הדרגה שלך (ברירת המחדל = המו״פ הנוכחי שלך). רצפות ושערים מהקונפיגורציה.
           </div>
           <button class="btn primary" style="margin-top:8px" onclick="runMaxOptimizer()">${IC('zap')} הרץ מיקסום</button>
         </div>
@@ -1356,27 +1392,28 @@ function goalTab(t){
 }
 window.runMaxOptimizer=()=>{
   const base=S.activeQuarter, op=S.quarters[base].operational;
-  const cap=parseFloat(($('#maxCap')||{}).value)||op.maxProducible||0;
+  const cap=parseFloat(($('#maxCap')||{}).value)||0;
   let cost=parseFloat(($('#maxCost')||{}).value)||0;
   if(!cost){ cost=op.inventory.length?(op.inventory.reduce((a,i)=>a+(i.cost||0),0)/op.inventory.length):0; }
+  const rd=Math.max(0, parseFloat(($('#maxRd')||{}).value)||0); // fixed R&D per quarter (strategy, not optimized)
   const box=$('#maxResult');
-  if(!cap||!cost){ box.innerHTML=`<div class="tag a">${IC('warn')} נדרשים קיבולת ועלות יח׳ להרצת מיקסום.</div>`; return; }
+  if(!cap||!cost){ box.innerHTML=`<div class="tag a">${IC('warn')} נדרשים קיבולת (יח׳/רבעון) ועלות יח׳ להרצת מיקסום.</div>`; return; }
   const qs=nextQuarters(base).slice(0,6);
   if(!qs.length){ box.innerHTML=`<div class="tag a">${IC('warn')} אין רבעונים עתידיים (${base} הוא הסוף).</div>`; return; }
-  const prodFracs=[1.0,0.9,0.8,0.65], margins=[1.3,1.6,2.0,2.5,3.0], rdOpts=[0, Math.round(cost*cap*0.04)];
+  const prodFracs=[1.0,0.9,0.8,0.65], margins=[1.3,1.6,2.0,2.5,3.0];
   let best=null;
-  prodFracs.forEach(pf=> margins.forEach(mg=> rdOpts.forEach(rd=>{
+  prodFracs.forEach(pf=> margins.forEach(mg=>{
     const production=Math.round(cap*pf), price=cost*mg;
     const levers={};
     qs.forEach(q=>{ levers[q]={rd,regions:{}};
-      REGIONS.forEach(r=>{ const prod=Math.round(production/REGIONS.length);
+      REGIONS.forEach(r=>{ const prod=r.id==='hq'?0:Math.round(production/3); // HQ doesn't sell; split across 3 markets
         levers[q].regions[r.id]={production:prod,unitCost:cost,sales:prod*price,advertising:Math.round(prod*price*0.06),invest:0,transferIn:0}; }); });
     const sp=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
     const cand={levers,feasible,endCash:sp.endCash,score:sp.value,pf,mg,rd,minDist:Math.min(...proj.map(p=>p.distance))};
     if(!best){ best=cand; return; }
     const better=(cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash)));
     if(better) best=cand;
-  })));
+  }));
   const name='MAX — מיקסום Q9';
   let sc=S.scenarios.find(s=>s.name===name);
   if(!sc){ sc={id:uid(),name,base,levers:{},createdAt:Date.now()}; S.scenarios.push(sc); }
