@@ -113,6 +113,30 @@ table.tbl td{padding:8px 10px;border-bottom:1px solid var(--line)}
 table.tbl tr:hover td{background:rgba(255,255,255,.02)}
 table.tbl input.f{padding:5px 7px}
 td.num,th.num{display:table-cell}  /* .num must not turn table cells into inline-blocks (breaks column layout) */
+.qstrip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.qcell{flex:1;min-width:92px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer;transition:.15s;position:relative}
+.qcell:hover{border-color:var(--accent)}
+.qcell.on{border-color:var(--line2)}
+.qcell.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.qcell .qn{font-family:'Rubik';font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px}
+.qcell .qv{font-size:12px;color:var(--muted);margin-top:3px}
+.qcell.empty{opacity:.55;border-style:dashed}
+.qcell .qdot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.qcell.empty .qdot{background:var(--muted2)}
+.finrow{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.finrow:last-child{border-bottom:0}
+.finrow b{font-variant-numeric:tabular-nums}
+.finrow.tot{border-top:2px solid var(--line2);font-weight:800;margin-top:4px}
+.act{display:flex;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid var(--line);border-inline-start:4px solid;margin-bottom:12px;background:var(--panel)}
+.act.red{border-inline-start-color:var(--red);background:linear-gradient(90deg,var(--redbg),var(--panel))}
+.act.amber{border-inline-start-color:var(--amber);background:linear-gradient(90deg,var(--amberbg),var(--panel))}
+.act.info{border-inline-start-color:var(--accent)}
+.act.good{border-inline-start-color:var(--green)}
+.act .an{width:26px;height:26px;border-radius:7px;background:var(--panel2);display:grid;place-items:center;font-weight:800;font-size:13px;flex-shrink:0;font-family:'Rubik'}
+.act .at{flex:1}
+.act .at b{font-size:14.5px}
+.act .at p{margin:5px 0 0;color:var(--muted);font-size:13.5px;line-height:1.55}
+.act .form{display:inline-flex;align-items:center;gap:5px;margin-top:7px;background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:3px 9px;font-size:12px;font-weight:700;color:var(--accent2)}
 table.tbl.wide td,table.tbl.wide th{white-space:nowrap;font-size:12px;padding:5px 8px}
 .scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .scrollx::-webkit-scrollbar{height:8px}
@@ -266,6 +290,7 @@ function emptyQuarter(){
     financial:{
       cash:{}, consolidated:0, retainedEarnings:0, netProfit:0, revenue:0, grossMargin:0, roe:0, roi:0, ros:0,
       ap:0, ar:0, supplierCredit:0, loans:0, securities:0,
+      netPlant:0, totalAssets:0, commonStock:0, totalEquity:0, interestExp:0, marketResearch:0,
     },
     operational:{ inventory:[], techX:0, techY:0, maxProducible:0, factories:0, offices:0, rd:0 },
     marketIntel:{ competitors:{}, sales:[], sources:[], generic:[] },
@@ -382,15 +407,17 @@ function IC(name,cls=''){ const p=ICONS[name]||''; return `<svg class="ic-svg ${
 
 /* ---------- Navigation ---------- */
 const PAGES = [
-  {id:'dashboard', ic:'dashboard', name:'דשבורד',   sub:'תמונת מצב, נורות ומגמות', sec:'ניתוח'},
-  {id:'ingest',    ic:'inbox',     name:'קליטת דוח', sub:'העלאה, חילוץ ואימות נתונים', sec:'ניתוח'},
-  {id:'cashflow',  ic:'lineChart', name:'תזרים',     sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'ניתוח'},
-  {id:'intel',     ic:'search',    name:'מודיעין',   sub:'מתחרים, מגמות והמלצות MR', sec:'ניתוח'},
-  {id:'ai',        ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'החלטה'},
-  {id:'sim',       ic:'sliders',   name:'סימולטור',  sub:'תרחישים, מנופים והשוואה', sec:'החלטה'},
-  {id:'export',    ic:'share',     name:'ייצוא הזנה', sub:'גיליון הזנה + צ׳ק-ליסט הגשה', sec:'החלטה'},
-  {id:'journal',   ic:'book',      name:'יומן החלטות', sub:'החלטות, רציונל ומאשרים', sec:'החלטה'},
-  {id:'goals',     ic:'target',    name:'יעדים',     sub:'רצפות, חוזים ופרמטרי מודל', sec:'קונפיגורציה'},
+  {id:'dashboard',  ic:'dashboard', name:'דשבורד',    sub:'תמונת מצב, נורות ומגמות', sec:'ניתוח'},
+  {id:'ingest',     ic:'inbox',     name:'קליטת דוח',  sub:'העלאה, חילוץ ואימות נתונים', sec:'ניתוח'},
+  {id:'financials', ic:'landmark',  name:'מצב פיננסי', sub:'רו״ה, מאזן ויחסים — תמונה מלאה', sec:'ניתוח'},
+  {id:'cashflow',   ic:'lineChart', name:'תזרים',      sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'ניתוח'},
+  {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מגמות והמלצות MR', sec:'ניתוח'},
+  {id:'plan',       ic:'clipboard', name:'תוכנית פעולה', sub:'מה לעשות ברבעון הקרוב + איך להזין', sec:'החלטה'},
+  {id:'ai',         ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'החלטה'},
+  {id:'sim',        ic:'sliders',   name:'סימולטור',   sub:'תרחישים, מנופים והשוואה', sec:'החלטה'},
+  {id:'export',     ic:'share',     name:'ייצוא הזנה',  sub:'גיליון הזנה + צ׳ק-ליסט הגשה', sec:'החלטה'},
+  {id:'journal',    ic:'book',      name:'יומן החלטות', sub:'החלטות, רציונל ומאשרים', sec:'החלטה'},
+  {id:'goals',      ic:'target',    name:'יעדים',      sub:'רצפות, חוזים ופרמטרי מודל', sec:'קונפיגורציה'},
 ];
 let currentPage='dashboard';
 function renderNav(){
@@ -508,11 +535,21 @@ function activeAlerts(){ return computeAlerts(S.activeQuarter); }
 const PAGE_RENDER = {};
 
 /* ----- DASHBOARD (F3) ----- */
+function quartersStrip(){
+  const ent=enteredQuarters();
+  return `<div class="qstrip">${QUARTERS.map(q=>{ const on=S.quarters[q].entered; const act=!S.cumulative&&q===S.activeQuarter;
+    return `<div class="qcell ${on?'on':'empty'} ${act?'active':''}" onclick="pickQuarter('${q}')">
+      <div class="qn"><span class="qdot"></span>${q}</div>
+      <div class="qv">${on?fmt(unifiedCashOf(q)):'לא נקלט'}</div></div>`; }).join('')}</div>
+    <div class="small muted" style="margin:-8px 0 16px">${ent.length} מתוך 9 רבעונים נקלטו${ent.length?` (${ent.join(', ')})`:''} · לחץ רבעון למעבר</div>`;
+}
+window.pickQuarter=(q)=>{ S.cumulative=false; S.activeQuarter=q; save(); renderQuarterSelect(); go(currentPage); };
+
 PAGE_RENDER.dashboard = (c)=>{
   if(S.cumulative){ renderCumulativeDashboard(c); return; }
   const q=S.activeQuarter, Q=S.quarters[q];
   if(!Q.entered){
-    c.innerHTML=emptyBlock(IC('inbox'),'רבעון '+q+' עדיין ריק','העלה את דוח התוצאות הרבעוני כדי לראות תמונת מצב, נורות ומגמות.',
+    c.innerHTML=quartersStrip()+emptyBlock(IC('inbox'),'רבעון '+q+' עדיין ריק','העלה את דוח התוצאות הרבעוני כדי לראות תמונת מצב, נורות ומגמות. הרצועה למעלה מראה אילו רבעונים כבר נקלטו.',
       `<button class="btn primary" onclick="go('ingest')">מעבר לקליטת דוח</button>`); return;
   }
   const fin=Q.financial, op=Q.operational;
@@ -520,7 +557,7 @@ PAGE_RENDER.dashboard = (c)=>{
   const cashNow=unifiedCashOf(q);
   const cashPrev=(prevQ&&S.quarters[prevQ].entered)?unifiedCashOf(prevQ):null;
   const brief=autoBriefing(q);
-  c.innerHTML=`
+  c.innerHTML=quartersStrip()+`
     <div class="card pad" style="margin-bottom:18px;border-inline-start:4px solid var(--accent)">
       <div class="between"><h3>${IC('clipboard')} תדריך פתיחה — ${q}</h3><span class="tag b">נוצר מהנתונים</span></div>
       <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">${brief.map(b=>`<li>${b}</li>`).join('')}</ul>
@@ -678,6 +715,155 @@ function lineChart(cv,{labels,series}){
 }
 function shortNum(v){ const a=Math.abs(v); if(a>=1e6)return (v/1e6).toFixed(1)+'M'; if(a>=1e3)return (v/1e3).toFixed(0)+'K'; return fmt(v); }
 
+/* ----- FINANCIAL POSITION (full picture: P&L + Balance + Ratios) ----- */
+PAGE_RENDER.financials = (c)=>{
+  const q = (S.cumulative?latestEntered():S.activeQuarter) || S.activeQuarter;
+  if(!q || !S.quarters[q].entered){
+    c.innerHTML=quartersStrip()+emptyBlock(IC('landmark'),'אין נתונים פיננסיים','קלוט דוח רבעוני כדי לראות את התמונה הפיננסית המלאה — רו״ה, מאזן ויחסים.',
+      `<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return;
+  }
+  const f=S.quarters[q].financial, op=S.quarters[q].operational;
+  const invVal=inventoryValue(q);
+  const cogs=(f.revenue||0)-(f.grossMargin||0);
+  const equity=f.totalEquity || ((f.commonStock||0)+(f.retainedEarnings||0));
+  const assets=f.totalAssets || ((f.consolidated||0)+(f.securities||0)+invVal+(f.netPlant||0));
+  const liab=(f.loans||0)+(f.ap||0)+(f.supplierCredit||0);
+  const nMargin=f.revenue>0? f.netProfit/f.revenue*100 : null;
+  const roe=f.roe|| (equity>0? f.netProfit/equity*100 : null);
+  const roa=assets>0? f.netProfit/assets*100 : null;
+  const debtRatio=assets>0? liab/assets*100 : null;
+  const row=(label,val,strong)=>`<div class="finrow ${strong?'tot':''}"><span>${label}</span><b class="num" style="${val<0?'color:var(--red)':''}">${fmt(val)}</b></div>`;
+  const ent=enteredQuarters();
+  c.innerHTML=quartersStrip()+`
+    <div class="between" style="margin-bottom:14px"><div class="small muted">מצב פיננסי מלא — רבעון <b>${q}</b> · ב-CHF (שווי-פרנק מהדוח)</div></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr 1fr;align-items:start">
+      <div class="card"><div class="ch"><h3>${IC('lineChart')} רווח והפסד</h3></div><div class="cb">
+        ${row('מחזור (מכירות צרכן)',f.revenue)}
+        ${row('עלות המכר',-Math.abs(cogs))}
+        ${row('רווח גולמי',f.grossMargin,true)}
+        ${row('מו״פ (Chip+Computer)',-(op.rd||0))}
+        ${row('מחקרי שוק',-(f.marketResearch||0))}
+        ${row('הוצאות ריבית',-(f.interestExp||0))}
+        ${row('רווח נקי',f.netProfit,true)}
+        <div class="small muted" style="margin-top:8px">${f.revenue>0?`שולי רווח נקי: <b>${nMargin.toFixed(1)}%</b>`:'טרם החלו מכירות — המחזור 0. ראה "תוכנית פעולה".'}</div>
+      </div></div>
+      <div class="card"><div class="ch"><h3>${IC('landmark')} מאזן</h3></div><div class="cb">
+        <div class="small muted" style="margin-bottom:4px">נכסים</div>
+        ${row('מזומן מאוחד',f.consolidated||unifiedCashOf(q))}
+        ${row('ני״ע',f.securities)}
+        ${row('מלאי',invVal)}
+        ${row('רכוש קבוע (מפעלים)',f.netPlant)}
+        ${row('סה״כ נכסים',assets,true)}
+        <div class="small muted" style="margin:10px 0 4px">התחייבויות והון</div>
+        ${row('הלוואות בנק',f.loans)}
+        ${row('ספקים (A/P)',f.ap)}
+        ${row('אשראי ספקים',f.supplierCredit)}
+        ${row('הון עצמי',equity,true)}
+      </div></div>
+      <div class="card"><div class="ch"><h3>${IC('target')} יחסים ומדדים</h3></div><div class="cb">
+        <div class="kpis" style="grid-template-columns:1fr 1fr">
+          ${kpi('ROE',roe!=null?roe.toFixed(1)+'%':'—','')}
+          ${kpi('ROA',roa!=null?roa.toFixed(1)+'%':'—','')}
+          ${kpi('שולי רווח',nMargin!=null?nMargin.toFixed(1)+'%':'—','')}
+          ${kpi('יחס חוב/נכסים',debtRatio!=null?debtRatio.toFixed(1)+'%':'—','')}
+        </div>
+        <div class="small muted" style="margin-top:12px">רמות טכנולוגיה: <b>Chip ${op.techX} / Computer ${op.techY}</b> · מפעלים ${op.factories} · מו״פ מצטבר עד כה: ${fmt(ent.reduce((a,x)=>a+(S.quarters[x].operational.rd||0),0))}</div>
+      </div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="ch"><h3>${IC('wallet')} מזומן לפי אזור — ${q}</h3></div>
+      <div class="cb" style="overflow-x:auto"><table class="tbl wide"><thead><tr>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד (CHF)</th></tr></thead>
+      <tbody><tr>${REGIONS.map(r=>`<td class="num" style="${(f.cash[r.id]||0)<0?'color:var(--red)':''}">${fmt(f.cash[r.id]||0)} ${r.cur}</td>`).join('')}<td class="num"><b>${fmt(f.consolidated||unifiedCashOf(q))}</b></td></tr></tbody></table></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="ch"><h3>${IC('clipboard')} השוואה רבעונית</h3><span class="small muted">כל הרבעונים שנקלטו</span></div>
+      <div class="cb" style="overflow-x:auto"><table class="tbl wide"><thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>מחזור</th><th>רווח גולמי</th><th>רווח נקי</th><th>מו״פ</th><th>חוב</th><th>רווחים צבורים</th><th>Chip/Comp</th></tr></thead>
+      <tbody>${ent.map(x=>{ const ff=S.quarters[x].financial, oo=S.quarters[x].operational; return `<tr><td><b>${x}</b></td>
+        <td class="num">${fmt(unifiedCashOf(x))}</td><td class="num">${fmt(ff.revenue)}</td><td class="num">${fmt(ff.grossMargin)}</td>
+        <td class="num" style="${ff.netProfit<0?'color:var(--red)':''}">${fmt(ff.netProfit)}</td><td class="num">${fmt(oo.rd)}</td><td class="num">${fmt(ff.loans)}</td>
+        <td class="num" style="${ff.retainedEarnings<0?'color:var(--red)':''}">${fmt(ff.retainedEarnings)}</td><td class="num">${oo.techX}/${oo.techY}</td></tr>`; }).join('')}</tbody></table></div>
+    </div>`;
+};
+
+/* ----- ACTION PLAN (practical: what to do next quarter + how to enter it) ----- */
+PAGE_RENDER.plan = (c)=>{
+  const q=S.activeQuarter, Q=S.quarters[q];
+  if(!Q.entered){ c.innerHTML=quartersStrip()+emptyBlock(IC('clipboard'),'אין בסיס לתוכנית','קלוט רבעון כדי לקבל תוכנית פעולה מעשית לרבעון הבא.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
+  const targetQ=nextQuarters(q)[0]||q;
+  const items=buildActionPlan(q,targetQ);
+  const reds=items.filter(i=>i.level==='red').length;
+  c.innerHTML=`
+    <div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--accent)">
+      <div class="between"><h3>${IC('clipboard')} תוכנית פעולה ל-${targetQ}</h3><span class="tag ${reds?'r':'b'}">${items.length} פעולות${reds?` · ${reds} דחופות`:''}</span></div>
+      <div class="small muted" style="margin-top:6px">מבוסס על נתוני ${q}, ההקרנה, המודיעין והיעדים. כל פעולה מציינת <b>מה לעשות</b>, <b>למה</b>, ו<b>איזה טופס להזין</b> (H=ייצור · A=מחיר/פרסום · W=מו״פ/מימון/העברות).</div>
+    </div>
+    ${items.map((it,i)=>`<div class="act ${it.level}">
+      <div class="an">${i+1}</div>
+      <div class="at"><b>${it.title}</b><p>${it.detail}</p>
+        ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
+        ${it.action?`<button class="btn sm" style="margin-top:8px;margin-inline-start:8px" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
+      </div></div>`).join('')}
+    <div class="card pad" style="margin-top:6px"><div class="small muted">אחרי שתחליט: הרץ את התרחיש ב<b>סימולטור</b>, ייצא <b>גיליון הזנה</b> ל-${targetQ}, ותעד ב<b>יומן ההחלטות</b>.</div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('zap')} מיקסום Q9</button></div>
+    </div>`;
+};
+function buildActionPlan(q,targetQ){
+  const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals, out=[];
+  const proj=projectCashflow(q,null); const brk=proj.find(x=>x.breach);
+  const mi=Q.marketIntel; const comps=Object.values(mi.competitors||{});
+  const us=comps.find(x=>x.num===OUR_CO);
+  // 1. Cash floor risk
+  if(brk) out.push({level:'red',title:'סכנת שבירת רצפת מזומן',form:'W3 (מימון/הלוואה)',
+    detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`});
+  // 2. Negative currency
+  REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0) out.push({level:'red',title:`גירעון מטבע — ${r.name}`,form:'W2 (העברות בין-אזוריות)',
+    detail:`יתרה שלילית ${fmt(f.cash[r.id])} ${r.cur}. העבר מזומן מאזור עודף או צמצם פעילות באזור זה לפני ההזנה.`}); });
+  // 3. No sales yet -> start selling
+  if((f.revenue||0)===0){
+    out.push({level:'amber',title:'עדיין לא מוכרים — התחל לייצר הכנסה',form:'H1–H3 (ייצור) + A1–A3 (מחיר/פרסום)',
+      detail:`המחזור ב-${q} הוא 0 בעוד המזומן נשחק (רווח נקי ${fmt(f.netProfit)}). ב-${targetQ} הזן <b>ייצור</b> לכל אזור (טפסי H) ו<b>מחיר+פרסום</b> (טפסי A). הרץ קודם בסימולטור כדי לוודא שהרצפות נשמרות.`,
+      action:"go('sim')",actionLabel:'תכנן בסימולטור'});
+  }
+  // 4. Net loss burn
+  if((f.netProfit||0)<0 && (f.revenue||0)===0){ const avgLoss=Math.abs(f.netProfit);
+    out.push({level:'info',title:'קצב שריפת מזומן',
+      detail:`הפסד נקי של כ-<b>${fmt(avgLoss)}</b> ברבעון (בעיקר מו״פ ${fmt(op.rd)}). זו השקעה בעתיד — אבל בלי מכירות היא לא מחזירה. תזמן את תחילת המכירות מול יתרת המזומן.`});
+  }
+  // 5. Retained-earnings rank (50% of final score)
+  if(comps.length && us){ const sorted=[...comps].filter(x=>x.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
+    const rank=sorted.findIndex(x=>x.num===OUR_CO)+1;
+    if(rank>comps.length/2) out.push({level:'amber',title:`ברווחים צבורים אתה #${rank}/${comps.length} — עדיפות עליונה`,
+      detail:`רווחים צבורים = 50% מהציון הסופי, ואתה בחצי התחתון (המוביל: חברה ${sorted[0].num}). כל רבעון בלי רווח מגדיל את הפער. זו הסיבה המרכזית להתחיל למכור ברווחיות.`,action:"go('intel')",actionLabel:'למודיעין'});
+  }
+  // 6. R&D vs competitors
+  if(comps.length){ const chipLeaders=[...comps].filter(x=>x.num!==OUR_CO&&x.rdChip>0).sort((a,b)=>b.rdChip-a.rdChip).slice(0,2);
+    const ourRd=(op.rd||0), avgRd=comps.reduce((a,x)=>a+((x.rdChip||0)+(x.rdPc||0)),0)/comps.length*1000; // MR74 in 000s
+    if(chipLeaders.length) out.push({level:'info',title:'לחץ טכנולוגי — החלטת מו״פ',form:'W1 (מו״פ)',
+      detail:`חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות בהשקעת מו״פ ב-Chip. ${ourRd>=avgRd?'אתה מעל ממוצע השוק — שמור על הקצב':'אתה מתחת לממוצע — סיכון לפיגור בדרגה'}. החלט על מו״פ ל-${targetQ} בטופס W1.`});
+  }
+  // 7. Tech targets
+  if(g.techXTarget>op.techX || g.techYTarget>op.techY) out.push({level:'info',title:'פער מול יעד הדרגה',form:'W1 (מו״פ)',
+    detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, היעד ${g.techXTarget}/${g.techYTarget}. כדי למכור דרגות גבוהות יותר (מרווח גבוה) — השקע במו״פ עד להשגת הדרגה.`});
+  // 8. Contracts at risk
+  S.config.contracts.forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
+    const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
+    if(inv<(ct.qty||0)) out.push({level:'amber',title:`חוזה בסיכון — ${ct.counterparty||'צד נגדי'}`,form:'H (ייצור)',
+      detail:`התחייבת ל-${ct.qty} × ${ct.product||'—'} עד ${ct.deliveryQuarter}, במלאי ${inv} בלבד. תזמן ייצור בטפסי H כדי לעמוד באספקה.`}); } });
+  // 9. Debt
+  if((f.loans||0)>0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2) out.push({level:'info',title:'שקול פירעון חוב',form:'W3 (מימון)',
+    detail:`יש חוב ${fmt(f.loans)} וריבית שוטפת. עם עודף מזומן נוכחי, פירעון חלקי חוסך ריבית ומשפר יחסים — אם אין שימוש טוב יותר למזומן.`});
+  // 10. MAX plan reference
+  const maxSc=S.scenarios.find(s=>s.name==='MAX — מיקסום Q9');
+  if(maxSc){ const sp=scoreProxy(maxSc.levers);
+    out.push({level:'good',title:'תוכנית המיקסום מוכנה',form:'ייצוא הזנה',
+      detail:`חושבה תוכנית מיטבית ל-Q9 (מזומן סופי מוקרן ${fmt(sp.endCash)}, פרוקסי ציון ${sp.value.toFixed(0)}). פתח אותה בסימולטור, כוונן, וייצא גיליון הזנה ל-${targetQ}.`,action:"go('export')",actionLabel:'ייצא הזנה'});
+  } else out.push({level:'info',title:'הרץ מיקסום Q9',form:'—',
+    detail:`טרם חושבה תוכנית מיטבית. עבור ל<b>יעדים ← MAX</b>, הזן קיבולת ועלות יח׳, וקבל המלצת ייצור/מחיר/מו״פ שממקסמת את הציון בלי לשבור רצפות.`,action:"go('goals')",actionLabel:'למיקסום'});
+  if(!out.length) out.push({level:'good',title:'המצב יציב — המשך התוכנית',detail:'אין נורות אדומות והרצפות נשמרות. המשך לפי היעדים ובחן תרחישים בסימולטור.'});
+  // sort by severity
+  const ord={red:0,amber:1,info:2,good:3};
+  out.sort((a,b)=>ord[a.level]-ord[b.level]);
+  return out;
+}
+
 /* ----- INGEST (F1) ----- */
 PAGE_RENDER.ingest = (c)=>{
   const q=S.activeQuarter;
@@ -763,6 +949,10 @@ function extractBalance(rows,scan,f){
   if(findRow(rows,/BANK LOANS/)){ scan.loans=area+bank+bonds; f.push('הלוואות'); }
   const re=cell(rows,/^RETAINED EARNINGS/,IS_COL.cons); if(re!==null){ scan.retainedEarnings=re; f.push('רווחים צבורים'); }
   const sec=cell(rows,/^GOVERNMENT SECURITIES/,IS_COL.cons); if(sec!==null){ scan.securities=sec; }
+  const plant=cell(rows,/^NET PLANT AND EQUIPMENT/,IS_COL.cons); if(plant!==null) scan.netPlant=plant;
+  const ta=cell(rows,/^TOTAL ASSETS/,IS_COL.cons); if(ta!==null) scan.totalAssets=ta;
+  const cs=cell(rows,/^COMMON STOCK/,IS_COL.cons); if(cs!==null) scan.commonStock=cs;
+  const teq=cell(rows,/^TOTAL EQUITY/,IS_COL.cons); if(teq!==null) scan.totalEquity=teq;
 }
 function extractIncome(rows,scan,f){
   const ne=cell(rows,/^NET EARNINGS$/,IS_COL.cons); if(ne!==null){ scan.netProfit=ne; f.push('רווח נקי'); }
@@ -771,6 +961,8 @@ function extractIncome(rows,scan,f){
   const consumer=sumRows(rows,/^CONSUMER$/,IS_COL.cons); if(findRow(rows,/^CONSUMER$/)){ scan.revenue=consumer; f.push('מחזור (מכירות צרכן)'); }
   const rdChip=cell(rows,/^R & D NEW CHIP/,IS_COL.cons)||0, rdPc=cell(rows,/^R & D NEW PC/,IS_COL.cons)||0;
   if(findRow(rows,/R & D NEW/)){ scan.rd=rdChip+rdPc; f.push('מו״פ (Chip+Computer)'); }
+  const mr=cell(rows,/^MARKET RESEARCH/,IS_COL.cons); if(mr!==null) scan.marketResearch=mr;
+  const ie=cell(rows,/^INTEREST EXPENSE/,IS_COL.cons); if(ie!==null) scan.interestExp=ie;
 }
 /* Management Info layout: US chip=1 pc=3, EC/EU chip=4 pc=6, BRAZIL chip=7 pc=9 (single-value rows use the chip column). */
 const MG_MAIN=[1,4,7], MG_PC=[3,6,9];
@@ -813,7 +1005,7 @@ function parseWorkbook(wb){
 function applyParsed({scan}){
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
   if(scan.cash){ REGIONS.forEach(r=>{ if(scan.cash[r.id]!==undefined) f.cash[r.id]=scan.cash[r.id]; }); }
-  ['consolidated','netProfit','revenue','grossMargin','retainedEarnings','loans','ap','ar','supplierCredit','securities'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) f[k]=scan[k]; });
+  ['consolidated','netProfit','revenue','grossMargin','retainedEarnings','loans','ap','ar','supplierCredit','securities','netPlant','totalAssets','commonStock','totalEquity','interestExp','marketResearch'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) f[k]=scan[k]; });
   ['techX','techY','maxProducible','factories','offices','rd'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) op[k]=scan[k]; });
   if(scan.inventory&&scan.inventory.length) op.inventory=scan.inventory;
   if(scan.gameRates) S.config.params.gameRates=scan.gameRates;
