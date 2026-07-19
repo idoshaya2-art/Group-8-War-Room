@@ -112,6 +112,8 @@ table.tbl th{text-align:start;color:var(--muted);font-weight:700;font-size:12px;
 table.tbl td{padding:8px 10px;border-bottom:1px solid var(--line)}
 table.tbl tr:hover td{background:rgba(255,255,255,.02)}
 table.tbl input.f{padding:5px 7px}
+table.tbl.wide{width:max-content;max-width:none}
+table.tbl.wide td,table.tbl.wide th{white-space:nowrap}
 
 /* KPI */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
@@ -263,7 +265,7 @@ function emptyQuarter(){
       ap:0, ar:0, supplierCredit:0, loans:0, securities:0,
     },
     operational:{ inventory:[], techX:0, techY:0, maxProducible:0, factories:0, offices:0, rd:0 },
-    marketIntel:[],
+    marketIntel:{ competitors:{}, sales:[], sources:[], generic:[] },
   };
 }
 function defaultState(){
@@ -291,9 +293,16 @@ function defaultState(){
   };
 }
 function load(){
-  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ S=deepMerge(defaultState(),JSON.parse(raw)); return; } }
+  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ S=deepMerge(defaultState(),JSON.parse(raw)); migrateIntel(); return; } }
   catch(e){ console.warn('load failed',e); }
   S=defaultState();
+}
+function migrateIntel(){ // coerce legacy array marketIntel into the structured object shape
+  QUARTERS.forEach(q=>{ const Q=S.quarters[q]; if(!Q)return;
+    const mi=Q.marketIntel;
+    if(!mi || Array.isArray(mi) || typeof mi!=='object'){ Q.marketIntel={competitors:{},sales:[],sources:[],generic:[]}; }
+    else { mi.competitors=mi.competitors||{}; mi.sales=mi.sales||[]; mi.sources=mi.sources||[]; mi.generic=mi.generic||[]; }
+  });
 }
 function deepMerge(base, over){
   if(Array.isArray(over)) return over;
@@ -808,12 +817,52 @@ function applyParsed({scan}){
   save();
 }
 function ingestMR(sheetName,rows){
-  const Q=S.quarters[S.activeQuarter];
-  const mrId=(sheetName.match(/\d+/)||[''])[0];
-  if(Q.marketIntel.some(m=>m.source===sheetName))return;
-  Q.marketIntel.push({company:'—',region:'—',product:'—',grade:'',metric:'MR '+(mrId||sheetName),value:0,
-    source:sheetName,kind:/17|28|74/.test(mrId)?'sold':'held',rows:rows.length});
+  const Q=S.quarters[S.activeQuarter]; const mi=Q.marketIntel;
+  // skip the "does not exist this quarter" placeholder sheet
+  const flat=rows.map(r=>r.join(' ')).join(' ').toLowerCase();
+  if(/does not exist in this quarter/.test(flat)) return;
+  if(!mi.sources.includes(sheetName)) mi.sources.push(sheetName);
+  if(/74/.test(sheetName)) extractMR74(rows,mi);
+  else if(/17|28/.test(sheetName)) extractMR1728(rows,mi);
+  else { if(!mi.generic.some(g=>g.source===sheetName)) mi.generic.push({source:sheetName,rows:rows.length}); }
   save(true);
+}
+/* MR74 = consolidated Balance Sheet + Income Statement for all companies (000s CHF).
+   Companies are in columns 1..N under a "COMPANY | CO. 1 | CO. 2 ..." header row. */
+function extractMR74(rows,mi){
+  const hdr=rows.find(r=> /^COMPANY$/.test(normLabel(r[0])) && /CO\.?\s*\d/.test(String(r[1]||'')));
+  if(!hdr) return;
+  const cols=[]; // {idx, num}
+  hdr.forEach((v,i)=>{ const m=String(v).match(/CO\.?\s*(\d+)/i); if(m) cols.push({idx:i, num:parseInt(m[1],10)}); });
+  const val=(re,c)=>{ const r=findRow(rows,re); return r?(parseNumber(r[c])||0):null; };
+  cols.forEach(c=>{
+    const co='CO '+c.num;
+    const rec={ num:c.num,
+      cash: val(/^CASH$/,c.idx), securities: val(/^SECURITIES/,c.idx), plant: val(/^NET PLANT/,c.idx),
+      totalAssets: val(/^TOTAL ASSETS/,c.idx), bankLoans: val(/^BANK LOANS PAYABLE/,c.idx),
+      retainedEarnings: val(/^RETAINED EARNINGS/,c.idx), equity: val(/^TOTAL EQUITY/,c.idx),
+      netEarnings: val(/^NET EARNINGS/,c.idx), grossMargin: val(/^TOTAL GROSS MARGIN/,c.idx),
+      rdChip: val(/^R & D NEW CHIP/,c.idx), rdPc: val(/^R & D NEW PC/,c.idx),
+      marketResearch: val(/^MARKET RESEARCH/,c.idx), interestExp: val(/^INTEREST EXPENSE/,c.idx),
+      unit:'000 CHF' };
+    mi.competitors[co]=Object.assign(mi.competitors[co]||{}, rec);
+  });
+}
+/* MR17&28 = consumer units sold by company / region / product(CHIP,PC) / grade(STD,DEL). */
+function extractMR1728(rows,mi){
+  // column layout: US CHIP-STD=1 DEL=2 PC-STD=3 DEL=4 ; EU 5-8 ; BRAZIL 9-12
+  const layout=[
+    {region:'us',product:'Chip',grade:'Standard',col:1},{region:'us',product:'Chip',grade:'Deluxe',col:2},
+    {region:'us',product:'Computer',grade:'Standard',col:3},{region:'us',product:'Computer',grade:'Deluxe',col:4},
+    {region:'europe',product:'Chip',grade:'Standard',col:5},{region:'europe',product:'Chip',grade:'Deluxe',col:6},
+    {region:'europe',product:'Computer',grade:'Standard',col:7},{region:'europe',product:'Computer',grade:'Deluxe',col:8},
+    {region:'brazil',product:'Chip',grade:'Standard',col:9},{region:'brazil',product:'Chip',grade:'Deluxe',col:10},
+    {region:'brazil',product:'Computer',grade:'Standard',col:11},{region:'brazil',product:'Computer',grade:'Deluxe',col:12},
+  ];
+  mi.sales=mi.sales.filter(s=>s.source!=='MR17&28');
+  rows.forEach(r=>{ const m=String(r[0]||'').match(/COMPANY\s*(\d+)/i); if(!m)return; const num=parseInt(m[1],10);
+    layout.forEach(L=>{ const u=parseNumber(r[L.col]); if(u&&u>0) mi.sales.push({company:num, region:L.region, product:L.product, grade:L.grade, units:u, source:'MR17&28'}); });
+  });
 }
 function renderVerifyForm(box){
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
@@ -933,30 +982,69 @@ PAGE_RENDER.cashflow = (c)=>{
 };
 
 /* ----- INTEL (F5 basic) ----- */
+const OUR_CO=8; // Company 8 = us
 PAGE_RENDER.intel = (c)=>{
-  const all=[]; QUARTERS.forEach(q=> S.quarters[q].marketIntel.forEach(m=>all.push({...m,q})));
+  const src=S.cumulative?latestEntered():S.activeQuarter;
+  const q = (src && S.quarters[src] && Object.keys(S.quarters[src].marketIntel.competitors).length) ? src
+          : QUARTERS.slice().reverse().find(x=>S.quarters[x].entered && Object.keys(S.quarters[x].marketIntel.competitors).length) || S.activeQuarter;
+  const mi=S.quarters[q].marketIntel;
+  const comps=Object.values(mi.competitors).sort((a,b)=>a.num-b.num);
+  const fmtK=(v)=> v==null?'—':fmt(v); // MR74 values are already in 000s
   c.innerHTML=`
-    <div class="card pad" style="margin-bottom:18px;border-inline-start:4px solid var(--purple)">
-      <div class="between"><h3>${IC('search')} ממליץ MR — אילו מחקרים לרכוש</h3><span class="tag b">F5.3</span></div>
-      <div class="small muted" style="margin:8px 0">דירוג לפי ערך-מידע מול עלות, בהתחשב בחינמיים המגיעים (74/17/28). המלצה כללית עד לכיול מנתוני מכירות.</div>
-      <ol style="padding-inline-start:20px;line-height:2;margin:0">
-        <li><b>MR74 / MR17 / MR28</b> — חינמיים, לנצל תמיד. MR17 מראה דרגות <u>שנמכרו</u> (לא רמות טכנולוגיה — הבחנה קריטית).</li>
-        <li><b>מחקר רמות טכנולוגיה של מתחרים</b> — ערך גבוה לפני החלטת מו״פ, אם בתקציב.</li>
-        <li><b>מחקר מחירים/מלאי אזורי</b> — כשיש חשד לצבירת מלאי או מחיר חריג בשוק.</li>
-      </ol>
+    <div class="between" style="margin-bottom:14px">
+      <div class="small muted">מודיעין מרבעון <b>${q}</b>${comps.length?` · מקורות: ${mi.sources.map(s=>`<span class="chip">${esc(s)}</span>`).join(' ')}`:''}</div>
     </div>
-    <div class="card">
-      <div class="ch"><h3>מודיעין מצטבר</h3><span class="tag ${all.length?'b':''}">${all.length} רשומות MR</span></div>
-      <div class="cb">
-        ${all.length? `<table class="tbl"><thead><tr><th>רבעון</th><th>מקור</th><th>סוג</th><th>חברה</th><th>אזור</th><th>מוצר</th><th>מדד</th></tr></thead>
-          <tbody>${all.map(m=>`<tr><td>${m.q}</td><td><span class="chip">${esc(m.source)}</span></td>
-            <td>${m.kind==='sold'?'<span class="tag a">נמכר</span>':'<span class="tag b">מוחזק</span>'}</td>
-            <td>${esc(m.company)}</td><td>${esc(m.region)}</td><td>${esc(m.product)}</td><td>${esc(m.metric)}</td></tr>`).join('')}</tbody></table>`
-        : emptyBlockInline(IC('search'),'אין רשומות MR עדיין','קלוט דוחות עם גיליונות MR* — הם ייכנסו למאגר המצטבר אוטומטית.')}
-        <div class="small muted" style="margin-top:12px">${IC('lock')} הבחנה מתודית: המערכת לא מסיקה "רמת טכנולוגיה" מדוח שמראה רק "נמכר" (F5.2). נתונים פרטניים נערכים ידנית.</div>
-      </div>
+    ${comps.length? renderCompetitors(comps,fmtK) : `<div class="card"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}
+    ${renderMarketShare(mi)}
+    <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--purple)">
+      <div class="between"><h3>${IC('search')} ממליץ MR</h3><span class="tag b">F5.3</span></div>
+      <div class="small muted" style="margin:8px 0">MR74/17/28 חינמיים — נצל תמיד. ${IC('lock')} MR17&28 מראה יחידות <u>שנמכרו</u> בפועל, לא רמות טכנולוגיה. לרמות טכנולוגיה של מתחרים — רכוש מחקר ייעודי לפני החלטת מו״פ.</div>
     </div>`;
 };
+function renderCompetitors(comps,fmtK){
+  const rank=(key,dir=1)=>{ const s=[...comps].filter(c=>c[key]!=null).sort((a,b)=>(b[key]-a[key])*dir); return s; };
+  const cashRank=rank('cash'); const reRank=rank('retainedEarnings');
+  const ourRankCash=cashRank.findIndex(c=>c.num===OUR_CO)+1, ourRankRE=reRank.findIndex(c=>c.num===OUR_CO)+1;
+  return `
+    <div class="kpis" style="margin-bottom:16px">
+      ${kpi('דירוג מזומן שלנו', ourRankCash?`#${ourRankCash} / ${cashRank.length}`:'—','')}
+      ${kpi('דירוג רווחים צבורים', ourRankRE?`#${ourRankRE} / ${reRank.length}`:'—','')}
+      ${kpi('מס׳ מתחרים', comps.length,'')}
+    </div>
+    <div class="card">
+      <div class="ch"><h3>${IC('landmark')} מאזן ורו״ה של המתחרים</h3><span class="small muted">מ-MR74 · ב-000 CHF · חברה 8 = אנחנו</span></div>
+      <div class="cb" style="overflow-x:auto">
+        <table class="tbl wide"><thead><tr>
+          <th>חברה</th><th>מזומן</th><th>ני״ע</th><th>מפעלים</th><th>הלוואות בנק</th><th>רווחים צבורים</th><th>רווח נקי</th><th>מו״פ Chip</th><th>מו״פ Comp</th><th>מחקרי שוק</th>
+        </tr></thead>
+        <tbody>${comps.map(c=>{ const me=c.num===OUR_CO; return `<tr style="${me?'background:rgba(61,111,224,.12)':''}">
+          <td><b>${me?'חברה 8 ★':'חברה '+c.num}</b></td>
+          <td class="num">${fmtK(c.cash)}</td><td class="num">${fmtK(c.securities)}</td><td class="num">${fmtK(c.plant)}</td>
+          <td class="num">${fmtK(c.bankLoans)}</td>
+          <td class="num" style="${c.retainedEarnings<0?'color:var(--red)':''}">${fmtK(c.retainedEarnings)}</td>
+          <td class="num" style="${c.netEarnings<0?'color:var(--red)':''}">${fmtK(c.netEarnings)}</td>
+          <td class="num">${fmtK(c.rdChip)}</td><td class="num">${fmtK(c.rdPc)}</td><td class="num">${fmtK(c.marketResearch)}</td>
+        </tr>`; }).join('')}</tbody></table>
+        <div class="small muted" style="margin-top:10px">מו״פ גבוה אצל מתחרה = לחץ טכנולוגי צפוי. מחקרי שוק גבוהים = מתחרה שאוסף מודיעין. רווחים צבורים = ביצועי עבר מצטברים (50% מהציון הסופי).</div>
+      </div>
+    </div>`;
+}
+function renderMarketShare(mi){
+  const sales=(mi.sales||[]);
+  if(!sales.length) return `<div class="card" style="margin-top:16px"><div class="ch"><h3>${IC('lineChart')} נתחי שוק (יחידות שנמכרו)</h3><span class="small muted">מ-MR17&28</span></div>
+    <div class="cb"><div class="small muted">אין מכירות שנקלטו ברבעון זה (טבעי ב-Q1 לפני התחלת מכירות). מרבעון המכירות הראשון תופיע כאן חלוקת היחידות לפי חברה/אזור/מוצר/דרגה.</div></div></div>`;
+  // aggregate units by company
+  const byCo={}; sales.forEach(s=>{ byCo[s.company]=(byCo[s.company]||0)+s.units; });
+  const total=Object.values(byCo).reduce((a,b)=>a+b,0)||1;
+  const rows=Object.entries(byCo).map(([co,u])=>({co:+co,u,share:u/total*100})).sort((a,b)=>b.u-a.u);
+  return `<div class="card" style="margin-top:16px">
+    <div class="ch"><h3>${IC('lineChart')} נתחי שוק — יחידות שנמכרו</h3><span class="small muted">מ-MR17&28</span></div>
+    <div class="cb" style="overflow-x:auto">
+      <table class="tbl"><thead><tr><th>חברה</th><th>יחידות</th><th>נתח שוק</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr style="${r.co===OUR_CO?'background:rgba(61,111,224,.12)':''}"><td><b>${r.co===OUR_CO?'חברה 8 ★':'חברה '+r.co}</b></td><td class="num">${fmt(r.u)}</td>
+        <td><div class="row" style="gap:8px"><div style="flex:1;height:7px;background:var(--bg);border-radius:4px;overflow:hidden;min-width:70px"><div style="width:${r.share.toFixed(0)}%;height:100%;background:linear-gradient(90deg,var(--accent),var(--purple))"></div></div><b class="num">${r.share.toFixed(1)}%</b></div></td></tr>`).join('')}</tbody></table>
+    </div></div>`;
+}
 
 /* ----- SIMULATOR (F6) ----- */
 PAGE_RENDER.sim = (c)=>{
@@ -1376,6 +1464,20 @@ function buildAIContext(){
   proj.forEach(p=> L.push(`- ${p.q}: מזומן מאוחד ${fmt(p.unified)} · רצפה ${fmt(p.floor)} · ${p.breach?'שבירה':'תקין'} (מרחק ${fmt(p.distance)})`));
   if(S.scenarios.length){ L.push(`## תרחישים שמורים`);
     S.scenarios.forEach(sc=>{ const sp=scoreProxy(sc.levers); L.push(`- "${sc.name}": מזומן סופי ${fmt(sp.endCash)} · שבירות ${sp.breaches} · פרוקסי ציון ${sp.value.toFixed(0)}`); }); }
+  // Competitor intelligence (MR74/MR17&28) — critical for data-driven decisions
+  const mi=Q.marketIntel; const comps=Object.values(mi.competitors||{}).sort((a,b)=>a.num-b.num);
+  if(comps.length){
+    L.push(`## מודיעין מתחרים — MR74 (מאזן+רו״ה, 000 CHF, חברה 8 = אנחנו) [מקור: ${q}/MR74]`);
+    comps.forEach(c=> L.push(`- חברה ${c.num}${c.num===OUR_CO?' (אנחנו)':''}: מזומן ${fmt(c.cash)} · ני״ע ${fmt(c.securities)} · הלוואות ${fmt(c.bankLoans)} · רווחים צבורים ${fmt(c.retainedEarnings)} · רווח נקי ${fmt(c.netEarnings)} · מו״פ Chip/Comp ${fmt(c.rdChip)}/${fmt(c.rdPc)} · מחקרי שוק ${fmt(c.marketResearch)}`));
+    const byRE=[...comps].filter(c=>c.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
+    const ourPos=byRE.findIndex(c=>c.num===OUR_CO)+1;
+    if(ourPos) L.push(`- דירוג רווחים צבורים שלנו: מקום ${ourPos} מתוך ${byRE.length}.`);
+  }
+  if((mi.sales||[]).length){
+    const byCo={}; mi.sales.forEach(s=>{ byCo[s.company]=(byCo[s.company]||0)+s.units; });
+    L.push(`## נתחי שוק (יחידות שנמכרו, MR17&28) [מקור: ${q}/MR17&28]`);
+    Object.entries(byCo).sort((a,b)=>b[1]-a[1]).forEach(([co,u])=> L.push(`- חברה ${co}${+co===OUR_CO?' (אנחנו)':''}: ${fmt(u)} יח׳`));
+  }
   return L.join('\n');
 }
 const AI_SYSTEM = `אתה יועץ אנליטי לצוות ניהול בסימולציית העסקים INTOPIA (חברה 8). ענֵה בעברית עסקית ישירה, RTL.
@@ -1626,7 +1728,7 @@ $('#importFile').onchange=e=>{
 };
 window.doImport=()=>{
   const incoming=window._pendingImport; if(!incoming)return;
-  S=deepMerge(defaultState(), incoming);
+  S=deepMerge(defaultState(), incoming); migrateIntel();
   save(); closeModal();
   renderNav(); renderQuarterSelect(); renderQBox(); go('dashboard');
   toast('הנתונים שוחזרו מהגיבוי ✓','g'); window._pendingImport=null;
@@ -1681,7 +1783,7 @@ function applyRemote(remote){
   // ignore our own echo
   if(remote.meta && remote.meta.syncOrigin===sync.clientId && remote.meta.lastEdited===sync.lastPushedAt) return;
   sync.applying=true;
-  S=deepMerge(defaultState(), remote);
+  S=deepMerge(defaultState(), remote); migrateIntel();
   try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
   sync.applying=false;
   renderNav(); renderQuarterSelect(); renderQBox();
