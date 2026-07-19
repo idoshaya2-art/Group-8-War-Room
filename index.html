@@ -503,8 +503,13 @@ function scoreProxy(leversByQuarter){
                    (op.techY>=g.techYTarget&&g.techYTarget>0?1:(g.techYTarget>0?op.techY/g.techYTarget:0)))/2;
   const cashScore=Math.max(0,Math.min(1,endCash/Math.max(1,(g.floors.Q9||1)*3)));
   const penalty=breaches*0.12;
-  const raw=(0.5*cashScore + 0.35*(isFinite(techScore)?techScore:0) + 0.15*(op.rd>0?1:0)) - penalty;
-  return {value:Math.max(0,Math.min(1,raw))*100, endCash, breaches};
+  const tS=isFinite(techScore)?techScore:0;
+  const rdOn=(op.rd>0?1:0);
+  const raw=(0.5*cashScore + 0.35*tS + 0.15*rdOn) - penalty;
+  // two halves for the 50% cash / 50% future-potential objective (each normalised 0..100)
+  const cashHalf=Math.max(0,Math.min(1,cashScore))*100;
+  const potentialHalf=Math.max(0,Math.min(1,(0.35*tS+0.15*rdOn)/0.5))*100;
+  return {value:Math.max(0,Math.min(1,raw))*100, endCash, breaches, cashHalf, potentialHalf, cashScore, techScore:tS};
 }
 
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
@@ -1356,46 +1361,150 @@ function renderScenarios(){
     </div>
     <div id="editorArea"></div>`;
 }
+const MARGIN_OPTS=[1.3,1.6,2.0,2.5,3.0];
+const ADV_OPTS=[0,4,6,8,10];
+function simCost(op){ return op.inventory.length?Math.round(op.inventory.reduce((a,i)=>a+(i.cost||0),0)/op.inventory.length):0; }
+function simCap(op){ return op.inventory.reduce((a,i)=>a+(i.qty||0),0); }
+let _simEditId=null,_simEditQ=null;
 window.newScenario=()=>{
   const sc={id:uid(),name:'תרחיש '+(S.scenarios.length+1),base:S.activeQuarter,levers:{},createdAt:Date.now()};
-  nextQuarters(S.activeQuarter).slice(0,3).forEach(q=>{ sc.levers[q]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[q].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0}); });
+  nextQuarters(S.activeQuarter).slice(0,3).forEach(q=>{ sc.levers[q]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[q].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',grade:1,margin:null,advPct:null}); });
   S.scenarios.push(sc); save(); renderScenarios(); editScenario(sc.id);
 };
 window.delScenario=(id)=>{ S.scenarios=S.scenarios.filter(s=>s.id!==id); save(); renderScenarios(); };
 window.editScenario=(id)=>{
   const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
-  const qs=Object.keys(sc.levers); const ed=$('#editorArea');
+  _simEditId=id;
+  const qs=Object.keys(sc.levers); const ed=$('#editorArea'); const op=S.quarters[S.activeQuarter].operational;
+  const gradeMax=Math.max(op.maxProducible||0,8);
+  const m=sc._lastMagic;
   ed.innerHTML=`
     <div class="card">
-      <div class="ch"><input class="f" style="max-width:260px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)"><span class="tag b" style="margin-inline-start:auto">בסיס ${sc.base}</span></div>
+      <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
+        <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg} · מכירה מפוצלת על 3 שווקים (לא מטה).</div></div>`:''}
+        <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="pill-tabs" id="qTabs">${qs.map((q,i)=>`<button class="${i===0?'active':''}" data-q="${q}">${q}</button>`).join('')}</div>
         <div id="leverGrid" style="margin-top:16px"></div>
       </div>
     </div>`;
-  const showQ=(q)=>{
-    const lv=sc.levers[q];
+  window._simShowQ=(q)=>{
+    _simEditQ=q; const lv=sc.levers[q];
     $('#leverGrid').innerHTML=`
-      <div class="field" style="max-width:220px"><label class="fl">מו״פ כולל (R&D)</label><input class="f" type="number" value="${lv.rd||0}" oninput="setLever('${id}','${q}','rd',null,this.value)"></div>
-      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אזור</th><th>ייצור</th><th>עלות יח׳</th><th>מכירות</th><th>פרסום</th><th>השקעה</th><th>העברה נכנסת</th></tr></thead>
-      <tbody>${REGIONS.map(r=>{ const rl=lv.regions[r.id]||{}; return `<tr><td><b>${r.name}</b><br><span class="small muted num">${r.cur}</span></td>
-        ${['production','unitCost','sales','advertising','invest','transferIn'].map(k=>`<td><input class="f" type="number" style="width:96px" value="${rl[k]||0}" oninput="setLever('${id}','${q}','${k}','${r.id}',this.value)"></td>`).join('')}
+      <div class="field" style="max-width:240px"><label class="fl">מו״פ כולל — W1 (R&D)</label><input class="f" type="number" value="${lv.rd||0}" oninput="setLever('${id}','${q}','rd',null,this.value)"><div class="small muted" style="margin-top:4px">מנוע הפוטנציאל העתידי — קובע דרגות למכירה ברבעונים הבאים.</div></div>
+      <div style="overflow-x:auto"><table class="tbl wide"><thead><tr><th>אזור</th><th>מוצר</th><th>דרגה</th><th>ייצור (H)</th><th>עלות יח׳</th><th>מכירות + מרווח</th><th>פרסום (A)</th><th>השקעה</th><th>העברה נכנסת (W2)</th></tr></thead>
+      <tbody>${REGIONS.map((r,i)=>{ const rl=lv.regions[r.id]||{}; return `<tr>
+        <td><b>${r.name}</b><br><span class="small muted num">${r.cur} · H${i+1}/A${i+1}</span></td>
+        <td><select class="f" style="width:82px" onchange="setLeverStr('${id}','${q}','${r.id}','product',this.value)"><option value="X" ${rl.product==='X'?'selected':''}>X·Chip</option><option value="Y" ${rl.product==='Y'||!rl.product?'selected':''}>Y·Comp</option></select></td>
+        <td><select class="f" style="width:60px" onchange="setLeverStr('${id}','${q}','${r.id}','grade',this.value)">${Array.from({length:gradeMax},(_,g)=>g+1).map(g=>`<option value="${g}" ${(rl.grade||1)===g?'selected':''}>${g}</option>`).join('')}</select></td>
+        <td><input class="f" id="f_${r.id}_production" type="number" style="width:88px" value="${rl.production||0}" oninput="setLever('${id}','${q}','production','${r.id}',this.value)"></td>
+        <td><input class="f" id="f_${r.id}_unitCost" type="number" style="width:80px" value="${rl.unitCost||0}" oninput="setLever('${id}','${q}','unitCost','${r.id}',this.value)"></td>
+        <td><input class="f" id="f_${r.id}_sales" type="number" style="width:104px" value="${rl.sales||0}" oninput="setLever('${id}','${q}','sales','${r.id}',this.value)"><select class="f" style="width:104px;margin-top:4px;font-size:11px" onchange="setLeverMargin('${id}','${q}','${r.id}',this.value)"><option value="">מרווח מהיר…</option>${MARGIN_OPTS.map(mm=>`<option value="${mm}" ${rl.margin===mm?'selected':''}>×${mm}${rl.unitCost>0?' → '+fmt(Math.round(rl.production*rl.unitCost*mm)):''}</option>`).join('')}</select></td>
+        <td><input class="f" id="f_${r.id}_advertising" type="number" style="width:88px" value="${rl.advertising||0}" oninput="setLever('${id}','${q}','advertising','${r.id}',this.value)"><select class="f" style="width:88px;margin-top:4px;font-size:11px" onchange="setLeverAdv('${id}','${q}','${r.id}',this.value)"><option value="">% מהכנסה…</option>${ADV_OPTS.map(pp=>`<option value="${pp}" ${rl.advPct===pp?'selected':''}>${pp}%</option>`).join('')}</select></td>
+        <td><input class="f" id="f_${r.id}_invest" type="number" style="width:84px" value="${rl.invest||0}" oninput="setLever('${id}','${q}','invest','${r.id}',this.value)"></td>
+        <td><input class="f" id="f_${r.id}_transferIn" type="number" style="width:96px" value="${rl.transferIn||0}" oninput="setLever('${id}','${q}','transferIn','${r.id}',this.value)"></td>
       </tr>`; }).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:10px">מכירות = הכנסה בפועל ברבעון (נכנסת לפי לוח הגבייה האזורי). המנוע מחשב תזרים ופרוקסי ציון בזמן אמת.</div>
+      <div class="small muted" style="margin-top:10px">מכירות = הכנסה מתוכננת ברבעון (נגבית מדורג לפי לוח הגבייה האזורי). "מרווח מהיר" ממלא מכירות = ייצור×עלות×מרווח; "% מהכנסה" ממלא פרסום. המנוע מחשב השפעה בזמן אמת למטה.</div>
       <div id="miniResult" style="margin-top:14px"></div>`;
-    renderMiniResult(sc);
+    renderImpactBoard(sc);
   };
-  $$('#qTabs button').forEach(b=>b.onclick=()=>{ $$('#qTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); showQ(b.dataset.q); });
-  showQ(qs[0]);
+  $$('#qTabs button').forEach(b=>b.onclick=()=>{ $$('#qTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); window._simShowQ(b.dataset.q); });
+  renderSimIntel(); window._simShowQ(qs[0]);
 };
-function renderMiniResult(sc){
-  const sp=scoreProxy(sc.levers); const box=$('#miniResult'); if(!box)return;
-  box.innerHTML=`<div class="kpis">${kpi('מזומן סופי מוקרן',fmt(sp.endCash),'')}${kpi('שבירות רצפה',sp.breaches,'')}${kpi('פרוקסי ציון',sp.value.toFixed(0),'')}</div>`;
+function renderSimIntel(){
+  const box=$('#simIntel'); if(!box)return;
+  const q=QUARTERS.slice().reverse().find(x=>S.quarters[x].entered && Object.keys((S.quarters[x].marketIntel||{}).competitors||{}).length) || S.activeQuarter;
+  const mi=S.quarters[q].marketIntel||{competitors:{},sales:[]};
+  const comps=Object.values(mi.competitors||{}); const sales=mi.sales||[];
+  if(!comps.length && !sales.length){ box.innerHTML=`<div class="small muted">${IC('search')} אין עדיין מודיעין מתחרים לעיגון (קלוט MR74 / MR17&28). ההמלצות מתבססות על נתוני החברה בלבד.</div>`; return; }
+  const bits=[];
+  const byRE=comps.filter(c=>c.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
+  const pos=byRE.findIndex(c=>c.num===OUR_CO)+1; if(pos) bits.push(`דירוג רווחים צבורים שלנו: <b>${pos}/${byRE.length}</b>`);
+  const total=sales.reduce((a,s)=>a+s.units,0), our=sales.filter(s=>s.company===OUR_CO).reduce((a,s)=>a+s.units,0);
+  if(total) bits.push(`נתח יחידות שלנו: <b>${((our/total)*100).toFixed(1)}%</b> (${fmt(our)}/${fmt(total)})`);
+  const rdAvg=comps.length?Math.round(comps.reduce((a,c)=>a+((c.rdChip||0)+(c.rdPc||0)),0)/comps.length):0;
+  if(rdAvg) bits.push(`מו״פ ממוצע בשוק: <b class="num">${fmt(rdAvg)}</b>`);
+  const leader=[...sales].sort((a,b)=>b.units-a.units)[0];
+  if(leader) bits.push(`מוביל מכירות: חברה ${leader.company} (${fmt(leader.units)} יח׳ ${leader.product||''} דרגה ${leader.grade||'?'})`);
+  box.innerHTML=`<div class="small" style="line-height:1.9">${IC('search')} <b>מודיעין מ-${q} — עגן את התמחור/ייצור מול זה:</b><br>${bits.join(' · ')}</div>`;
 }
+function renderImpactBoard(sc){
+  const box=$('#miniResult'); if(!box)return;
+  const sp=scoreProxy(sc.levers), base=scoreProxy(null);
+  const proj=projectCashflow(S.activeQuarter,sc.levers);
+  const minDist=proj.length?Math.min(...proj.map(p=>p.distance)):0;
+  const dCash=sp.endCash-base.endCash;
+  const q=_simEditQ, lv=sc.levers[q]||{regions:{}}, p=S.config.params;
+  let rev=0,prodOut=0,adv=0,inv=0,tr=0; const rd=lv.rd||0;
+  REGIONS.forEach(r=>{ const rl=lv.regions[r.id]||{}; rev+=rl.sales||0; prodOut+=(rl.production||0)*(rl.unitCost||0)*(p.productionPay[0]/100); adv+=rl.advertising||0; inv+=rl.invest||0; tr+=rl.transferIn||0; });
+  const netNow=tr-prodOut-adv-inv-rd;
+  const bar=(v,c)=>`<div style="flex:1;height:8px;background:var(--bg);border-radius:5px;overflow:hidden;min-width:80px"><div style="width:${Math.max(0,Math.min(100,v)).toFixed(0)}%;height:100%;background:${c}"></div></div>`;
+  box.innerHTML=`
+    <div class="kpis" style="margin-bottom:12px">
+      ${kpi('מזומן סופי מוקרן (Q9)',fmt(sp.endCash),(dCash>=0?'+':'')+fmt(Math.round(dCash))+' מול בסיס')}
+      ${kpi('שבירות רצפה',sp.breaches,sp.breaches?'סיכון בלתי-הפיך':'תקין')}
+      ${kpi('מרחק מינ׳ מרצפה',fmt(Math.round(minDist)),minDist<0?'שלילי':'')}
+    </div>
+    <div class="card pad" style="background:var(--bg2)">
+      <div class="small muted" style="margin-bottom:8px">${IC('scale')} ציון = 50% מזומן + 50% פוטנציאל עתידי (כל מהלך נשקל מול שניהם)</div>
+      <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:130px">מחצית מזומן (50%)</span>${bar(sp.cashHalf,'linear-gradient(90deg,var(--accent),var(--accent2))')}<b class="num" style="width:40px">${sp.cashHalf.toFixed(0)}</b></div>
+      <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:130px">מחצית פוטנציאל (50%)</span>${bar(sp.potentialHalf,'linear-gradient(90deg,var(--purple),#c084fc)')}<b class="num" style="width:40px">${sp.potentialHalf.toFixed(0)}</b></div>
+      <div class="row" style="gap:10px;align-items:center"><span class="small" style="width:130px"><b>ציון כולל</b></span>${bar(sp.value,'linear-gradient(90deg,var(--green),var(--accent))')}<b class="num" style="width:40px">${sp.value.toFixed(0)}</b></div>
+    </div>
+    <div class="card pad" style="margin-top:10px">
+      <div class="small muted" style="margin-bottom:6px">השפעה כלכלית מיידית של המהלכים ב-${q} (ההכנסה נגבית מדורג — כאן רק ההשפעה המיידית על המזומן):</div>
+      <div class="small" style="line-height:1.9">
+        • הכנסה מתוכננת: <b class="num">${fmt(rev)}</b> · פרסום (A): <b class="num">${fmt(adv)}</b> · מו״פ (W1): <b class="num">${fmt(rd)}</b><br>
+        • ייצור — תשלום מיידי ${p.productionPay[0]}% (H): <b class="num">${fmt(Math.round(prodOut))}</b> · השקעה: <b class="num">${fmt(inv)}</b> · העברות נכנסות (W2): <b class="num">${fmt(tr)}</b><br>
+        • תזרים מיידי מהמהלכים: <b class="num" style="color:${netNow>=0?'var(--green)':'var(--amber)'}">${netNow>=0?'+':''}${fmt(Math.round(netNow))}</b>
+      </div>
+      <div class="small muted" style="margin-top:8px">${IC('info')} מחצית הפוטנציאל מונעת מיעדי הטכנולוגיה ומימון מו״פ (W1). כדי להעלותה — תכננו מו״פ לעבר יעדי הדרגה, לא רק מזומן.</div>
+    </div>`;
+}
+function renderMiniResult(sc){ renderImpactBoard(sc); }
+function _patchInput(region,k,val){ const el=document.getElementById('f_'+region+'_'+k); if(el&&document.activeElement!==el) el.value=val; }
 window.renameScenario=(id,v)=>{ const sc=S.scenarios.find(s=>s.id===id); sc.name=v; save(true); };
 window.setLever=(id,q,k,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const num=parseFloat(val)||0;
-  if(region){ sc.levers[q].regions[region]=sc.levers[q].regions[region]||{}; sc.levers[q].regions[region][k]=num; } else sc.levers[q][k]=num;
-  save(true); renderMiniResult(sc); };
+  if(region){ const rl=sc.levers[q].regions[region]=sc.levers[q].regions[region]||{}; rl[k]=num;
+    if((k==='production'||k==='unitCost') && rl.margin && rl.unitCost>0){ rl.sales=Math.round((rl.production||0)*rl.unitCost*rl.margin); _patchInput(region,'sales',rl.sales); if(rl.advPct!=null){ rl.advertising=Math.round(rl.sales*rl.advPct/100); _patchInput(region,'advertising',rl.advertising); } }
+    if(k==='sales'){ rl.margin=null; if(rl.advPct!=null){ rl.advertising=Math.round(num*rl.advPct/100); _patchInput(region,'advertising',rl.advertising); } }
+    if(k==='advertising'){ rl.advPct=null; }
+  } else sc.levers[q][k]=num;
+  save(true); renderImpactBoard(sc); };
+window.setLeverStr=(id,q,region,k,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const rl=sc.levers[q].regions[region];
+  rl[k]=(k==='grade')?(parseInt(val)||1):val; save(true); renderImpactBoard(sc); };
+window.setLeverMargin=(id,q,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const rl=sc.levers[q].regions[region]; const m=parseFloat(val);
+  rl.margin=(isNaN(m)||m<=0)?null:m;
+  if(rl.margin && rl.unitCost>0){ rl.sales=Math.round((rl.production||0)*rl.unitCost*rl.margin); _patchInput(region,'sales',rl.sales); if(rl.advPct!=null){ rl.advertising=Math.round(rl.sales*rl.advPct/100); _patchInput(region,'advertising',rl.advertising); } }
+  save(true); renderImpactBoard(sc); };
+window.setLeverAdv=(id,q,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const rl=sc.levers[q].regions[region]; const pp=parseFloat(val);
+  rl.advPct=isNaN(pp)?null:pp;
+  if(rl.advPct!=null){ rl.advertising=Math.round((rl.sales||0)*rl.advPct/100); _patchInput(region,'advertising',rl.advertising); }
+  save(true); renderImpactBoard(sc); };
+function refreshSimEditor(){ if(_simEditId&&window._simShowQ&&_simEditQ) window._simShowQ(_simEditQ); }
+window.magicOptimize=(id)=>{
+  const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
+  const base=S.activeQuarter, op=S.quarters[base].operational, qs=Object.keys(sc.levers);
+  if(!qs.length){ toast('אין רבעונים עתידיים לאופטימיזציה','a'); return; }
+  let cost=simCost(op);
+  if(!cost){ const uc=[]; qs.forEach(q=>REGIONS.forEach(r=>{ const u=sc.levers[q].regions[r.id].unitCost; if(u>0)uc.push(u); })); cost=uc.length?Math.round(uc.reduce((a,b)=>a+b,0)/uc.length):10; }
+  let cap=0; qs.forEach(q=>REGIONS.forEach(r=>{ cap=Math.max(cap,sc.levers[q].regions[r.id].production||0); }));
+  if(!cap) cap=simCap(op)||8000;
+  const rd=op.rd||0, before=scoreProxy(sc.levers).value;
+  const prodFracs=[1.0,0.9,0.8,0.65]; let best=null;
+  prodFracs.forEach(pf=>MARGIN_OPTS.forEach(mg=>{
+    const production=Math.round(cap*pf), price=cost*mg, levers={};
+    qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{}; const prod=r.id==='hq'?0:Math.round(production/3);
+      levers[q].regions[r.id]={production:prod,unitCost:cost,sales:prod*price,advertising:Math.round(prod*price*0.06),invest:0,transferIn:0,product:cur.product||'Y',grade:cur.grade||1,margin:mg,advPct:6}; }); });
+    const spv=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
+    const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,mg};
+    if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
+  }));
+  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg}; save();
+  renderScenarios(); editScenario(id);
+  toast('קסם: ציון '+before.toFixed(0)+' → '+best.score.toFixed(0)+(best.feasible?'':' (שובר רצפה)'), best.feasible?'g':'a');
+};
 window.sensitivity=()=>{
   const base=S.activeQuarter; const bs=scoreProxy(S.scenarios[0]?S.scenarios[0].levers:null);
   const variants=[{name:'מחיר/מכירות +10%',mult:{sales:1.1}},{name:'מחיר/מכירות −10%',mult:{sales:0.9}},
