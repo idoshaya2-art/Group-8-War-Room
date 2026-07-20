@@ -310,7 +310,8 @@ function defaultState(){
     cumulative:false,
     config:{
       goals:{ floors:{Q1:0,Q2:0,Q3:0,Q4:0,Q5:0,Q6:0,Q7:0,Q8:0,Q9:0},
-        techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0 },
+        techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0,
+        scoreTargets:{roe:25, roi:15, ros:10} },
       contracts:[],
       params:{
         collection:{ us:[100,0,0], europe:[50,20,30], brazil:[30,30,40], hq:[100,0,0] },
@@ -493,23 +494,67 @@ function projectCashflow(baseQuarter, leversByQuarter){
   }
   return out;
 }
+/* ---------- WS-1: the real INTOPIA final score — 50% past performance / 50% future potential ----------
+   Past  = cumulative net profit ranked vs competitors (MR74) + efficiency (ROE/ROI/ROS vs targets).
+   Future= tech vs target + market share (MR17&28) + financial health, weighted, with maturation to Q9.
+   Every number is sourced from entered quarters / competitor intel; scenarios add an after-tax P&L projection. */
+const START_CAPITAL=8000000; // opening capital, SF
+function _c01(v){ return Math.max(0,Math.min(1,isFinite(v)?v:0)); }
+function cumRealizedNet(base){ const bi=qIndex(base); let s=0;
+  QUARTERS.forEach((q,i)=>{ if(i<=bi && S.quarters[q].entered) s+=(S.quarters[q].financial.netProfit||0); }); return s; }
+function competitorRankOf(base,ourValue){ // rank OUR (possibly projected) profit vs competitors' retained earnings
+  const others=Object.values((S.quarters[base].marketIntel||{}).competitors||{})
+    .filter(c=>c.num!==OUR_CO && c.retainedEarnings!=null).map(c=>c.retainedEarnings);
+  if(others.length<1) return null;
+  const n=others.length+1, beat=others.filter(v=>v<ourValue).length;
+  return {score:beat/(n-1), rank:n-beat, n}; // 1=best; responsive to ourValue
+}
+function marketShareScore(base){
+  const sales=(S.quarters[base].marketIntel||{}).sales||[]; if(!sales.length) return null;
+  const total=sales.reduce((a,s)=>a+s.units,0); if(total<=0) return null;
+  const our=sales.filter(s=>s.company===OUR_CO).reduce((a,s)=>a+s.units,0);
+  const n=Math.max(new Set(sales.map(s=>s.company)).size,2);
+  return {score:_c01((our/total)/(2*(1/n))), share:our/total}; // 2× fair share = full marks
+}
+function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's future-quarter levers (WS-2 tax applied)
+  if(!levers) return 0; const p=S.config.params, loans=S.quarters[base].financial.loans||0; let add=0;
+  nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; let net=0;
+    REGIONS.forEach(r=>{ if(r.id==='hq') return; const rl=(lev.regions&&lev.regions[r.id])||{};
+      const pretax=(rl.sales||0)-((rl.production||0)*(rl.unitCost||0))-(rl.advertising||0)-(rd/3);
+      net += pretax - (pretax>0?pretax*((p.tax[r.id]||0)/100):0); });
+    net -= loans*((p.interest&&p.interest.bank||0)/100)/4; add+=net; });
+  return add;
+}
 function scoreProxy(leversByQuarter){
-  const base=S.activeQuarter;
+  const base=S.activeQuarter, g=S.config.goals, op=S.quarters[base].operational, f=S.quarters[base].financial;
   const proj=projectCashflow(base,leversByQuarter);
   const endCash=proj.length?proj[proj.length-1].unified:unifiedCashOf(base);
   const breaches=proj.filter(x=>x.breach).length;
-  const g=S.config.goals, op=S.quarters[base].operational;
-  const techScore=((op.techX>=g.techXTarget&&g.techXTarget>0?1:(g.techXTarget>0?op.techX/g.techXTarget:0))+
-                   (op.techY>=g.techYTarget&&g.techYTarget>0?1:(g.techYTarget>0?op.techY/g.techYTarget:0)))/2;
-  const cashScore=Math.max(0,Math.min(1,endCash/Math.max(1,(g.floors.Q9||1)*3)));
-  const penalty=breaches*0.12;
-  const tS=isFinite(techScore)?techScore:0;
-  const rdOn=(op.rd>0?1:0);
-  const raw=(0.5*cashScore + 0.35*tS + 0.15*rdOn) - penalty;
-  // two halves for the 50% cash / 50% future-potential objective (each normalised 0..100)
-  const cashHalf=Math.max(0,Math.min(1,cashScore))*100;
-  const potentialHalf=Math.max(0,Math.min(1,(0.35*tS+0.15*rdOn)/0.5))*100;
-  return {value:Math.max(0,Math.min(1,raw))*100, endCash, breaches, cashHalf, potentialHalf, cashScore, techScore:tS};
+  // ===== PAST HALF (50%) =====
+  const cumNet=cumRealizedNet(base)+projectedNetAdd(base,leversByQuarter);
+  const rankObj=competitorRankOf(base,cumNet); // rank our projected cumulative vs rivals
+  const level=_c01(0.5 + cumNet/START_CAPITAL); // absolute magnitude: 0 profit→0.5, ±full capital→1/0
+  const profScore = rankObj ? (0.7*rankObj.score + 0.3*level) : level;
+  const t=(g.scoreTargets)||{roe:25,roi:15,ros:10};
+  const effScore=_c01(((f.roe||0)/(t.roe||25)+(f.roi||0)/(t.roi||15)+(f.ros||0)/(t.ros||10))/3);
+  const pastHalf=_c01(0.6*profScore+0.4*effScore)*100;
+  // ===== POTENTIAL HALF (50%) =====
+  const techX=g.techXTarget>0?op.techX/g.techXTarget:(op.techX/9), techY=g.techYTarget>0?op.techY/g.techYTarget:(op.techY/9);
+  const techScore=_c01((techX+techY)/2);
+  const shareObj=marketShareScore(base);
+  const eqRatio=f.totalAssets>0?_c01(f.totalEquity/f.totalAssets):null;
+  const levHealth=f.totalEquity>0?_c01(1-Math.min(1,(f.loans||0)/f.totalEquity)):null;
+  const health=(eqRatio!=null||levHealth!=null)?_c01(((eqRatio||0)+(levHealth||0))/((eqRatio!=null?1:0)+(levHealth!=null?1:0))):null;
+  const parts=[{v:techScore,w:0.45},{v:shareObj?shareObj.score:null,w:0.30},{v:health,w:0.25}].filter(c=>c.v!=null);
+  const wsum=parts.reduce((a,c)=>a+c.w,0)||1;
+  const potentialHalf=_c01(parts.reduce((a,c)=>a+c.v*c.w,0)/wsum)*100;
+  // ===== COMBINE =====
+  // a persistent breach cascades across quarters — count it once-ish and cap the hit so it doesn't obliterate the score
+  const penalty=Math.min(18, breaches*4);
+  const value=Math.max(0,Math.min(100,(pastHalf+potentialHalf)/2 - penalty));
+  return {value, endCash, breaches, cashHalf:pastHalf, pastHalf, potentialHalf,
+    parts:{profScore,effScore,techScore,share:shareObj?shareObj.share:null,health,cumNet,
+      rank:rankObj?rankObj.rank:null,rankN:rankObj?rankObj.n:null}};
 }
 
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
@@ -1448,9 +1493,9 @@ function renderImpactBoard(sc){
       ${kpi('מרחק מינ׳ מרצפה',fmt(Math.round(minDist)),minDist<0?'שלילי':'')}
     </div>
     <div class="card pad" style="background:var(--bg2)">
-      <div class="small muted" style="margin-bottom:8px">${IC('scale')} ציון = 50% מזומן + 50% פוטנציאל עתידי (כל מהלך נשקל מול שניהם)</div>
-      <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:130px">מחצית מזומן (50%)</span>${bar(sp.cashHalf,'linear-gradient(90deg,var(--accent),var(--accent2))')}<b class="num" style="width:40px">${sp.cashHalf.toFixed(0)}</b></div>
-      <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:130px">מחצית פוטנציאל (50%)</span>${bar(sp.potentialHalf,'linear-gradient(90deg,var(--purple),#c084fc)')}<b class="num" style="width:40px">${sp.potentialHalf.toFixed(0)}</b></div>
+      <div class="small muted" style="margin-bottom:8px">${IC('scale')} ציון Q9 = 50% ביצועי עבר (רווח מצטבר, ROE/ROI/ROS מול מתחרים) + 50% פוטנציאל עתידי (טק, נתח שוק, בריאות פיננסית)</div>
+      <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:150px">מחצית ביצועי עבר (50%)</span>${bar(sp.pastHalf,'linear-gradient(90deg,var(--accent),var(--accent2))')}<b class="num" style="width:40px">${sp.pastHalf.toFixed(0)}</b></div>
+      <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:150px">מחצית פוטנציאל (50%)</span>${bar(sp.potentialHalf,'linear-gradient(90deg,var(--purple),#c084fc)')}<b class="num" style="width:40px">${sp.potentialHalf.toFixed(0)}</b></div>
       <div class="row" style="gap:10px;align-items:center"><span class="small" style="width:130px"><b>ציון כולל</b></span>${bar(sp.value,'linear-gradient(90deg,var(--green),var(--accent))')}<b class="num" style="width:40px">${sp.value.toFixed(0)}</b></div>
     </div>
     <div class="card pad" style="margin-top:10px">
@@ -1460,7 +1505,7 @@ function renderImpactBoard(sc){
         • ייצור — תשלום מיידי ${p.productionPay[0]}% (A2-3/A2-4): <b class="num">${fmt(Math.round(prodOut))}</b> · השקעה (A3-2): <b class="num">${fmt(inv)}</b> · העברות נכנסות (A3-1): <b class="num">${fmt(tr)}</b><br>
         • תזרים מיידי מהמהלכים: <b class="num" style="color:${netNow>=0?'var(--green)':'var(--amber)'}">${netNow>=0?'+':''}${fmt(Math.round(netNow))}</b>
       </div>
-      <div class="small muted" style="margin-top:8px">${IC('info')} מחצית הפוטנציאל מונעת מיעדי הטכנולוגיה ומימון מו״פ (H1-1). כדי להעלותה — תכננו מו״פ לעבר יעדי הדרגה, לא רק מזומן.</div>
+      <div class="small muted" style="margin-top:8px">${IC('info')} <b>מחצית עבר</b> = רווח נקי מצטבר מדורג מול המתחרים (MR74) + יעילות ROE/ROI/ROS. <b>מחצית פוטנציאל</b> = דרגה טכנולוגית מול היעד + נתח שוק (MR17&28) + בריאות פיננסית (הון/נכסים, מינוף). כל מהלך נשקל מול שתיהן.</div>
     </div>`;
 }
 function renderMiniResult(sc){ renderImpactBoard(sc); }
@@ -1909,12 +1954,12 @@ function buildAIContext(){
   L.push(`- רווח נקי: ${fmt(f.netProfit)} · מחזור: ${fmt(f.revenue)} · רווחים צבורים: ${fmt(f.retainedEarnings)}`);
   L.push(`- הלוואות/חוב: ${fmt(f.loans)} · אשראי ספקים: ${fmt(f.supplierCredit)} · A/P: ${fmt(f.ap)} · A/R: ${fmt(f.ar)}`);
   if(f.roe) L.push(`- ROE: ${f.roe}% · ROS: ${f.ros}%`);
-  // Objective decomposition — 50% cash strength / 50% future potential (so every answer is scored against the goal)
-  const sp0=scoreProxy(null);
-  L.push(`## פירוק המטרה — ציון סיום = 50% מזומן + 50% פוטנציאל עתידי`);
-  L.push(`- מחצית מזומן: מזומן מאוחד סופי צפוי (מצב כפי-שהוא) ${fmt(sp0.endCash)} · שבירות רצפה בהקרנה: ${sp0.breaches}.`);
-  L.push(`- מחצית פוטנציאל: טכנולוגיה X=${op.techX}/יעד ${g.techXTarget} · Y=${op.techY}/יעד ${g.techYTarget} · מו״פ ${q}: ${fmt(op.rd)}${op.rd>0?'':' — 0! צבר עתידי אינו מוזן'}.`);
-  L.push(`- פרוקסי ציון נוכחי: ${sp0.value.toFixed(0)}/100. כוון כל מהלך להעלאת שני המרכיבים יחד, לא אחד על חשבון השני.`);
+  // Objective decomposition — the real INTOPIA 50/50 final score (past performance / future potential)
+  const sp0=scoreProxy(null); const pp=sp0.parts;
+  L.push(`## פירוק המטרה — ציון סיום Q9 = 50% ביצועי עבר + 50% פוטנציאל עתידי [מחושב במנוע]`);
+  L.push(`- מחצית ביצועי עבר: ${sp0.pastHalf.toFixed(0)}/100 — רווח נקי מצטבר ${fmt(Math.round(pp.cumNet))}${pp.rank?` · דירוג רווחים מול מתחרים: ${pp.rank}/${pp.rankN} (MR74)`:''} · יעילות (ROE ${f.roe||0}% / ROI ${f.roi||0}% / ROS ${f.ros||0}%).`);
+  L.push(`- מחצית פוטנציאל עתידי: ${sp0.potentialHalf.toFixed(0)}/100 — טכנולוגיה X=${op.techX}/יעד ${g.techXTarget||'—'} Y=${op.techY}/יעד ${g.techYTarget||'—'}${pp.share!=null?` · נתח שוק ${(pp.share*100).toFixed(1)}% (MR17&28)`:' · נתח שוק לא נקלט'} · בריאות פיננסית ${pp.health!=null?(pp.health*100).toFixed(0)+'/100':'לא נקלטה'}.`);
+  L.push(`- ציון כולל נוכחי: ${sp0.value.toFixed(0)}/100${sp0.breaches?` (קנס ${sp0.breaches} שבירות רצפה)`:''}. כוון כל מהלך להעלאת שתי המחציות יחד — רווח עכשיו מול השקעה שמבשילה עד Q9.`);
   // Input-code legend so recommendations can be phrased exactly as typed into the game
   L.push(formsCatalogText());
   L.push(`## תפעול`);
