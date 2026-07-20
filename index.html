@@ -463,21 +463,21 @@ const ICONS={
 function IC(name,cls=''){ const p=ICONS[name]||''; return `<svg class="ic-svg ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`; }
 
 /* ---------- Navigation ---------- */
+/* The quarterly loop IS the nav: 5 numbered steps in work order, then depth pages. */
 const PAGES = [
-  {id:'dashboard',  ic:'dashboard', name:'דשבורד',    sub:'תמונת מצב, נורות ומגמות', sec:'ניתוח'},
-  {id:'ingest',     ic:'inbox',     name:'קליטת דוח',  sub:'העלאה, חילוץ ואימות נתונים', sec:'ניתוח'},
-  {id:'financials', ic:'landmark',  name:'מצב פיננסי', sub:'רו״ה, מאזן ויחסים — תמונה מלאה', sec:'ניתוח'},
-  {id:'qa',         ic:'check',     name:'בקרת נתונים', sub:'עקביות בין רבעונים, דוחות ושדות', sec:'ניתוח'},
-  {id:'cashflow',   ic:'lineChart', name:'תזרים',      sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'ניתוח'},
-  {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מגמות והמלצות MR', sec:'ניתוח'},
-  {id:'roles',      ic:'users',     name:'תצוגות תפקיד', sub:'CEO · CFO · COO · CMO · מודיעין', sec:'החלטה'},
-  {id:'plan',       ic:'clipboard', name:'תוכנית פעולה', sub:'מה לעשות ברבעון הקרוב + איך להזין', sec:'החלטה'},
-  {id:'ai',         ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'החלטה'},
-  {id:'sim',        ic:'sliders',   name:'סימולטור',   sub:'תרחישים, מנופים והשוואה', sec:'החלטה'},
-  {id:'export',     ic:'share',     name:'ייצוא הזנה',  sub:'גיליון הזנה + צ׳ק-ליסט הגשה', sec:'החלטה'},
-  {id:'journal',    ic:'book',      name:'יומן החלטות', sub:'החלטות, רציונל ומאשרים', sec:'החלטה'},
-  {id:'goals',      ic:'target',    name:'יעדים',      sub:'רצפות, חוזים ופרמטרי מודל', sec:'קונפיגורציה'},
+  {id:'ingest',     ic:'inbox',     name:'1 · קליטה ובקרה', sub:'העלאת הדוח, אימות ובדיקת עקביות', sec:'הלולאה הרבעונית'},
+  {id:'dashboard',  ic:'dashboard', name:'2 · אבחון',       sub:'תמונת מצב, נורות ומגמות', sec:'הלולאה הרבעונית'},
+  {id:'plan',       ic:'clipboard', name:'3 · החלטות',      sub:'המלצות קונקרטיות → בקליק לסימולטור', sec:'הלולאה הרבעונית'},
+  {id:'sim',        ic:'sliders',   name:'4 · סימולטור',    sub:'כוונון, השוואה וכפתור קסם', sec:'הלולאה הרבעונית'},
+  {id:'export',     ic:'share',     name:'5 · הזנה והגשה',  sub:'גיליון הזנה, צ׳ק-ליסט ויומן החלטות', sec:'הלולאה הרבעונית'},
+  {id:'financials', ic:'landmark',  name:'מצב פיננסי', sub:'רו״ה, מאזן ויחסים — תמונה מלאה', sec:'עומק'},
+  {id:'cashflow',   ic:'lineChart', name:'תזרים',      sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'עומק'},
+  {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מנוע ביקוש והמלצות MR', sec:'עומק'},
+  {id:'roles',      ic:'users',     name:'תצוגות תפקיד', sub:'CEO · CFO · COO · CMO · מודיעין', sec:'עומק'},
+  {id:'ai',         ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'עומק'},
+  {id:'goals',      ic:'target',    name:'הגדרות ויעדים', sub:'רצפות, חוזים, פרמטרים ומיקסום', sec:'קונפיגורציה'},
 ];
+const PAGE_ALIAS={qa:'ingest', journal:'export'}; // merged tabs keep their old links working
 let currentPage='dashboard';
 function renderNav(){
   const nav=$('#nav'); nav.innerHTML=''; let lastSec=null;
@@ -490,6 +490,7 @@ function renderNav(){
   });
 }
 function go(id){
+  if(PAGE_ALIAS[id]) id=PAGE_ALIAS[id];
   currentPage=id; renderNav();
   const p=PAGES.find(x=>x.id===id);
   $('#pageTitle').textContent=p.name; $('#pageSub').textContent=p.sub;
@@ -1008,13 +1009,18 @@ function lineChart(cv,{labels,series}){
 function shortNum(v){ const a=Math.abs(v); if(a>=1e6)return (v/1e6).toFixed(1)+'M'; if(a>=1e3)return (v/1e3).toFixed(0)+'K'; return fmt(v); }
 
 /* ----- FINANCIAL POSITION (full picture: P&L + Balance + Ratios) ----- */
-PAGE_RENDER.qa=(c)=>{
+function qaSectionHTML(){ // embedded in step 1 (ingest) — the check belongs right where data enters
+  const r=runDataQA();
+  if(!r.quarters) return `<div class="card pad" style="margin-top:18px"><b>${IC('check')} בקרת נתונים</b><div class="small muted" style="margin-top:6px">תופעל אוטומטית אחרי קליטת הרבעון הראשון — עקביות בין דוחות, רבעונים ושדות.</div></div>`;
+  const c={innerHTML:''}; PAGE_RENDER.qa(c,true); return c.innerHTML;
+}
+PAGE_RENDER.qa=(c,embed)=>{
   const r=runDataQA();
   if(!r.quarters){ c.innerHTML=quartersStrip()+emptyBlock(IC('check'),'אין רבעונים לבדיקה','קלוט לפחות רבעון אחד כדי להריץ בקרת עקביות.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const lvl={red:{t:'קריטי',c:'r'},amber:{t:'אי-עקביות',c:'a'},info:{t:'לבדיקה',c:'b'},ok:{t:'תקין ✓',c:'g'}};
   const ord={red:0,amber:1,info:2,ok:3};
   const sorted=[...r.findings].sort((a,b)=>ord[a.level]-ord[b.level]||qIndex(a.q)-qIndex(b.q));
-  c.innerHTML=quartersStrip()+`
+  c.innerHTML=(embed?'<div style="margin-top:18px"></div>':quartersStrip())+`
     <div class="kpis" style="margin-bottom:16px">
       ${kpi('מדד עקביות',r.score+'/100',r.score>=85?'נתונים אמינים':'דרוש טיפול')}
       ${kpi('רבעונים נבדקו',r.quarters,'')}
@@ -1112,12 +1118,16 @@ PAGE_RENDER.plan = (c)=>{
     </div>
     ${renderRoadmap(q)}
     ${renderDependencies(q,targetQ)}
+    ${(window._recSims=items.map(it=>it.sim||null),'')}
     ${items.map((it,i)=>`<div class="act ${it.level}">
       <div class="an">${i+1}</div>
       <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
         ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
         ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
-        ${it.action?`<button class="btn sm" style="margin-top:8px;margin-inline-start:8px" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
+        <div class="row" style="gap:8px;margin-top:8px">
+          ${it.sim?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
+          ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
+        </div>
       </div></div>`).join('')}
     <div class="card pad" style="margin-top:6px"><div class="small muted">אחרי שתחליט: הרץ את התרחיש ב<b>סימולטור</b>, ייצא <b>גיליון הזנה</b> ל-${targetQ}, ותעד ב<b>יומן ההחלטות</b>.</div>
       <div class="row" style="margin-top:10px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('zap')} מיקסום Q9</button></div>
@@ -1193,6 +1203,35 @@ function chainStage(q){ // where are we on the mandatory build-up path?
   if((op.factories||0)>0) return {stage:1,txt:'מפעלים קיימים — הרבעון מייצרים שבבים',pcs,chips};
   return {stage:0,txt:'בונים מפעלים — ייצור שבבים ברבעון הבא',pcs,chips};
 }
+/* One-click: apply a recommendation's concrete levers onto the working scenario and open it. */
+window._recSims=[];
+window.applyRecToSim=(idx)=>{
+  const rec=window._recSims[idx]; if(!rec) return;
+  const name='תוכנית הרבעון — מההמלצות';
+  let sc=S.scenarios.find(s=>s.name===name);
+  if(!sc){ sc={id:uid(),name,base:S.activeQuarter,levers:{},createdAt:Date.now()}; S.scenarios.push(sc); }
+  sc.base=S.activeQuarter;
+  const tq=rec.q;
+  if(!sc.levers[tq]){ sc.levers[tq]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[tq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}); }
+  const lev=sc.levers[tq];
+  if(rec.rd!=null) lev.rd=rec.rd;
+  Object.entries(rec.regions||{}).forEach(([rid,patch])=>{ lev.regions[rid]=Object.assign(lev.regions[rid]||{},patch); });
+  save(); toast('הוחל על "'+name+'" — נפתח בסימולטור ✓','g');
+  go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
+};
+/* Concrete sell-plan per region from finished-PC inventory: units, price (best source available), advertising. */
+function pcPlanFor(q){
+  const out=[]; (S.quarters[q].operational.inventory||[]).filter(i=>i.product==='Y'&&(i.qty||0)>0).forEach(i=>{
+    const rid=i.region||'europe'; const reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
+    let price=0, src='';
+    const a=S.learning.anchors&&S.learning.anchors[rid+'|Y'];
+    if(a&&a.price>0){ price=Math.round(a.price); src='עוגן ביקוש נלמד'; }
+    else if(i.cost>0){ price=Math.round(i.cost*2); src='עלות ×2'; }
+    else { price=300; src='הנחת פתיחה — עדכן לפי עלות בפועל'; }
+    out.push({rid, reg, units:i.qty, price, src, revenue:i.qty*price, adv:Math.round(i.qty*price*0.06), cost:i.cost||0});
+  });
+  return out;
+}
 function buildActionPlan(q,targetQ){
   const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals, out=[];
   const proj=projectCashflow(q,null); const brk=proj.find(x=>x.breach);
@@ -1203,22 +1242,35 @@ function buildActionPlan(q,targetQ){
     detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`,
     dep:`ההחלטה חייבת להתקבל <b>רבעון-שניים לפני</b> ${brk.q} — מימון וצמצום הוצאות משפיעים על המזומן קדימה, לא רטרואקטיבית.`});
   // 2. Negative currency
-  REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0) out.push({level:'red',title:`גירעון מטבע — ${r.name}`,form:'A3-1 (Money Transfer אזור↔מטה)',
-    detail:`יתרה שלילית ${fmt(f.cash[r.id])} ${r.cur}. העבר מזומן מהמטה (A3-1) או צמצם פעילות באזור זה לפני ההזנה.`}); });
+  REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0){ const need=Math.round(Math.abs(f.cash[r.id])*1.2);
+    out.push({level:'red',title:`גירעון מטבע — ${r.name}: העבר ${fmt(need)} ${r.cur}`,form:'A3-1 (Money Transfer אזור↔מטה)',
+      detail:`יתרה שלילית ${fmt(f.cash[r.id])} ${r.cur}. סכום מוצע: <b>${fmt(need)} ${r.cur}</b> (הגירעון + כרית 20%) בהעברה מהמטה, Convert in Area? כן.`,
+      sim:{q:targetQ,regions:{[r.id]:{transferIn:need}}}}); } });
+  // HQ thin liquidity -> concrete A3-1 transfer from the richest region
+  const hqCash=f.cash.hq||0;
+  if(hqCash>=0 && hqCash<100000){
+    const rich=REGIONS.filter(r=>r.id!=='hq').map(r=>({r,v:f.cash[r.id]||0})).sort((a,b)=>b.v*fxRate(b.r.cur)-a.v*fxRate(a.r.cur))[0];
+    if(rich && rich.v>300000){ const amt=Math.round(rich.v*0.8); const chf=Math.round(amt*fxRate(rich.r.cur)/fxRate('CHF'));
+      out.push({level:'amber',conf:'data',title:`מטה דק (${fmt(hqCash)} CHF) — העבר ${fmt(amt)} ${rich.r.cur} מ${rich.r.name}`,form:'A3-1 (Money Transfer — To Home Office)',
+        detail:`המטה משלם ריבית ומו״פ אך מחזיק ${fmt(hqCash)} CHF בלבד, בעוד ב${rich.r.name} יש ${fmt(rich.v)} ${rich.r.cur}. מוצע: העברת <b>${fmt(amt)} ${rich.r.cur}</b> (80% מהיתרה, ≈${fmt(chf)} SF) To Home Office.`,
+        dep:`חייב להתבצע לפני מימון מו״פ (H1-1) והוצאות מטה ברבעון הבא.`,
+        sim:{q:targetQ,regions:{hq:{transferIn:chf}}}}); }
+  }
   // 3. Revenue status — judged against the mandatory value-chain timeline
   //    (factory Q1 -> chips Q2 -> PCs Q3 -> first possible sale Q4): zero revenue
   //    before PCs exist is ON PLAN, not an alarm.
   if((f.revenue||0)===0){
     const carried=pcCarriedInto(q), st=chainStage(q);
-    if(carried>0){
-      out.push({level:'red',conf:'rule',title:'מכירה הייתה אפשרית — ולא קרתה',form:'A1-1/A1-2 (מחיר+פרסום)',
-        detail:`נכנסת ל-${q} עם ${fmt(carried)} מחשבים מוכנים מהרבעון הקודם, ובכל זאת המחזור 0 — כמעט תמיד סימן שמחיר לא הוזן ("אין מחיר = אין מכירה"). ודא שב-${targetQ} מוזן מחיר ופרסום.`,
-        dep:`מלאי מוכן ✓ · חסר: מחיר (A1-2). זו הפעולה היחידה שחוסמת הכנסה.`});
-    } else if(st.stage>=3){
-      out.push({level:'red',conf:'rule',title:`המכירה הראשונה האפשרית: ${targetQ} — אל תפספסו את המחיר`,form:'A1-2 (PC Prices & Advertising)',
-        detail:`${fmt(st.pcs)} מחשבים מוכנים במלאי הסגירה של ${q}. לפי מסלול ההבשלה (מפעל←שבבים←מחשבים) זה הרבעון הראשון שבו מכירה בכלל אפשרית — מחזור 0 עד כה היה מובנה ולא טעות. כל מה שנדרש עכשיו: <b>להזין מחיר + פרסום ב-${targetQ}</b>. שכחת מחיר = עוד רבעון אבוד.`,
-        dep:`מפעל ✓ (רבעון 1) · שבבים ✓ (רבעון 2) · מחשבים ✓ (רבעון 3) ⟵ נותר רק תמחור A1-2 ב-${targetQ}.`,
-        action:"go('export')",actionLabel:'לגיליון ההזנה'});
+    if(carried>0 || st.stage>=3){
+      const plan=pcPlanFor(q);
+      const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה ${fmt(p.revenue)} · פרסום 6% = ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src})</span>`).join('<br>');
+      const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:6}; });
+      out.push({level:'red',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
+        title: carried>0 ? 'מכירה הייתה אפשרית — ולא קרתה. הזן מחיר עכשיו' : `המכירה הראשונה האפשרית: ${targetQ} — תוכנית מכירה מוכנה`,
+        form:'A1-2 (PC Prices & Advertising)',
+        detail:`${carried>0?`נכנסת ל-${q} עם ${fmt(carried)} מחשבים והמחזור נשאר 0 — "אין מחיר = אין מכירה". `:`מחזור 0 עד כה היה מובנה (מפעל←שבבים←מחשבים). עכשיו יש מלאי מוכן — `}התוכנית הקונקרטית ל-${targetQ}:<br>${planTxt}`,
+        dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2) ב-${targetQ}. ההכנסה תיגבה מדורג לפי לוח הגבייה האזורי.`,
+        sim:{q:targetQ,regions:simRegions}});
     } else {
       out.push({level:'info',conf:'rule',title:'מחזור 0 — במסלול ההבשלה, לא טעות',
         detail:`אי-אפשר למכור לפני שיש מחשבים: מפעל (רבעון) ← שבבים (רבעון) ← מחשבים (רבעון) ← מכירה. מצב נוכחי: <b>${st.txt}</b>${st.chips?` (${fmt(st.chips)} שבבים)`:''}. שריפת המזומן (רווח נקי ${fmt(f.netProfit)}) היא עלות ההקמה המתוכננת — עקוב שהיא לא שוברת רצפה.`,
@@ -1239,9 +1291,15 @@ function buildActionPlan(q,targetQ){
       dep:`מו״פ היום ⟵ הדרגה זמינה לייצור ומכירה רק ברבעון הבא. השקעה זו מקדימה ומאפשרת את החלטות הייצור/התמחור של הדרגה הגבוהה.`});
   }
   // 7. Tech targets
-  if(g.techXTarget>op.techX || g.techYTarget>op.techY) out.push({level:'info',title:'פער מול יעד הדרגה',form:'H1-1 (מו״פ)',
-    detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, היעד ${g.techXTarget}/${g.techYTarget}. כדי למכור דרגות גבוהות יותר (מרווח גבוה) — השקע במו״פ עד להשגת הדרגה.`,
-    dep:`שרשרת: מו״פ ⟵ דרגה ⟵ ייצור הדרגה החדשה ⟵ תמחור פרמיום. כל שלב תלוי בקודם; תכנן את המו״פ מספיק מוקדם כדי שהדרגה תבשיל בזמן.`});
+  if(g.techXTarget>op.techX || g.techYTarget>op.techY || (op.rd||0)===0){
+    let lastRd=0; enteredQuarters().forEach(x=>{ const v=S.quarters[x].operational.rd||0; if(v>0) lastRd=v; });
+    const rdSuggest=lastRd||800000;
+    const tgt=(g.techXTarget||g.techYTarget)?`היעד ${g.techXTarget||'—'}/${g.techYTarget||'—'}`:'יעדי דרגה טרם הוגדרו (הגדרות ויעדים)';
+    out.push({level:(op.rd||0)===0?'amber':'info',conf:lastRd?'data':'est',title:`${(op.rd||0)===0?'מו״פ נעצר (0)':'פער מול יעד הדרגה'} — חדש מו״פ של ${fmt(rdSuggest)} SF`,form:'H1-1 (מו״פ)',
+      detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, ${tgt}${(op.rd||0)===0?' — והמו״פ ברבעון זה 0, מחצית הפוטנציאל נתקעת':''}. מוצע ל-${targetQ}: <b>${fmt(rdSuggest)} SF</b> (${lastRd?'הקצב האחרון שלך':'ברירת מחדל'}).`,
+      dep:`שרשרת: מו״פ ⟵ דרגה ⟵ ייצור הדרגה החדשה ⟵ תמחור פרמיום. מו״פ שמוזן ב-${targetQ} מבשיל רבעון קדימה.`,
+      sim:{q:targetQ,rd:rdSuggest}});
+  }
   // 8. Contracts at risk
   S.config.contracts.forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
     const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
@@ -1344,6 +1402,7 @@ PAGE_RENDER.ingest = (c)=>{
         <div class="cb" id="verifyForm"></div>
       </div>
     </div>`;
+  c.insertAdjacentHTML('beforeend', qaSectionHTML());
   setupDrop(); renderVerifyForm($('#verifyForm'));
 };
 function setupDrop(){
@@ -1990,6 +2049,7 @@ PAGE_RENDER.export = (c)=>{
       <div class="ch"><h3>${IC('book')} מקרא טפסי ההחלטה של INTOPIA</h3><span class="small muted">כל הקודים, האזורים והשדות הרשמיים</span></div>
       <div class="cb" id="formsRef"></div>
     </div>`;
+  c.insertAdjacentHTML('beforeend', journalSectionHTML());
   refreshExport(); renderFormsReference($('#formsRef'));
 };
 function selectedExportScenario(){ const id=$('#expScenario')?.value; return S.scenarios.find(s=>s.id===id)||S.scenarios[0]; }
@@ -2062,11 +2122,11 @@ window.downloadInputSheet=(targetQ)=>{
 };
 
 /* ----- JOURNAL (F8.3) ----- */
-PAGE_RENDER.journal = (c)=>{
+function journalSectionHTML(){
   const list=[...S.decisions].sort((a,b)=>b.ts-a.ts);
-  c.innerHTML=`
-    <div class="between" style="margin-bottom:16px"><div class="small muted">כל החלטה + רציונל + תרחיש + מאשר. ניתן לשליפה בכל רבעון.</div>
-    <button class="btn primary" onclick="openDecisionModal(null)">+ רישום החלטה</button></div>
+  return `<div class="card" style="margin-top:18px">
+    <div class="ch"><h3>${IC('book')} יומן החלטות</h3><button class="btn sm primary" onclick="openDecisionModal(null)">+ רישום החלטה</button></div>
+    <div class="cb">
     ${list.length? list.map(d=>`
       <div class="card pad" style="margin-bottom:12px">
         <div class="between"><div><span class="chip">${d.quarter}</span> <b style="margin-inline-start:6px">${esc(d.scenarioName)}</b></div>
@@ -2074,8 +2134,10 @@ PAGE_RENDER.journal = (c)=>{
         <div style="margin:8px 0;line-height:1.6">${esc(d.rationale)}</div>
         <div class="small muted">אישר: <b>${esc(d.approver)}</b> <button class="x" style="font-size:16px;margin-inline-start:8px" onclick="delDecision('${d.id}')">${IC('trash')}</button></div>
       </div>`).join('')
-      : `<div class="card"><div class="cb">${emptyBlockInline(IC('book'),'אין החלטות ביומן','בחר תרחיש בסימולטור או רשום החלטה ידנית — היא תישמר עם הרציונל והמאשר.')}</div></div>`}`;
-};
+      : `<div class="small muted">אין החלטות ביומן עדיין — בחר תרחיש בסימולטור או רשום ידנית; ההחלטה נשמרת עם רציונל ומאשר.</div>`}
+    </div></div>`;
+}
+PAGE_RENDER.journal = (c)=>{ c.innerHTML=journalSectionHTML(); };
 window.delDecision=(id)=>{ S.decisions=S.decisions.filter(d=>d.id!==id); save(); go('journal'); };
 window.openDecisionModal=(sc)=>{
   openModal('רישום החלטה',`
