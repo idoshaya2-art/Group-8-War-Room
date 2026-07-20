@@ -93,6 +93,13 @@ a{color:var(--accent2)}
 .ns-kpi b{font-size:15px}
 .ns-alert{margin-inline-start:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;max-width:42%;cursor:pointer}
 .ns-alert.red{color:var(--red)} .ns-alert.amber{color:var(--amber)} .ns-alert.ok{color:var(--green)}
+/* WS-5: master-plan roadmap strip */
+.rm-strip{display:flex;align-items:center;gap:6px;overflow-x:auto;flex-wrap:wrap}
+.rm-cell{min-width:54px;text-align:center;padding:8px 6px;border-radius:9px;background:var(--panel2);border:1px solid var(--line)}
+.rm-cell b{display:block;font-size:13px}.rm-cell span{font-size:10px;color:var(--muted)}
+.rm-cell.done{border-color:color-mix(in srgb,var(--green) 40%,var(--line))}.rm-cell.done span{color:var(--green)}
+.rm-cell.cur{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+.rm-ar{color:var(--muted2);font-weight:800}
 
 /* ===== Components ===== */
 .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -980,10 +987,11 @@ PAGE_RENDER.plan = (c)=>{
       <div class="between"><h3>${IC('clipboard')} תוכנית פעולה ל-${targetQ}</h3><span class="tag ${reds?'r':'b'}">${items.length} פעולות${reds?` · ${reds} דחופות`:''}</span></div>
       <div class="small muted" style="margin-top:6px">מבוסס על נתוני ${q}, ההקרנה, המודיעין והיעדים. כל פעולה מציינת <b>מה לעשות</b>, <b>למה</b>, ו<b>איזה טופס רשמי להזין</b> (A2-3/A2-4=ייצור · A1-1/A1-2=מחיר+פרסום · H1-1=מו״פ · A3-1=העברת כסף). מקרא מלא בעמוד "ייצוא הזנה".</div>
     </div>
+    ${renderRoadmap(q)}
     ${renderDependencies(q,targetQ)}
     ${items.map((it,i)=>`<div class="act ${it.level}">
       <div class="an">${i+1}</div>
-      <div class="at"><b>${it.title}</b><p>${it.detail}</p>
+      <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
         ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
         ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
         ${it.action?`<button class="btn sm" style="margin-top:8px;margin-inline-start:8px" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
@@ -1025,6 +1033,29 @@ function renderDependencies(q,targetQ){
       <ul style="padding-inline-start:20px;line-height:1.85;margin:12px 0 0">${deps.map(d=>`<li><b>${d.t}</b> — ${d.d}</li>`).join('')}</ul>
     </div></div>`;
 }
+// WS-5: confidence tags — every recommendation says where it comes from (data / game rule / estimate).
+const CONF={ data:{t:'מבוסס נתונים',c:'g'}, rule:{t:'חוק משחק',c:'b'}, est:{t:'אומדן',c:'a'} };
+function confTag(k){ const x=CONF[k]||CONF.rule; return `<span class="tag ${x.c}" title="רמת ביטחון להמלצה">${x.t}</span>`; }
+// WS-5: maturation countdown — will an investment still pay off by Q9?
+function quartersToEnd(q){ return (QUARTERS.length-1)-qIndex(q); }
+function maturationAdvice(q){
+  const n=quartersToEnd(q), out=[];
+  out.push({ok:n>=1, t:'מו״פ (H1-1)', d:n>=1?`מבשיל +1 רבעון — נותרו ${n}, עדיין משתלם`:'ב-Q9 לא יבשיל בזמן — אל תשקיע במו״פ חדש'});
+  out.push({ok:n>=3, t:'מפעל חדש (A2-1)', d:n>=3?'בנייה→ייצור→מכירה→גבייה עדיין נסגר עד Q9':'מאוחר מדי — לא יחזיר את ההשקעה עד Q9'});
+  out.push({ok:n>=2, t:'משרד מכירות (A1-3)', d:n>=2?'עלות קבועה שמחזירה עם צמיחת נפח':'ההחזר לא יתממש עד Q9 — דלג'});
+  out.push({ok:true, t:'נתח שוק / דרגה', d:'נמדדים ב-Q9 (מחצית הפוטנציאל) — בנה מוקדם, מתגמל בכל שלב'});
+  return {n,out};
+}
+function renderRoadmap(q){
+  const mat=maturationAdvice(q);
+  const cells=QUARTERS.map(x=>{ const done=S.quarters[x].entered, cur=x===q;
+    return `<div class="rm-cell ${cur?'cur':(done?'done':'')}"><b>${x}</b><span>${cur?'נוכחי':(done?'✓ נקלט':'—')}</span></div>`; }).join('<span class="rm-ar">←</span>');
+  return `<div class="card" style="margin-bottom:16px"><div class="ch"><h3>${IC('trendUp')} תוכנית-אב Q1→Q9 · ספירת בשלות</h3><span class="tag ${mat.n<=2?'a':'b'}">${mat.n} רבעונים עד הסיום</span></div>
+    <div class="cb"><div class="rm-strip">${cells}</div>
+      <div class="small muted" style="margin-top:12px">מה עוד מבשיל עד Q9 אם מתחילים מ-${q}:</div>
+      <ul style="padding-inline-start:20px;line-height:1.9;margin:6px 0 0">${mat.out.map(m=>`<li class="small"><span style="color:${m.ok?'var(--green)':'var(--red)'};font-weight:800">${m.ok?'✓':'✕'}</span> <b>${esc(m.t)}</b> — ${esc(m.d)}</li>`).join('')}</ul>
+    </div></div>`;
+}
 function buildActionPlan(q,targetQ){
   const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals, out=[];
   const proj=projectCashflow(q,null); const brk=proj.find(x=>x.breach);
@@ -1052,13 +1083,13 @@ function buildActionPlan(q,targetQ){
   // 5. Retained-earnings rank (50% of final score)
   if(comps.length && us){ const sorted=[...comps].filter(x=>x.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
     const rank=sorted.findIndex(x=>x.num===OUR_CO)+1;
-    if(rank>comps.length/2) out.push({level:'amber',title:`ברווחים צבורים אתה #${rank}/${comps.length} — עדיפות עליונה`,
+    if(rank>comps.length/2) out.push({level:'amber',conf:'data',title:`ברווחים צבורים אתה #${rank}/${comps.length} — עדיפות עליונה`,
       detail:`רווחים צבורים = 50% מהציון הסופי, ואתה בחצי התחתון (המוביל: חברה ${sorted[0].num}). כל רבעון בלי רווח מגדיל את הפער. זו הסיבה המרכזית להתחיל למכור ברווחיות.`,action:"go('intel')",actionLabel:'למודיעין'});
   }
   // 6. R&D vs competitors
   if(comps.length){ const chipLeaders=[...comps].filter(x=>x.num!==OUR_CO&&x.rdChip>0).sort((a,b)=>b.rdChip-a.rdChip).slice(0,2);
     const ourRd=(op.rd||0), avgRd=comps.reduce((a,x)=>a+((x.rdChip||0)+(x.rdPc||0)),0)/comps.length*1000; // MR74 in 000s
-    if(chipLeaders.length) out.push({level:'info',title:'לחץ טכנולוגי — החלטת מו״פ',form:'H1-1 (מו״פ, בליכטנשטיין)',
+    if(chipLeaders.length) out.push({level:'info',conf:'data',title:'לחץ טכנולוגי — החלטת מו״פ',form:'H1-1 (מו״פ, בליכטנשטיין)',
       detail:`חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות בהשקעת מו״פ ב-Chip. ${ourRd>=avgRd?'אתה מעל ממוצע השוק — שמור על הקצב':'אתה מתחת לממוצע — סיכון לפיגור בדרגה'}. החלט על מו״פ ל-${targetQ} בטופס H1-1.`,
       dep:`מו״פ היום ⟵ הדרגה זמינה לייצור ומכירה רק ברבעון הבא. השקעה זו מקדימה ומאפשרת את החלטות הייצור/התמחור של הדרגה הגבוהה.`});
   }
@@ -1077,7 +1108,7 @@ function buildActionPlan(q,targetQ){
   // 10. MAX plan reference
   const maxSc=S.scenarios.find(s=>s.name==='MAX — מיקסום Q9');
   if(maxSc){ const sp=scoreProxy(maxSc.levers);
-    out.push({level:'good',title:'תוכנית המיקסום מוכנה',form:'ייצוא הזנה',
+    out.push({level:'good',conf:'est',title:'תוכנית המיקסום מוכנה',form:'ייצוא הזנה',
       detail:`חושבה תוכנית מיטבית ל-Q9 (מזומן סופי מוקרן ${fmt(sp.endCash)}, פרוקסי ציון ${sp.value.toFixed(0)}). פתח אותה בסימולטור, כוונן, וייצא גיליון הזנה ל-${targetQ}.`,action:"go('export')",actionLabel:'ייצא הזנה'});
   } else out.push({level:'info',title:'הרץ מיקסום Q9',form:'—',
     detail:`טרם חושבה תוכנית מיטבית. עבור ל<b>יעדים ← MAX</b>, הזן קיבולת ועלות יח׳, וקבל המלצת ייצור/מחיר/מו״פ שממקסמת את הציון בלי לשבור רצפות.`,action:"go('goals')",actionLabel:'למיקסום'});
