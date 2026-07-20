@@ -338,6 +338,7 @@ function defaultState(){
         tax:{us:34, europe:30, brazil:25, hq:0},
         interest:{bank:10, supplierCredit:11, h4:12, securities:6},
         productionPay:[100,0],
+        factoryCost:500000, officeCost:80000, // A2-1 one-time build (SF) · A1-3 per-office per-quarter operating (SF)
         fx:{USD:1, EUR:1.5, BRL:0.5, CHF:1},
       },
     },
@@ -532,8 +533,9 @@ function projectCashflow(baseQuarter, leversByQuarter){
       const rl=(lev.regions&&lev.regions[r.id])||{};
       const sales=rl.sales||0, prodCost=(rl.production||0)*(rl.unitCost||0), adv=rl.advertising||0,
             invest=rl.invest||0, transferIn=rl.transferIn||0, rd=(lev.rd||0)/REGIONS.length;
+      const facCost=(rl.newFac||0)*(p.factoryCost||0), offCost=(rl.offices||0)*(p.officeCost||0); // WS-4: A2-1 build + A1-3 operating
       if(sales) push(r.id,i,sales);
-      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd - transferIn;
+      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost - transferIn;
     });
     pipeline.filter(x=>x.q===q).forEach(x=> bal[x.region]+=x.amount);
     const loans=S.quarters[baseQuarter].financial.loans||0;
@@ -571,7 +573,8 @@ function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's fu
   if(!levers) return 0; const p=S.config.params, loans=S.quarters[base].financial.loans||0; let add=0;
   nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; let net=0;
     REGIONS.forEach(r=>{ if(r.id==='hq') return; const rl=(lev.regions&&lev.regions[r.id])||{};
-      const pretax=(rl.sales||0)-((rl.production||0)*(rl.unitCost||0))-(rl.advertising||0)-(rd/3);
+      const offCost=(rl.offices||0)*(p.officeCost||0); // A1-3 offices are opex, hit profit
+      const pretax=(rl.sales||0)-((rl.production||0)*(rl.unitCost||0))-(rl.advertising||0)-(rd/3)-offCost;
       net += pretax - (pretax>0?pretax*((p.tax[r.id]||0)/100):0); });
     net -= loans*((p.interest&&p.interest.bank||0)/100)/4; add+=net; });
   return add;
@@ -1563,7 +1566,7 @@ function simCap(op){ return op.inventory.reduce((a,i)=>a+(i.qty||0),0); }
 let _simEditId=null,_simEditQ=null;
 window.newScenario=()=>{
   const sc={id:uid(),name:'תרחיש '+(S.scenarios.length+1),base:S.activeQuarter,levers:{},createdAt:Date.now()};
-  nextQuarters(S.activeQuarter).slice(0,3).forEach(q=>{ sc.levers[q]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[q].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null}); });
+  nextQuarters(S.activeQuarter).slice(0,3).forEach(q=>{ sc.levers[q]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[q].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}); });
   S.scenarios.push(sc); save(); renderScenarios(); editScenario(sc.id);
 };
 window.delScenario=(id)=>{ S.scenarios=S.scenarios.filter(s=>s.id!==id); save(); renderScenarios(); };
@@ -1601,6 +1604,15 @@ window.editScenario=(id)=>{
         <td><input class="f" id="f_${r.id}_transferIn" type="number" style="width:96px" value="${rl.transferIn||0}" oninput="setLever('${id}','${q}','transferIn','${r.id}',this.value)"></td>
       </tr>`; }).join('')}</tbody></table></div>
       <div class="small muted" style="margin-top:10px">מכירות = הכנסה מתוכננת ברבעון (נגבית מדורג לפי לוח הגבייה האזורי). "מרווח מהיר" ממלא מכירות = ייצור×עלות×מרווח; "% מהכנסה" ממלא פרסום. המנוע מחשב השפעה בזמן אמת למטה.</div>
+      <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--muted)">${IC('landmark')} הרחבת תשתית — מפעלים (A2-1) ומשרדי מכירות (A1-3)</summary>
+        <div style="overflow-x:auto;margin-top:10px"><table class="tbl wide"><thead><tr><th>אזור</th><th>מפעלים חדשים (A2-1)</th><th>יעד משרדי מכירות (A1-3)</th><th>עלות משוערת ברבעון</th></tr></thead>
+        <tbody>${REGIONS.filter(r=>r.id!=='hq').map(r=>{ const rl=lv.regions[r.id]||{}; const cost=(rl.newFac||0)*(S.config.params.factoryCost||0)+(rl.offices||0)*(S.config.params.officeCost||0);
+          return `<tr><td><b>${r.name}</b></td>
+          <td><input class="f" type="number" min="0" max="3" style="width:80px" value="${rl.newFac||0}" oninput="setLever('${id}','${q}','newFac','${r.id}',this.value)"></td>
+          <td><input class="f" type="number" min="0" max="9" style="width:80px" value="${rl.offices||0}" oninput="setLever('${id}','${q}','offices','${r.id}',this.value)"></td>
+          <td class="num" id="infcost_${r.id}">${fmt(cost)} SF</td></tr>`; }).join('')}</tbody></table></div>
+        <div class="small muted" style="margin-top:6px">מפעל = עלות חד-פעמית (~${fmt(S.config.params.factoryCost)} SF), קיבולת זמינה רבעון קדימה. משרד = עלות תפעול חוזרת (~${fmt(S.config.params.officeCost)} SF/רבעון) שמעלה את תקרת הביקוש. שני הסעיפים משפיעים על התזרים ועל הציון.</div>
+      </details>
       <div id="miniResult" style="margin-top:14px"></div>`;
     renderImpactBoard(sc);
   };
@@ -1757,6 +1769,8 @@ function buildInputRows(targetQ,sc){
     const price=(rl.production>0&&rl.sales>0)?Math.round(rl.sales/rl.production):(rl.margin&&rl.unitCost?Math.round(rl.unitCost*rl.margin):0);
     if(rl.production>0) rows.push({form:isX?'A2-3':'A2-4',action:`ייצור ${r.name} — ${isX?'X·Chip':'Y·PC'} ${model}`,value:rl.production,note:rl.unitCost?`עלות/יח׳ ${fmt(rl.unitCost)} ${r.cur}`:''});
     if(rl.sales>0||rl.advertising>0) rows.push({form:isX?'A1-1':'A1-2',action:`תמחור+פרסום ${r.name} — ${isX?'Chip':'PC'} ${model}`,value:price,note:`מחיר/יח׳ · פרסום ${fmt(rl.advertising||0)} · מכירות ${fmt(rl.sales||0)} ${r.cur}`});
+    if((rl.newFac||0)>0) rows.push({form:'A2-1',action:`הקמת מפעלים — ${r.name}`,value:rl.newFac,note:`עלות ≈${fmt((rl.newFac||0)*(S.config.params.factoryCost||0))} SF · זמין רבעון קדימה`});
+    if((rl.offices||0)>0) rows.push({form:'A1-3',action:`משרדי מכירות — ${r.name}`,value:rl.offices,note:`יעד ${rl.offices} משרדים · עלות ≈${fmt((rl.offices||0)*(S.config.params.officeCost||0))} SF/רבעון`});
     if(rl.transferIn>0) rows.push({form:'A3-1',action:`Money Transfer — To Home Office? / אל ${r.name}`,value:rl.transferIn,note:`${r.cur} · כיוון מהמטה`});
     if(rl.invest>0) rows.push({form:'A3-2',action:`השקעה/הלוואה מקומית — ${r.name}`,value:rl.invest,note:r.cur});
   });
