@@ -74,6 +74,25 @@ a{color:var(--accent2)}
 .qsel label{font-size:12px;color:var(--muted)}
 .qsel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font-weight:700}
 .content{padding:24px 26px 60px;max-width:1400px;width:100%}
+/* WS-6: persistent North-Star bar (always know the score) */
+.northstar{padding:12px 26px 0;max-width:1400px;width:100%}
+.ns-wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line2);border-radius:14px;padding:11px 16px}
+.ns-score{display:flex;align-items:center;gap:12px}
+.ns-num{font-size:27px;font-weight:800;line-height:1}
+.ns-num span{font-size:12px;color:var(--muted2);font-weight:700}
+.ns-halves{display:flex;flex-direction:column;gap:4px;min-width:130px}
+.ns-h{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--muted)}
+.ns-h>span{width:30px}
+.ns-h .bar{flex:1;height:6px;background:var(--bg);border-radius:4px;overflow:hidden}
+.ns-h .bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.ns-h.pot .bar>i{background:linear-gradient(90deg,var(--purple),#c084fc)}
+.ns-lbl{font-size:11px;color:var(--muted);font-weight:700}
+.ns-div{width:1px;align-self:stretch;background:var(--line2)}
+.ns-kpi{display:flex;flex-direction:column;gap:2px}
+.ns-kpi .k{font-size:10px;color:var(--muted);font-weight:700}
+.ns-kpi b{font-size:15px}
+.ns-alert{margin-inline-start:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;max-width:42%;cursor:pointer}
+.ns-alert.red{color:var(--red)} .ns-alert.amber{color:var(--amber)} .ns-alert.ok{color:var(--green)}
 
 /* ===== Components ===== */
 .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -261,6 +280,7 @@ canvas{display:block;max-width:100%}
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
       <button class="btn sm ghost" id="btnSync" title="סנכרון צוותי"><span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span> סנכרון</button>
     </div>
+    <div class="northstar" id="northstar"></div>
     <div class="content" id="content"></div>
   </div>
 </div>
@@ -359,6 +379,7 @@ function save(silent){
   saveTimer=setTimeout(()=>{ try{ localStorage.setItem(LS_KEY,JSON.stringify(S)); }catch(e){ toast('שגיאת שמירה: '+e.message,'r'); } },120);
   if(sync.connected && !sync.applying) schedulePush();
   if(!silent) renderQBox();
+  if(typeof renderNorthStar==='function' && $('#northstar')) renderNorthStar();
 }
 
 /* ---------- Utilities ---------- */
@@ -446,6 +467,31 @@ function go(id){
   const p=PAGES.find(x=>x.id===id);
   $('#pageTitle').textContent=p.name; $('#pageSub').textContent=p.sub;
   const c=$('#content'); c.innerHTML=''; PAGE_RENDER[id](c); window.scrollTo(0,0);
+  renderNorthStar();
+}
+// WS-6: the persistent North-Star bar — score (real 50/50), cash-vs-floor, and the top action, on every page.
+function renderNorthStar(){
+  const box=$('#northstar'); if(!box) return;
+  const base=S.activeQuarter, Q=S.quarters[base];
+  if(!Q||!Q.entered){ box.innerHTML=`<div class="ns-wrap"><div class="ns-lbl">${IC('inbox')} קלוט דוח רבעון כדי לראות את הציון החי (50% עבר / 50% פוטנציאל)</div></div>`; return; }
+  const sp=scoreProxy(null);
+  const cash=unifiedCashOf(base), floor=(S.config.goals.floors[base]||0), dist=cash-floor;
+  const alerts=computeAlerts(base);
+  const top=alerts.find(a=>a.level==='red')||alerts.find(a=>a.level==='amber')||alerts[0];
+  const tlvl=top?(top.level==='red'?'red':(top.level==='amber'?'amber':'ok')):'ok';
+  const half=(v,pot)=>`<div class="ns-h ${pot?'pot':''}"><span>${pot?'עתיד':'עבר'}</span><div class="bar"><i style="width:${Math.max(0,Math.min(100,v)).toFixed(0)}%"></i></div><b class="num" style="width:26px">${v.toFixed(0)}</b></div>`;
+  box.innerHTML=`<div class="ns-wrap">
+    <div class="ns-score">
+      <div class="ns-num">${sp.value.toFixed(0)}<span>/100</span></div>
+      <div class="ns-halves">${half(sp.pastHalf,false)}${half(sp.potentialHalf,true)}</div>
+      <div class="ns-lbl">ציון Q9<br>חברה ${OUR_CO} · ${base}</div>
+    </div>
+    <div class="ns-div"></div>
+    <div class="ns-kpi"><span class="k">מזומן מול רצפה</span><b class="num" style="color:${dist>=0?'var(--green)':'var(--red)'}">${dist>=0?'+':''}${fmt(Math.round(dist))} SF</b></div>
+    ${sp.parts.rank?`<div class="ns-kpi"><span class="k">דירוג רווחים</span><b class="num">${sp.parts.rank}/${sp.parts.rankN}</b></div>`:''}
+    ${sp.parts.share!=null?`<div class="ns-kpi"><span class="k">נתח שוק</span><b class="num">${(sp.parts.share*100).toFixed(1)}%</b></div>`:''}
+    ${top?`<div class="ns-alert ${tlvl}" onclick="go('${top.key==='floor'?'cashflow':(top.key==='noprice'?'ingest':'plan')}')">${IC(tlvl==='red'?'warn':'info')} ${esc(top.title)}</div>`:`<div class="ns-alert ok">${IC('check')} אין התראות פתוחות</div>`}
+  </div>`;
 }
 function renderQuarterSelect(){
   const sel=$('#quarterSelect'); sel.innerHTML='';
