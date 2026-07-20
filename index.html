@@ -454,6 +454,7 @@ const PAGES = [
   {id:'financials', ic:'landmark',  name:'מצב פיננסי', sub:'רו״ה, מאזן ויחסים — תמונה מלאה', sec:'ניתוח'},
   {id:'cashflow',   ic:'lineChart', name:'תזרים',      sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'ניתוח'},
   {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מגמות והמלצות MR', sec:'ניתוח'},
+  {id:'roles',      ic:'users',     name:'תצוגות תפקיד', sub:'CEO · CFO · COO · CMO · מודיעין', sec:'החלטה'},
   {id:'plan',       ic:'clipboard', name:'תוכנית פעולה', sub:'מה לעשות ברבעון הקרוב + איך להזין', sec:'החלטה'},
   {id:'ai',         ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'החלטה'},
   {id:'sim',        ic:'sliders',   name:'סימולטור',   sub:'תרחישים, מנופים והשוואה', sec:'החלטה'},
@@ -1118,6 +1119,63 @@ function buildActionPlan(q,targetQ){
   out.sort((a,b)=>ord[a.level]-ord[b.level]);
   return out;
 }
+
+/* ===== WS-6b · Role views (CEO/CFO/COO/CMO/Intel) + ours-vs-AI ===== */
+const ROLES=[
+  {id:'ceo',name:'מנכ״ל · CEO',ic:'target'},
+  {id:'cfo',name:'כספים · CFO',ic:'wallet'},
+  {id:'coo',name:'תפעול · COO',ic:'landmark'},
+  {id:'cmo',name:'שיווק · CMO',ic:'trendUp'},
+  {id:'intel',name:'מודיעין · Intel',ic:'search'},
+];
+const ROLE_PANEL={};
+PAGE_RENDER.roles=(c)=>{
+  const base=S.cumulative?latestEntered():S.activeQuarter;
+  if(!base||!S.quarters[base].entered){ c.innerHTML=emptyBlock(IC('users'),'אין נתונים','קלוט רבעון כדי לפתוח תצוגות תפקיד.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
+  c.innerHTML=`<div class="small muted" style="margin-bottom:12px">כל תפקיד מקבל את הפינה שלו — אותם נתונים, ממוקדים. תומך בעבודה מקבילה של 5 חברי הצוות.</div>
+    <div class="pill-tabs" id="roleTabs">${ROLES.map((r,i)=>`<button class="${i===0?'active':''}" data-r="${r.id}">${IC(r.ic)} ${r.name}</button>`).join('')}</div>
+    <div id="rolePanel" style="margin-top:16px"></div>`;
+  $$('#roleTabs button').forEach(b=>b.onclick=()=>{ $$('#roleTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); showRole(b.dataset.r,base); });
+  showRole('ceo',base);
+};
+function showRole(role,base){ const el=$('#rolePanel'); if(!el)return; el.innerHTML=ROLE_PANEL[role](base); if(role==='ceo') renderOursVsAI(); }
+ROLE_PANEL.ceo=(base)=>{ const sp=scoreProxy(null); const top=computeAlerts(base).slice(0,3);
+  return `<div class="kpis">${kpi('ציון Q9',sp.value.toFixed(0)+'/100','')}${kpi('מחצית עבר',sp.pastHalf.toFixed(0),'')}${kpi('מחצית פוטנציאל',sp.potentialHalf.toFixed(0),'')}${kpi('דירוג רווחים',sp.parts.rank?sp.parts.rank+'/'+sp.parts.rankN:'—','')}</div>
+    <div class="card pad" style="margin-top:14px"><b>${IC('warn')} 3 הדחופים ביותר</b><ul style="padding-inline-start:20px;line-height:1.9;margin:8px 0 0">${top.map(a=>`<li class="small"><span class="tag ${a.level==='red'?'r':(a.level==='amber'?'a':'b')}">${a.level==='red'?'אדום':(a.level==='amber'?'כתום':'מידע')}</span> ${esc(a.title)}</li>`).join('')||'<li class="small">אין התראות פתוחות</li>'}</ul></div>
+    <div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('scale')} התוכנית שלנו מול המלצת ה-AI</h3></div><div class="cb" id="oursVsAi"></div></div>`;
+};
+function renderOursVsAI(){ const box=$('#oursVsAi'); if(!box)return;
+  const ours=S.scenarios.find(s=>s.name!=='MAX — מיקסום Q9'); const ai=S.scenarios.find(s=>s.name==='MAX — מיקסום Q9');
+  const spO=ours?scoreProxy(ours.levers):scoreProxy(null); const spA=ai?scoreProxy(ai.levers):null;
+  const col=(title,sp,sub)=>`<div class="card pad" style="flex:1;min-width:200px"><div class="small muted">${title}</div><div style="font-size:30px;font-weight:800;line-height:1.1">${sp?sp.value.toFixed(0):'—'}<span style="font-size:12px;color:var(--muted2)">/100</span></div><div class="small muted">${sub}</div>${sp?`<div class="small" style="margin-top:6px">עבר ${sp.pastHalf.toFixed(0)} · עתיד ${sp.potentialHalf.toFixed(0)} · מזומן Q9 ${fmt(Math.round(sp.endCash))}</div>`:''}</div>`;
+  const delta=(spA&&spO)?(spA.value-spO.value):null;
+  box.innerHTML=`<div class="row" style="gap:12px;align-items:stretch;flex-wrap:wrap">
+    ${col('התוכנית שלנו'+(ours?` · ${esc(ours.name)}`:''),spO,ours?'תרחיש נוכחי':'בסיס — טרם נבנה תרחיש')}
+    ${col('המלצת ה-AI (MAX)',spA,ai?'תוכנית מיטבית':'טרם חושבה')}
+   </div>
+   ${delta!=null?`<div class="tag ${delta>=0?'g':'a'}" style="margin-top:12px;display:block">פער: ה-AI ${delta>=0?'משפר ב-':'נמוך ב-'}${Math.abs(delta).toFixed(0)} נק׳${delta>=0?' — שקול לאמץ':' — התוכנית שלנו מובילה'}</div>`:''}
+   ${!ai?`<button class="btn primary" style="margin-top:12px" onclick="go('goals')">${IC('zap')} הרץ מיקסום ליצירת המלצת AI</button>`:`<button class="btn" style="margin-top:12px" onclick="go('sim')">${IC('sliders')} פתח בסימולטור</button>`}`;
+}
+ROLE_PANEL.cfo=(base)=>{ const f=S.quarters[base].financial; const cash=unifiedCashOf(base), floor=S.config.goals.floors[base]||0;
+  return `<div class="kpis">${kpi('מזומן מאוחד (SF)',fmt(cash),'')}${kpi('מרחק מרצפה',fmt(Math.round(cash-floor)),'')}${kpi('חוב',fmt(f.loans),'')}${kpi('ROE / ROI / ROS',(f.roe||0)+'/'+(f.roi||0)+'/'+(f.ros||0)+'%','')}</div>
+    <div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('wallet')} מזומן לפי אזור</h3></div><div class="cb"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אזור</th><th>מקומי</th><th>שווי SF</th></tr></thead><tbody>${REGIONS.map(r=>`<tr><td>${r.name}</td><td class="num" style="${(f.cash[r.id]||0)<0?'color:var(--red)':''}">${fmt(f.cash[r.id]||0)} ${r.cur}</td><td class="num">${fmt(Math.round((f.cash[r.id]||0)*fxRate(r.cur)))}</td></tr>`).join('')}</tbody></table></div></div></div>
+    <div class="card pad" style="margin-top:14px"><b>מימון וגבייה</b><div class="small" style="margin-top:8px;line-height:1.9">אשראי ספקים ${fmt(f.supplierCredit)} · A/P ${fmt(f.ap)} · A/R ${fmt(f.ar)} · ריבית בנק ${S.config.params.interest.bank}%<br>לוח גבייה: ${REGIONS.filter(r=>r.id!=='hq').map(r=>r.name+' '+((S.config.params.collection[r.id]||[]).join('/'))).join(' · ')}</div></div>`;
+};
+ROLE_PANEL.coo=(base)=>{ const op=S.quarters[base].operational; const chipInv=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+  const sc=S.scenarios[0], tq=nextQuarters(base)[0]; const cg=(sc&&tq)?chipGuard(sc,tq):null;
+  return `<div class="kpis">${kpi('מפעלים',op.factories||0,'')}${kpi('משרדים',op.offices||0,'')}${kpi('דרגת Chip/PC',(op.techX||0)+' / '+(op.techY||0),'')}${kpi('שבבים במלאי',fmt(chipInv),'')}</div>
+    ${cg?`<div class="tag ${cg.ok?'g':'r'}" style="margin-top:14px;display:block">${cg.ok?IC('check')+' מחשבים מתוכננים ('+fmt(cg.pcPlanned)+') ≤ שבבים זמינים ('+fmt(cg.chipInv)+')':IC('warn')+' חסרים '+fmt(cg.gap)+' שבבים לייצור המחשבים המתוכננים (אין שבב = אין מחשב)'}</div>`:''}
+    <div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('landmark')} מלאי</h3></div><div class="cb">${op.inventory.length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>מוצר</th><th>דרגה</th><th>כמות</th><th>עלות</th><th>מחיר</th></tr></thead><tbody>${op.inventory.map(i=>`<tr><td>${i.product==='X'?'Chip':(i.product==='Y'?'PC':(i.product||'—'))}</td><td>${i.grade||'—'}</td><td class="num">${fmt(i.qty)}</td><td class="num">${fmt(i.cost)}</td><td class="num" style="${!(i.price>0)&&i.qty>0?'color:var(--red)':''}">${i.price>0?fmt(i.price):'אין מחיר!'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="small muted">אין מלאי</div>'}</div></div>`;
+};
+ROLE_PANEL.cmo=(base)=>{ const ms=marketShareScore(base); const L=S.learning;
+  return `<div class="kpis">${kpi('נתח שוק שלנו',ms?(ms.share*100).toFixed(1)+'%':'—','')}${kpi('גמישות מחיר',(L&&L.obs)?L.elast.price.toFixed(2):'—','')}${kpi('תצפיות נלמדו',(L&&L.obs)||0,'')}</div>
+    ${renderDemandEngine()}`;
+};
+ROLE_PANEL.intel=(base)=>{ const mi=S.quarters[base].marketIntel||{}; const comps=Object.values(mi.competitors||{}).sort((a,b)=>a.num-b.num); const ls=learningSummary();
+  return `${comps.length?`<div class="card pad"><b>${IC('search')} תובנות מתחרים</b><ul style="padding-inline-start:20px;line-height:1.9;margin:8px 0 0">${intelInsights(comps,mi).slice(0,4).map(i=>`<li class="small">${i}</li>`).join('')}</ul></div>`:'<div class="card pad"><div class="small muted">אין נתוני מתחרים — קלוט MR74.</div></div>'}
+    ${ls&&ls.trends.length?`<div class="card pad" style="margin-top:14px"><b>${IC('trendUp')} מגמות מתחרים</b><ul style="padding-inline-start:20px;line-height:1.8;margin:8px 0 0">${ls.trends.map(t=>`<li class="small">${esc(t.msg)}</li>`).join('')}</ul></div>`:''}
+    ${ls&&ls.gaps.length?`<div class="tag a" style="margin-top:14px;display:block;line-height:1.7"><b>${IC('search')} המחקר המשתלם לקנות עכשיו:</b><br>${ls.gaps.map(g=>'• '+esc(g.mr)+' — '+esc(g.why)).join('<br>')}</div>`:''}`;
+};
 
 /* ----- INGEST (F1) ----- */
 PAGE_RENDER.ingest = (c)=>{
