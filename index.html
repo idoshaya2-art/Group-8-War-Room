@@ -382,6 +382,11 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
   // WS-2: correct legacy USD-based FX to the game's SF rates (only if untouched old default)
   const fx=S.config&&S.config.params&&S.config.params.fx;
   if(fx && (fx.EUR===1.08 || fx.BRL===0.20 || fx.CHF===1.10)) S.config.params.fx={...FX_DEFAULT};
+  // normalise legacy inventory product labels ("Chip אירופה") to canonical X/Y + region
+  QUARTERS.forEach(q=>{ const inv=(S.quarters[q]&&S.quarters[q].operational&&S.quarters[q].operational.inventory)||[];
+    inv.forEach(it=>{ const s=String(it.product||'');
+      if(s!=='X'&&s!=='Y'){ if(/chip|שבב/i.test(s)) it.product='X'; else if(/computer|pc|מחשב/i.test(s)) it.product='Y';
+        if(!it.region){ const reg=REGIONS.find(r=>s.includes(r.name.split(' ')[0])); if(reg) it.region=reg.id; } } }); });
 }
 function deepMerge(base, over){
   if(Array.isArray(over)) return over;
@@ -791,7 +796,7 @@ function computeAlerts(q){
     desc:`יתרת אשראי ספקים ${fmt(Q.financial.supplierCredit)} — ריבית ~${S.config.params.interest.supplierCredit}%. שקול פירעון מוקדם.`});
   const noPrice=Q.operational.inventory.filter(i=>(i.qty||0)>0 && !(i.price>0));
   if(noPrice.length) out.push({level:'red',key:'noprice',title:'מלאי ללא מחיר מוזן',
-    desc:`${noPrice.length} פריטי מלאי ללא מחיר — "אין מחיר = אין מכירה". פריטים: ${noPrice.map(i=>(i.product||'?')+(i.grade?'/'+i.grade:'')).join(', ')}.`});
+    desc:`${noPrice.length} פריטי מלאי ללא מחיר — "אין מחיר = אין מכירה". פריטים: ${noPrice.map(i=>(i.product==='X'?'Chip':(i.product==='Y'?'PC':(i.product||'?')))+(i.grade?'/'+i.grade:'')+(i.region?' ('+i.region+')':'')).join(', ')}.`});
   if((Q.operational.rd||0)===0) out.push({level:'amber',key:'rd',title:'מו״פ = 0',
     desc:'אין השקעת מו״פ ברבעון זה — שים לב לקנס עקביות ולפיגור טכנולוגי מול מתחרים.'});
   S.config.contracts.forEach(c=>{
@@ -1399,8 +1404,9 @@ function extractMgmt(rows,scan,f){
   const inv=[];
   const addInv=(re,gradeLabel)=>{ const r=findRow(rows,re); if(!r)return;
     REGIONS.filter(x=>x.id!=='hq').forEach((reg,idx)=>{ const units=parseNumber(r[MG_MAIN[idx]])||0, pcUnits=parseNumber(r[MG_PC[idx]])||0;
-      if(units>0) inv.push({product:`Chip ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:units,cost:0,price:0});
-      if(pcUnits>0) inv.push({product:`Computer ${reg.name.split(' ')[0]}`,grade:gradeLabel,qty:pcUnits,cost:0,price:0}); }); };
+      // canonical product codes (X=Chip, Y=PC) so the chip guard, demand model and role views all recognise items
+      if(units>0) inv.push({product:'X',region:reg.id,grade:gradeLabel,qty:units,cost:0,price:0});
+      if(pcUnits>0) inv.push({product:'Y',region:reg.id,grade:gradeLabel,qty:pcUnits,cost:0,price:0}); }); };
   addInv(/^STANDARD UNITS/,'Standard'); addInv(/^DELUXE UNITS/,'Deluxe');
   if(inv.length){ scan.inventory=inv; f.push('מלאי סגירה'); }
 }
