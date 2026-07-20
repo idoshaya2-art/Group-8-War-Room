@@ -284,7 +284,7 @@ const REGIONS  = [
   {id:'hq',     name:'מטה (ליכטנשטיין)',    cur:'CHF'},
 ];
 const PERSONAS = ['CEO','CFO','COO','CMO','R&D/מודיעין'];
-const FX_DEFAULT = {USD:1, EUR:1.08, BRL:0.20, CHF:1.10}; // fallback USD-equivalent rates (manual mode only)
+const FX_DEFAULT = {USD:1, EUR:1.5, BRL:0.5, CHF:1}; // INTOPIA game rates — SF base (USD=1, EUR=1.5, BRL=0.5, SF/CHF=1)
 function fxRate(cur){ const fx=(S&&S.config&&S.config.params&&S.config.params.fx)||FX_DEFAULT; return fx[cur]!==undefined?fx[cur]:(FX_DEFAULT[cur]||1); }
 
 /* ---------- Persistence ---------- */
@@ -318,7 +318,7 @@ function defaultState(){
         tax:{us:34, europe:30, brazil:25, hq:0},
         interest:{bank:10, supplierCredit:11, h4:12, securities:6},
         productionPay:[100,0],
-        fx:{USD:1, EUR:1.08, BRL:0.20, CHF:1.10},
+        fx:{USD:1, EUR:1.5, BRL:0.5, CHF:1},
       },
     },
     quarters:q,
@@ -339,6 +339,9 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
     if(!mi || Array.isArray(mi) || typeof mi!=='object'){ Q.marketIntel={competitors:{},sales:[],sources:[],generic:[]}; }
     else { mi.competitors=mi.competitors||{}; mi.sales=mi.sales||[]; mi.sources=mi.sources||[]; mi.generic=mi.generic||[]; }
   });
+  // WS-2: correct legacy USD-based FX to the game's SF rates (only if untouched old default)
+  const fx=S.config&&S.config.params&&S.config.params.fx;
+  if(fx && (fx.EUR===1.08 || fx.BRL===0.20 || fx.CHF===1.10)) S.config.params.fx={...FX_DEFAULT};
 }
 function deepMerge(base, over){
   if(Array.isArray(over)) return over;
@@ -646,7 +649,7 @@ PAGE_RENDER.dashboard = (c)=>{
 function autoBriefing(q){
   const Q=S.quarters[q], out=[]; const cash=unifiedCashOf(q);
   const prevQ=qIndex(q)>0?QUARTERS[qIndex(q)-1]:null;
-  out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> ${Q.financial.consolidated?'(מאוחד מהדוח, CHF)':'(שווי-USD מוערך)'}.`);
+  out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> ${Q.financial.consolidated?'(מאוחד מהדוח, SF)':'(שווי-SF מוערך)'}.`);
   if(prevQ&&S.quarters[prevQ].entered){ const d=cash-unifiedCashOf(prevQ);
     out.push(`שינוי מול ${prevQ}: <b class="num">${d>=0?'+':''}${fmt(d)}</b> ${d>=0?IC('trendUp'):IC('trendDown')}.`); }
   const reds=computeAlerts(q).filter(a=>a.level==='red');
@@ -884,6 +887,7 @@ function renderDependencies(q,targetQ){
   ];
   const deps=[];
   deps.push({t:'מו״פ ⟵ קודם לדרגה גבוהה', d:'החלטת מו״פ (H1-1, בליכטנשטיין) נספרת רבעון קדימה — רק אחרי שהדרגה מוכנה אפשר לייצר ולמכור אותה. למכירת דרגה/דגם גבוה יותר, המו״פ חייב להקדים ברבעון (או יותר).'});
+  deps.push({t:'שבב ⟵ קודם למחשב', d:'מחשב (Y) דורש שבב (X). בשל עיכוב הרבעון, ייצור מחשבים ברבעון נתון מוגבל למלאי השבבים שנצבר מרבעונים קודמים — "אין שבב = אין מחשב". תזמן ייצור שבבים (A2-3) רבעון לפני ייצור המחשבים (A2-4).'});
   deps.push({t:'ייצור ⟵ קודם לתמחור/מכירה', d:'תמחור ופרסום (A1-1 שבב / A1-2 מחשב) שווים משהו רק אם קיים מלאי. קבע ייצור (A2-3/A2-4) קודם — "אין מלאי / אין מחיר = אין מכירה".'});
   deps.push({t:'מפעלים ⟵ מגבילים נפח ייצור', d:`הייצור חסום בקיבולת המפעלים (${op.factories} כרגע). הקמת מפעל (A2-1, עד 3 חדשים) אורכת זמן — ההחלטה חייבת להקדים את הרבעון שבו רוצים את הנפח.`});
   deps.push({t:'רצפת מזומן ⟵ מגבילה כל הוצאה', d:`כל ההוצאות (מו״פ, ייצור, פרסום, מפעל, העברות) כפופות לרצפה${f.consolidated?` — מזומן נוכחי ${fmt(f.consolidated)} CHF`:''}. ודא מימון (A3-2 הלוואה מקומית / H4 הלוואה בין-חברות) לפני התחייבות להוצאות גדולות.`});
@@ -1621,17 +1625,38 @@ function renderInputSheet(box,targetQ,sc){
     <tbody>${rows.map(r=>`<tr><td><span class="chip">${r.form}</span></td><td>${esc(r.action)}</td><td class="num">${fmt(r.value)}</td><td class="small muted">${esc(r.note)}</td><td style="text-align:center">☐</td></tr>`).join('')}</tbody></table>
     ${!sc?'<div class="small muted" style="margin-top:10px">אין תרחיש נבחר — צור תרחיש בסימולטור כדי לאכלס את הגיליון.</div>':''}`;
 }
+// WS-2: chip→computer constraint. PCs (Y) produced in a quarter need chips (X) already in inventory
+// (1-quarter delay — chips produced this quarter are available only next quarter).
+function chipGuard(sc,targetQ){
+  const op=S.quarters[S.activeQuarter].operational;
+  const chipInv=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+  const lev=sc&&sc.levers[targetQ]; let pcPlanned=0;
+  if(lev) REGIONS.forEach(r=>{ const rl=lev.regions[r.id]||{}; if(rl.product==='Y') pcPlanned+=(rl.production||0); });
+  return {chipInv,pcPlanned,ok:pcPlanned<=chipInv,gap:Math.max(0,pcPlanned-chipInv)};
+}
+function scenarioValidation(sc,targetQ){
+  const lev=sc&&sc.levers[targetQ]; if(!lev) return {noNeg:true,hasCost:true};
+  let noNeg=true,hasCost=true;
+  REGIONS.forEach(r=>{ const rl=lev.regions[r.id]||{};
+    ['production','unitCost','sales','advertising','invest','transferIn'].forEach(k=>{ if((rl[k]||0)<0) noNeg=false; });
+    if((rl.production||0)>0 && !(rl.unitCost>0)) hasCost=false; });
+  if((lev.rd||0)<0) noNeg=false;
+  return {noNeg,hasCost};
+}
 function renderChecklist(box,targetQ,sc){
   const Q=S.quarters[S.activeQuarter];
+  const cg=chipGuard(sc,targetQ), val=scenarioValidation(sc,targetQ);
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
-    {t:'טופס לכל פעולה מתוכננת',ok:!!sc},
-    {t:'אין הזנת בסיס + Fallback במקביל',ok:true},
+    {t:`מחשבים מתוכננים ≤ שבבים זמינים (מחשב דורש שבב)${cg.pcPlanned?` · ${fmt(cg.pcPlanned)} PC מול ${fmt(cg.chipInv)} שבבים`:''}`,ok:cg.ok},
+    {t:'לכל ייצור מתוכנן יש עלות יח׳',ok:val.hasCost},
+    {t:'אין ערכים שליליים בתרחיש',ok:val.noNeg},
     {t:'אין גירעון מטבע פתוח באף אזור',ok:REGIONS.every(r=>(Q.financial.cash[r.id]||0)>=0)},
     {t:'מו״פ מוזן (עקביות)',ok:(Q.operational.rd||0)>0||(sc&&sc.levers[targetQ]&&sc.levers[targetQ].rd>0)},
     {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
+    ${!cg.ok?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים לייצור המחשבים — ייצר/רכוש שבבים רבעון קודם (אין שבב = אין מחשב).</div>`:''}
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;
 }
 window.downloadInputSheet=(targetQ)=>{
@@ -1746,11 +1771,11 @@ function goalTab(t){
         </div>
       </div>
       <div class="card">
-        <div class="ch"><h3>${IC('exchange')} שערי המרה למאוחד (שווי-USD)</h3></div>
+        <div class="ch"><h3>${IC('exchange')} שערי המרה למאוחד (בסיס SF — שערי המשחק)</h3></div>
         <div class="cb">
           <div class="small muted" style="margin-bottom:10px">המזומן המאוחד מחושב כסכום כל האזורים לפי השערים כאן. עדכן לשער האמיתי מדוח ה-Currency.</div>
           <div class="row" style="gap:10px">
-            ${['USD','EUR','BRL'].map(cur=>`<div class="field" style="flex:1"><label class="fl">1 ${cur} = ? USD</label><input class="f" type="number" step="0.001" value="${(p.fx&&p.fx[cur])!==undefined?p.fx[cur]:(FX_DEFAULT[cur]||1)}" oninput="setFx('${cur}',this.value)"></div>`).join('')}
+            ${['USD','EUR','BRL'].map(cur=>`<div class="field" style="flex:1"><label class="fl">1 ${cur} = ? SF</label><input class="f" type="number" step="0.001" value="${(p.fx&&p.fx[cur])!==undefined?p.fx[cur]:(FX_DEFAULT[cur]||1)}" oninput="setFx('${cur}',this.value)"></div>`).join('')}
           </div>
           <div class="src">ברירת מחדל: USD=1, EUR=1.08, BRL=0.20 — ערכים להמחשה, לאמת מהדוח.</div>
         </div>
@@ -1936,7 +1961,7 @@ function buildAIContext(){
   L.push(`# הקשר נתונים — חברה 8, רבעון פעיל ${q}`);
   L.push(`## מצב פיננסי (רבעון ${q})`);
   REGIONS.forEach(r=> L.push(`- מזומן ${r.name}: ${fmt(f.cash[r.id]||0)} ${r.cur}  [מקור: רבעון ${q}/מזומן/${r.id}]`));
-  L.push(`- מזומן מאוחד (שווי-USD, שערים מהקונפיגורציה): ${fmt(unifiedCashOf(q))}  [מחושב במנוע]`);
+  L.push(`- מזומן מאוחד (שווי-SF, שערי המשחק USD=1/EUR=1.5/BRL=0.5): ${fmt(unifiedCashOf(q))}  [מחושב במנוע]`);
   // Liquidity per region — cash is currency-segmented and NOT freely fungible (the recurring blind spot)
   const liq=REGIONS.map(r=>({r,native:f.cash[r.id]||0,uni:(f.cash[r.id]||0)*fxRate(r.cur)}));
   const totalUni=liq.reduce((a,x)=>a+x.uni,0)||1;
