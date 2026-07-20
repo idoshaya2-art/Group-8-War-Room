@@ -100,6 +100,16 @@ a{color:var(--accent2)}
 .rm-cell.done{border-color:color-mix(in srgb,var(--green) 40%,var(--line))}.rm-cell.done span{color:var(--green)}
 .rm-cell.cur{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
 .rm-ar{color:var(--muted2);font-weight:800}
+/* decision categories — full-scan view (every form gets a visible verdict) */
+.pcat{border:1px solid var(--line2);border-radius:14px;padding:14px;margin-bottom:16px;background:var(--panel)}
+.pcat .cathead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.catpill{font-size:12px;font-weight:800;letter-spacing:.03em;color:#fff;padding:5px 13px;border-radius:20px;white-space:nowrap}
+.pcat.fin .catpill{background:#e0574c}.pcat.strat .catpill{background:#0d9488}
+.pcat.ops .catpill{background:#3b6fa5}.pcat.mkt .catpill{background:#20355c}
+.fchips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.fchip{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;border:1px solid var(--line2);color:var(--muted2);white-space:nowrap;cursor:default}
+.fchip.rec{background:rgba(52,211,153,.14);color:var(--green);border-color:transparent}
+.fchip.watch{background:rgba(245,158,11,.14);color:var(--amber);border-color:transparent}
 
 /* ===== Components ===== */
 .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -1119,16 +1129,27 @@ PAGE_RENDER.plan = (c)=>{
     ${renderRoadmap(q)}
     ${renderDependencies(q,targetQ)}
     ${(window._recSims=items.map(it=>it.sim||null),'')}
-    ${items.map((it,i)=>`<div class="act ${it.level}">
-      <div class="an">${i+1}</div>
-      <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
-        ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
-        ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
-        <div class="row" style="gap:8px;margin-top:8px">
-          ${it.sim?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
-          ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
-        </div>
-      </div></div>`).join('')}
+    ${(()=>{ const V=formVerdicts(q,items); let n=0;
+      return PLAN_CATS.map(cat=>{
+        const catItems=items.map((it,i)=>({it,i})).filter(x=>(x.it.cat||'strat')===cat.id);
+        const recs=catItems.filter(x=>x.it.sim||x.it.level==='red'||x.it.level==='amber').length;
+        return `<section class="pcat ${cat.id}">
+          <div class="cathead"><span class="catpill">${cat.name}</span><span class="small muted">${cat.forms.length} טפסים נבחנו · ${catItems.length} פעולות</span></div>
+          <div class="fchips">${cat.forms.map(code=>{ const v=V[code]||{st:'skip',why:''};
+            return `<span class="fchip ${v.st}" title="${esc(v.why)}">${code} ${v.st==='rec'?'✔':(v.st==='watch'?'👁':'—')}</span>`; }).join('')}</div>
+          ${catItems.length? catItems.map(({it,i})=>{ n++;
+            return `<div class="act ${it.level}">
+            <div class="an">${n}</div>
+            <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
+              ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
+              ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
+              <div class="row" style="gap:8px;margin-top:8px">
+                ${it.sim?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
+                ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
+              </div>
+            </div></div>`; }).join('')
+          : `<div class="small muted" style="padding:2px 4px">אין פעולה נדרשת בקטגוריה זו — ריחוף על הטפסים למעלה מציג את הסיבה לכל אחד.</div>`}
+        </section>`; }).join(''); })()}
     <div class="card pad" style="margin-top:6px"><div class="small muted">אחרי שתחליט: הרץ את התרחיש ב<b>סימולטור</b>, ייצא <b>גיליון הזנה</b> ל-${targetQ}, ותעד ב<b>יומן ההחלטות</b>.</div>
       <div class="row" style="margin-top:10px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('zap')} מיקסום Q9</button></div>
     </div>`;
@@ -1253,18 +1274,54 @@ function pcPlanFor(q){
   });
   return out;
 }
+/* Full-scan verdict for every official form: recommended here / watch / not needed — with the reason. */
+const PLAN_CATS=[
+  {id:'fin', name:'פיננסי · Financial', forms:['A3-1','A3-2','A3-3','W1','W3']},
+  {id:'strat',name:'אסטרטגיה · Strategic', forms:['H1-1','H1-2','H2','H4','H5','W2']},
+  {id:'ops', name:'תפעול וייצור · Operation & Production', forms:['A2-1','A2-3','A2-4','A4']},
+  {id:'mkt', name:'שיווק · Marketing', forms:['A1-1','A1-2','A1-3','H6']},
+];
+function formVerdicts(q,items){
+  const Q=S.quarters[q], f=Q.financial, op=Q.operational;
+  const chips=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+  const pcs=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
+  const hqCash=f.cash.hq||0;
+  const rec=code=>items.some(it=>it.form&&it.form.includes(code));
+  const R={};
+  const set=(code,st,why)=>{ R[code]={st:rec(code)?'rec':st, why:rec(code)?'מומלץ — ראה פעולה למטה':why}; };
+  set('A3-1','skip','אין גירעונות והמטה מאוזן');
+  set('A3-2','skip','המינימום הצפוי בהקרנה מעל כרית הביטחון — ייבחן מחדש אחרי תוכנית הרבעון');
+  set('A3-3','skip','ממיר את כל המט״ח באזור — עדיף העברה/המרה ממוקדת (A3-1/W3)');
+  set('W1','skip','אין תשלומי שירותים בין-חברות');
+  set('W3','skip','אין צורך בהמרת סכום נקודתית');
+  set('H1-1','skip','המו״פ בקצב — אין פער דרגה פתוח');
+  set('H1-2','skip','אין פערי מידע קריטיים כרגע');
+  set('H2', hqCash>1000000?'watch':'skip', hqCash>1000000?'עודף מזומן במטה — שקול ניירות ערך לתשואה':'אין עודף מזומן פנוי להשקעה');
+  set('H4','skip','אין הסכם הלוואה בין-חברות פעיל — חלופה אם המימון המקומי יקר');
+  set('H5','skip','אין עסקת רישיון דרגה על הפרק');
+  set('W2','skip','אין מכירת מפעל בין-חברות');
+  set('A2-1',(op.factories||0)>0?'skip':'watch',(op.factories||0)>0?`קיימים ${op.factories} מפעלים — הקיבולת מספיקה לשלב זה`:'אין מפעלים — נדרש להקמת ייצור');
+  set('A2-3','skip', chips>0?`${fmt(chips)} שבבים במלאי — אין צורך בגל נוסף כרגע`:'ייבחן לפי קצב המכירות');
+  set('A2-4','skip', chips>0?'יש שבבים לעיבוד — שקול ייצור מחשבים':'אין שבבים זמינים לעיבוד ברבעון זה (עיכוב רבעון)');
+  set('A4', (chips>0&&pcs>0)?'watch':'skip','קבע עדיפויות עיבוד רק כשמנהלים X ו-Y במקביל');
+  set('A1-1','skip','אין מכירת שבבים לצרכן במודל הנוכחי');
+  set('A1-2', pcs>0?'watch':'skip', pcs>0?'יש מחשבים במלאי — מחיר חובה ברבעון המכירה':'אין מלאי מוגמר לתמחור');
+  set('A1-3','skip',`${op.offices||0} משרדי מכירות קיימים`);
+  set('H6','watch','אופציה: מכירה תעשייתית לחברה אחרת אם יישאר מלאי לא מנוצל');
+  return R;
+}
 function buildActionPlan(q,targetQ){
   const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals, out=[];
   const proj=projectCashflow(q,null); const brk=proj.find(x=>x.breach);
   const mi=Q.marketIntel; const comps=Object.values(mi.competitors||{});
   const us=comps.find(x=>x.num===OUR_CO);
   // 1. Cash floor risk
-  if(brk) out.push({level:'red',title:'סכנת שבירת רצפת מזומן',form:'A3-2 (הלוואה מקומית) / H4 (הלוואה בין-חברות)',
+  if(brk) out.push({cat:'fin',level:'red',title:'סכנת שבירת רצפת מזומן',form:'A3-2 (הלוואה מקומית) / H4 (הלוואה בין-חברות)',
     detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`,
     dep:`ההחלטה חייבת להתקבל <b>רבעון-שניים לפני</b> ${brk.q} — מימון וצמצום הוצאות משפיעים על המזומן קדימה, לא רטרואקטיבית.`});
   // 2. Negative currency
   REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0){ const need=Math.round(Math.abs(f.cash[r.id])*1.2);
-    out.push({level:'red',title:`גירעון מטבע — ${r.name}: העבר ${fmt(need)} ${r.cur}`,form:'A3-1 (Money Transfer אזור↔מטה)',
+    out.push({cat:'fin',level:'red',title:`גירעון מטבע — ${r.name}: העבר ${fmt(need)} ${r.cur}`,form:'A3-1 (Money Transfer אזור↔מטה)',
       detail:`יתרה שלילית ${fmt(f.cash[r.id])} ${r.cur}. סכום מוצע: <b>${fmt(need)} ${r.cur}</b> (הגירעון + כרית 20%) בהעברה מהמטה, Convert in Area? כן.`,
       sim:{q:targetQ,regions:{[r.id]:{transferIn:need}}}}); } });
   // HQ thin liquidity -> concrete A3-1 transfer from the richest region
@@ -1272,7 +1329,7 @@ function buildActionPlan(q,targetQ){
   if(hqCash>=0 && hqCash<100000){
     const rich=REGIONS.filter(r=>r.id!=='hq').map(r=>({r,v:f.cash[r.id]||0})).sort((a,b)=>b.v*fxRate(b.r.cur)-a.v*fxRate(a.r.cur))[0];
     if(rich && rich.v>300000){ const amt=Math.round(rich.v*0.8); const chf=Math.round(amt*fxRate(rich.r.cur)/fxRate('CHF'));
-      out.push({level:'amber',conf:'data',title:`מטה דק (${fmt(hqCash)} CHF) — העבר ${fmt(amt)} ${rich.r.cur} מ${rich.r.name}`,form:'A3-1 (Money Transfer — To Home Office)',
+      out.push({cat:'fin',level:'amber',conf:'data',title:`מטה דק (${fmt(hqCash)} CHF) — העבר ${fmt(amt)} ${rich.r.cur} מ${rich.r.name}`,form:'A3-1 (Money Transfer — To Home Office)',
         detail:`המטה משלם ריבית ומו״פ אך מחזיק ${fmt(hqCash)} CHF בלבד, בעוד ב${rich.r.name} יש ${fmt(rich.v)} ${rich.r.cur}. מוצע: העברת <b>${fmt(amt)} ${rich.r.cur}</b> (80% מהיתרה, ≈${fmt(chf)} SF) To Home Office.`,
         dep:`חייב להתבצע לפני מימון מו״פ (H1-1) והוצאות מטה ברבעון הבא.`,
         sim:{q:targetQ,regions:{hq:{transferIn:chf}}}}); }
@@ -1286,14 +1343,14 @@ function buildActionPlan(q,targetQ){
       const plan=pcPlanFor(q);
       const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה ${fmt(p.revenue)} · פרסום 6% = ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src})</span>`).join('<br>');
       const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:6}; });
-      out.push({level:'red',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
+      out.push({cat:'mkt',level:'red',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
         title: carried>0 ? 'מכירה הייתה אפשרית — ולא קרתה. הזן מחיר עכשיו' : `המכירה הראשונה האפשרית: ${targetQ} — תוכנית מכירה מוכנה`,
         form:'A1-2 (PC Prices & Advertising)',
         detail:`${carried>0?`נכנסת ל-${q} עם ${fmt(carried)} מחשבים והמחזור נשאר 0 — "אין מחיר = אין מכירה". `:`מחזור 0 עד כה היה מובנה (מפעל←שבבים←מחשבים). עכשיו יש מלאי מוכן — `}התוכנית הקונקרטית ל-${targetQ}:<br>${planTxt}`,
         dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2) ב-${targetQ}. ההכנסה תיגבה מדורג לפי לוח הגבייה האזורי.`,
         sim:{q:targetQ,regions:simRegions}});
     } else {
-      out.push({level:'info',conf:'rule',title:'מחזור 0 — במסלול ההבשלה, לא טעות',
+      out.push({cat:'ops',level:'info',conf:'rule',title:'מחזור 0 — במסלול ההבשלה, לא טעות',
         detail:`אי-אפשר למכור לפני שיש מחשבים: מפעל (רבעון) ← שבבים (רבעון) ← מחשבים (רבעון) ← מכירה. מצב נוכחי: <b>${st.txt}</b>${st.chips?` (${fmt(st.chips)} שבבים)`:''}. שריפת המזומן (רווח נקי ${fmt(f.netProfit)}) היא עלות ההקמה המתוכננת — עקוב שהיא לא שוברת רצפה.`,
         dep:`הכן מראש את החוליה הבאה בשרשרת, ואת המחיר — כדי שלא יאבד רבעון כשהמכירה תיפתח.`});
     }
@@ -1301,13 +1358,13 @@ function buildActionPlan(q,targetQ){
   // 5. Retained-earnings rank (50% of final score)
   if(comps.length && us){ const sorted=[...comps].filter(x=>x.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
     const rank=sorted.findIndex(x=>x.num===OUR_CO)+1;
-    if(rank>comps.length/2) out.push({level:'amber',conf:'data',title:`ברווחים צבורים אתה #${rank}/${comps.length} — עדיפות עליונה`,
+    if(rank>comps.length/2) out.push({cat:'strat',level:'amber',conf:'data',title:`ברווחים צבורים אתה #${rank}/${comps.length} — עדיפות עליונה`,
       detail:`רווחים צבורים = 50% מהציון הסופי, ואתה בחצי התחתון (המוביל: חברה ${sorted[0].num}). כל רבעון בלי רווח מגדיל את הפער. זו הסיבה המרכזית להתחיל למכור ברווחיות.`,action:"go('intel')",actionLabel:'למודיעין'});
   }
   // 6. R&D vs competitors
   if(comps.length){ const chipLeaders=[...comps].filter(x=>x.num!==OUR_CO&&x.rdChip>0).sort((a,b)=>b.rdChip-a.rdChip).slice(0,2);
     const ourRd=(op.rd||0), avgRd=comps.reduce((a,x)=>a+((x.rdChip||0)+(x.rdPc||0)),0)/comps.length*1000; // MR74 in 000s
-    if(chipLeaders.length) out.push({level:'info',conf:'data',title:'לחץ טכנולוגי — החלטת מו״פ',form:'H1-1 (מו״פ, בליכטנשטיין)',
+    if(chipLeaders.length) out.push({cat:'strat',level:'info',conf:'data',title:'לחץ טכנולוגי — החלטת מו״פ',form:'H1-1 (מו״פ, בליכטנשטיין)',
       detail:`חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות בהשקעת מו״פ ב-Chip. ${ourRd>=avgRd?'אתה מעל ממוצע השוק — שמור על הקצב':'אתה מתחת לממוצע — סיכון לפיגור בדרגה'}. החלט על מו״פ ל-${targetQ} בטופס H1-1.`,
       dep:`מו״פ היום ⟵ הדרגה זמינה לייצור ומכירה רק ברבעון הבא. השקעה זו מקדימה ומאפשרת את החלטות הייצור/התמחור של הדרגה הגבוהה.`});
   }
@@ -1316,27 +1373,64 @@ function buildActionPlan(q,targetQ){
     let lastRd=0; enteredQuarters().forEach(x=>{ const v=S.quarters[x].operational.rd||0; if(v>0) lastRd=v; });
     const rdSuggest=lastRd||800000;
     const tgt=(g.techXTarget||g.techYTarget)?`היעד ${g.techXTarget||'—'}/${g.techYTarget||'—'}`:'יעדי דרגה טרם הוגדרו (הגדרות ויעדים)';
-    out.push({level:(op.rd||0)===0?'amber':'info',conf:lastRd?'data':'est',title:`${(op.rd||0)===0?'מו״פ נעצר (0)':'פער מול יעד הדרגה'} — חדש מו״פ של ${fmt(rdSuggest)} SF`,form:'H1-1 (מו״פ)',
+    out.push({cat:'strat',level:(op.rd||0)===0?'amber':'info',conf:lastRd?'data':'est',title:`${(op.rd||0)===0?'מו״פ נעצר (0)':'פער מול יעד הדרגה'} — חדש מו״פ של ${fmt(rdSuggest)} SF`,form:'H1-1 (מו״פ)',
       detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, ${tgt}${(op.rd||0)===0?' — והמו״פ ברבעון זה 0, מחצית הפוטנציאל נתקעת':''}. מוצע ל-${targetQ}: <b>${fmt(rdSuggest)} SF</b> (${lastRd?'הקצב האחרון שלך':'ברירת מחדל'}).`,
       dep:`שרשרת: מו״פ ⟵ דרגה ⟵ ייצור הדרגה החדשה ⟵ תמחור פרמיום. מו״פ שמוזן ב-${targetQ} מבשיל רבעון קדימה.`,
       sim:{q:targetQ,rd:rdSuggest}});
   }
+  // Financing bridge (A3-2) — judged vs a safety cushion even when floors are unset
+  const safety=Math.max(0,...Object.values(g.floors||{}))||250000;
+  const minProj=proj.length?Math.min(...proj.map(x=>x.unified)):unifiedCashOf(q);
+  if(minProj<safety){
+    const need=Math.ceil((safety-minProj)/50000)*50000;
+    out.push({cat:'fin',level:'amber',conf:'data',title:`מימון גישור — לווה ${fmt(need)} SF`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
+      detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. מוצע: הלוואה מקומית של <b>${fmt(need)} SF</b> באזור הפעילות (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה מהמכירות. חלופה: H4 הלוואה בין-חברות בריבית מוסכמת.`,
+      dep:`קח את המימון רבעון לפני הצורך — הגבייה המדורגת מעכבת את המזומן גם אחרי שהמכירות מתחילות.`,
+      sim:{q:targetQ,regions:{europe:{transferIn:need}}}});
+  }
+  // Market research to buy (H1-2) — close the most expensive information gap
+  const gaps=(S.learning&&S.learning.gaps)||[];
+  if(gaps.length) out.push({cat:'strat',level:'info',conf:'data',title:`קנה מחקרי שוק ב-${targetQ}: ${gaps.map(x=>x.mr).join(' + ')}`,form:'H1-2 (Market Research — עד 3 בתשלום לרבעון)',
+    detail:gaps.map(x=>`<b>${x.mr}</b> — ${x.why}`).join('<br>'),
+    dep:`תוצאות המחקר הן קלט חובה להמלצות הרבעון הבא — בלעדיהן מנוע הביקוש נשאר לא מכויל.`});
+  // Next production wave (A2-3) — keep the chip->PC pipeline full
+  const chipsNow=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+  if(chipsNow===0 && (op.factories||0)>0){
+    let lastChips=0, chipRegion='europe';
+    enteredQuarters().forEach(x=>{ (S.quarters[x].operational.inventory||[]).filter(i=>i.product==='X').forEach(i=>{ if((i.qty||0)>lastChips){ lastChips=i.qty; chipRegion=i.region||'europe'; } }); });
+    if(lastChips>0){ const regName=(REGIONS.find(r=>r.id===chipRegion)||{}).name||chipRegion;
+      out.push({cat:'ops',level:'amber',conf:'data',title:`גל ייצור הבא — ייצר ${fmt(lastChips)} שבבים ב${regName}`,form:'A2-3 (Chip Production)',
+        detail:`מלאי השבבים התרוקן (עובד למחשבים). בלי שבבים ב-${targetQ} לא יהיו מחשבים ברבעון שאחריו — צוואר הבקבוק של כל המכירות העתידיות. מוצע: <b>${fmt(lastChips)} יח׳</b> (כגודל הגל הקודם). השלם עלות/יח׳ בסימולטור.`,
+        dep:`שבבים ב-${targetQ} ⟵ מחשבים ברבעון הבא ⟵ מכירה ברבעון שאחריו. כל דילוג = חור של רבעון בהכנסות.`,
+        sim:{q:targetQ,regions:{[chipRegion]:{production:lastChips,product:'X',model:'Standard'}}}});
+    }
+  }
+  // Sales offices (A1-3) — needed where we plan to sell
+  const pcsNow=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
+  if(pcsNow>0 && (op.offices||0)===0){
+    const sellRegion=((op.inventory||[]).find(i=>i.product==='Y')||{}).region||'europe';
+    const regName=(REGIONS.find(r=>r.id===sellRegion)||{}).name||sellRegion;
+    out.push({cat:'mkt',level:'amber',conf:'rule',title:`אין משרדי מכירות — פתח 2 ב${regName}`,form:'A1-3 (Open or Close Sales Offices)',
+      detail:`מתכננים למכור ${fmt(pcsNow)} מחשבים אך רשומים 0 משרדי מכירות. משרדים מגבילים את תקרת המכירה לצרכן — פתח <b>2</b> ב${regName} יחד עם התמחור.`,
+      dep:`נכנס לתוקף עם ההזנה — חייב להיות באותו רבעון של פתיחת המכירות.`,
+      sim:{q:targetQ,regions:{[sellRegion]:{offices:2}}}});
+  }
   // 8. Contracts at risk
   S.config.contracts.forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
     const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
-    if(inv<(ct.qty||0)) out.push({level:'amber',title:`חוזה בסיכון — ${ct.counterparty||'צד נגדי'}`,form:'A2-3/A2-4 (ייצור)',
+    if(inv<(ct.qty||0)) out.push({cat:'ops',level:'amber',title:`חוזה בסיכון — ${ct.counterparty||'צד נגדי'}`,form:'A2-3/A2-4 (ייצור)',
       detail:`התחייבת ל-${ct.qty} × ${ct.product||'—'} עד ${ct.deliveryQuarter}, במלאי ${inv} בלבד. תזמן ייצור (A2-3 שבב / A2-4 מחשב) כדי לעמוד באספקה.`}); } });
   // 9. Debt
-  if((f.loans||0)>0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2) out.push({level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
+  if((f.loans||0)>0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2) out.push({cat:'fin',level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
     detail:`יש חוב ${fmt(f.loans)} וריבית שוטפת. עם עודף מזומן נוכחי, פירעון חלקי חוסך ריבית ומשפר יחסים — אם אין שימוש טוב יותר למזומן.`});
   // 10. MAX plan reference
   const maxSc=S.scenarios.find(s=>s.name==='MAX — מיקסום Q9');
   if(maxSc){ const sp=scoreProxy(maxSc.levers);
-    out.push({level:'good',conf:'est',title:'תוכנית המיקסום מוכנה',form:'ייצוא הזנה',
+    out.push({cat:'strat',level:'good',conf:'est',title:'תוכנית המיקסום מוכנה',form:'ייצוא הזנה',
       detail:`חושבה תוכנית מיטבית ל-Q9 (מזומן סופי מוקרן ${fmt(sp.endCash)}, פרוקסי ציון ${sp.value.toFixed(0)}). פתח אותה בסימולטור, כוונן, וייצא גיליון הזנה ל-${targetQ}.`,action:"go('export')",actionLabel:'ייצא הזנה'});
-  } else out.push({level:'info',title:'הרץ מיקסום Q9',form:'—',
+  } else out.push({cat:'strat',level:'info',title:'הרץ מיקסום Q9',form:'—',
     detail:`טרם חושבה תוכנית מיטבית. עבור ל<b>יעדים ← MAX</b>, הזן קיבולת ועלות יח׳, וקבל המלצת ייצור/מחיר/מו״פ שממקסמת את הציון בלי לשבור רצפות.`,action:"go('goals')",actionLabel:'למיקסום'});
-  if(!out.length) out.push({level:'good',title:'המצב יציב — המשך התוכנית',detail:'אין נורות אדומות והרצפות נשמרות. המשך לפי היעדים ובחן תרחישים בסימולטור.'});
+  if(!out.length) out.push({cat:'strat',level:'good',title:'המצב יציב — המשך התוכנית',detail:'אין נורות אדומות והרצפות נשמרות. המשך לפי היעדים ובחן תרחישים בסימולטור.'});
   // sort by severity
   const ord={red:0,amber:1,info:2,good:3};
   out.sort((a,b)=>ord[a.level]-ord[b.level]);
