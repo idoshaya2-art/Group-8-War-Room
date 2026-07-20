@@ -452,6 +452,7 @@ const PAGES = [
   {id:'dashboard',  ic:'dashboard', name:'דשבורד',    sub:'תמונת מצב, נורות ומגמות', sec:'ניתוח'},
   {id:'ingest',     ic:'inbox',     name:'קליטת דוח',  sub:'העלאה, חילוץ ואימות נתונים', sec:'ניתוח'},
   {id:'financials', ic:'landmark',  name:'מצב פיננסי', sub:'רו״ה, מאזן ויחסים — תמונה מלאה', sec:'ניתוח'},
+  {id:'qa',         ic:'check',     name:'בקרת נתונים', sub:'עקביות בין רבעונים, דוחות ושדות', sec:'ניתוח'},
   {id:'cashflow',   ic:'lineChart', name:'תזרים',      sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'ניתוח'},
   {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מגמות והמלצות MR', sec:'ניתוח'},
   {id:'roles',      ic:'users',     name:'תצוגות תפקיד', sub:'CEO · CFO · COO · CMO · מודיעין', sec:'החלטה'},
@@ -693,6 +694,80 @@ function learningSummary(){
     trends:L.trends||[], gaps:L.gaps||[], markets:Object.keys(L.market||{}).length };
 }
 
+/* ==========================================================================
+   Data-consistency QA — cross-checks every entered quarter against itself,
+   against its neighbours, and against the competitor reports (MR74/MR17&28).
+   Runs on the team's real data in the browser; every finding cites sources.
+   ========================================================================== */
+function runDataQA(){
+  const F=[]; const eq=enteredQuarters();
+  const add=(level,q,title,detail)=>F.push({level,q,title,detail});
+  if(!eq.length) return {findings:F,score:null,quarters:0};
+  const rel=(a,b)=>{ const m=Math.max(Math.abs(a),Math.abs(b),1); return Math.abs(a-b)/m; };
+  eq.forEach(q=>{
+    const Q=S.quarters[q], f=Q.financial, op=Q.operational, mi=Q.marketIntel||{};
+    // 1 · consolidated cash vs sum of regional cash at config FX
+    const sumFx=REGIONS.reduce((a,r)=>a+(f.cash[r.id]||0)*fxRate(r.cur),0);
+    if((f.consolidated||0)>0 && sumFx!==0){
+      const d=rel(f.consolidated,sumFx);
+      if(d>0.08) add('amber',q,'מזומן מאוחד ≠ סכום האזורים',`בדוח: ${fmt(f.consolidated)} · מחושב מהאזורים בשערי הקונפיגורציה: ${fmt(Math.round(sumFx))} (פער ${(d*100).toFixed(0)}%). בדוק שערי המרה או חילוץ מזומן אזורי. [${q}/מאזן מול ${q}/מזומן×FX]`);
+      else add('ok',q,'מזומן מאוחד תואם את סכום האזורים',`${fmt(f.consolidated)} מול ${fmt(Math.round(sumFx))} — פער ${(d*100).toFixed(1)}%.`);
+    }
+    // 2 · balance-sheet identity
+    if((f.totalAssets||0)>0 && (f.totalEquity||0)>0){
+      const rhs=(f.totalEquity||0)+(f.loans||0)+(f.ap||0)+(f.supplierCredit||0);
+      const d=rel(f.totalAssets,rhs);
+      if(d>0.10) add('amber',q,'זהות מאזנית לא נסגרת',`נכסים ${fmt(f.totalAssets)} מול הון+חוב+ספקים ${fmt(Math.round(rhs))} (פער ${(d*100).toFixed(0)}%). ייתכן שדה התחייבות שלא חולץ. [${q}/מאזן]`);
+      else add('ok',q,'זהות מאזנית נסגרת',`נכסים ${fmt(f.totalAssets)} ≈ הון+התחייבויות ${fmt(Math.round(rhs))}.`);
+    }
+    // 3 · inventory without price (the deadly one)
+    const noPrice=(op.inventory||[]).filter(i=>(i.qty||0)>0&&!(i.price>0));
+    if(noPrice.length) add('red',q,'מלאי ללא מחיר מוזן',`${noPrice.length} פריטים (${noPrice.map(i=>(i.product==='X'?'Chip':'PC')+(i.grade?'/'+i.grade:'')).join(', ')}) — "אין מחיר = אין מכירה". [${q}/מלאי]`);
+    // 4 · MR74 our-row vs our own books (MR74 is in 000s)
+    const us=(mi.competitors||{})[OUR_CO];
+    if(us && us.retainedEarnings!=null && f.retainedEarnings){
+      const d=rel(us.retainedEarnings*1000, f.retainedEarnings);
+      if(d>0.15) add('amber',q,'MR74 לא תואם את הספרים שלנו',`רווחים צבורים ב-MR74: ${fmt(us.retainedEarnings)}K מול הדוח שלנו: ${fmt(f.retainedEarnings)} (פער ${(d*100).toFixed(0)}%). בדוק יחידות (000s) או חילוץ. [${q}/MR74 מול ${q}/מאזן]`);
+      else add('ok',q,'MR74 תואם את הספרים שלנו',`רווחים צבורים: ${fmt(us.retainedEarnings)}K ≈ ${fmt(f.retainedEarnings)}.`);
+    }
+    // 5 · revenue vs our sold units
+    const ourUnits=(mi.sales||[]).filter(s=>s.company===OUR_CO).reduce((a,s)=>a+s.units,0);
+    if((f.revenue||0)>0 && ourUnits===0 && (mi.sales||[]).length) add('info',q,'יש מחזור אך MR17&28 לא מראה יחידות שלנו',`מחזור ${fmt(f.revenue)} אך 0 יח׳ לחברה ${OUR_CO} בנתוני המכירות. ייתכן שהמחקר לא כיסה את האזור. [${q}]`);
+    if(ourUnits>0 && (f.revenue||0)===0) add('amber',q,'MR מראה מכירות שלנו אך מחזור=0',`${fmt(ourUnits)} יח׳ ב-MR17&28 אך המחזור בדוח 0 — כנראה שדה מחזור לא חולץ. [${q}]`);
+    // 6 · ROS sanity
+    if((f.revenue||0)>0 && f.ros){
+      const ros=f.netProfit/f.revenue*100;
+      if(Math.abs(ros-f.ros)>6) add('info',q,'ROS בדוח ≠ רווח/מחזור',`בדוח ${f.ros}% מול מחושב ${ros.toFixed(1)}% — ייתכן בסיס חישוב שונה (מצטבר/שנתי). [${q}/יחסים]`);
+    }
+  });
+  // cross-quarter checks
+  for(let i=1;i<eq.length;i++){
+    const q=eq[i], p=eq[i-1], f=S.quarters[q].financial, fp=S.quarters[p].financial;
+    const op=S.quarters[q].operational, opp=S.quarters[p].operational;
+    if(qIndex(q)-qIndex(p)>1) add('amber',q,`פער ברצף הרבעונים (${p}→${q})`,`רבעונים באמצע לא נקלטו — הקרנות ומצטברים יחסרו אותם.`);
+    // retained-earnings continuity
+    if(fp.retainedEarnings!==0 || f.retainedEarnings!==0){
+      const expect=fp.retainedEarnings+(f.netProfit||0);
+      const d=rel(f.retainedEarnings,expect);
+      if(d>0.10 && Math.abs(f.retainedEarnings-expect)>20000)
+        add('amber',q,'רווחים צבורים לא רציפים',`${p}: ${fmt(fp.retainedEarnings)} + רווח ${q}: ${fmt(f.netProfit)} = צפוי ${fmt(Math.round(expect))}, בדוח: ${fmt(f.retainedEarnings)}. בדוק חילוץ רווח נקי/דיבידנד. [${p}→${q}]`);
+      else add('ok',q,'רווחים צבורים רציפים',`${fmt(fp.retainedEarnings)} + ${fmt(f.netProfit)} ≈ ${fmt(f.retainedEarnings)}.`);
+    }
+    // tech must not drop
+    if((op.techX||0)<(opp.techX||0) || (op.techY||0)<(opp.techY||0))
+      add('red',q,'ירידה ברמה טכנולוגית',`${p}: X${opp.techX}/Y${opp.techY} → ${q}: X${op.techX}/Y${op.techY}. דרגה לא יורדת ב-INTOPIA — כנראה שגיאת חילוץ. [${p}→${q}/תפעול]`);
+    // common stock constant
+    if((fp.commonStock||0)>0 && (f.commonStock||0)>0 && rel(f.commonStock,fp.commonStock)>0.02)
+      add('info',q,'שינוי בהון מניות',`${fmt(fp.commonStock)} → ${fmt(f.commonStock)}. חריג אלא אם הונפק הון. [${p}→${q}/מאזן]`);
+    // unexplained cash swing
+    const u1=REGIONS.reduce((a,r)=>a+(fp.cash[r.id]||0)*fxRate(r.cur),0), u2=REGIONS.reduce((a,r)=>a+(f.cash[r.id]||0)*fxRate(r.cur),0);
+    if(u1>100000 && rel(u1,u2)>0.6 && rel(f.loans||0,fp.loans||0)<0.2)
+      add('info',q,'קפיצת מזומן חדה ללא שינוי חוב',`מזומן מאוחד ${fmt(Math.round(u1))} → ${fmt(Math.round(u2))} בעוד החוב כמעט ללא שינוי — ודא שאין שדה שחולץ פעמיים/חסר. [${p}→${q}]`);
+  }
+  const reds=F.filter(x=>x.level==='red').length, ambers=F.filter(x=>x.level==='amber').length, infos=F.filter(x=>x.level==='info').length;
+  const score=Math.max(0,100-15*reds-7*ambers-2*infos);
+  return {findings:F,score,quarters:eq.length,reds,ambers,infos};
+}
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
 function computeAlerts(q){
   const Q=S.quarters[q], g=S.config.goals, out=[];
@@ -909,6 +984,29 @@ function lineChart(cv,{labels,series}){
 function shortNum(v){ const a=Math.abs(v); if(a>=1e6)return (v/1e6).toFixed(1)+'M'; if(a>=1e3)return (v/1e3).toFixed(0)+'K'; return fmt(v); }
 
 /* ----- FINANCIAL POSITION (full picture: P&L + Balance + Ratios) ----- */
+PAGE_RENDER.qa=(c)=>{
+  const r=runDataQA();
+  if(!r.quarters){ c.innerHTML=quartersStrip()+emptyBlock(IC('check'),'אין רבעונים לבדיקה','קלוט לפחות רבעון אחד כדי להריץ בקרת עקביות.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
+  const lvl={red:{t:'קריטי',c:'r'},amber:{t:'אי-עקביות',c:'a'},info:{t:'לבדיקה',c:'b'},ok:{t:'תקין ✓',c:'g'}};
+  const ord={red:0,amber:1,info:2,ok:3};
+  const sorted=[...r.findings].sort((a,b)=>ord[a.level]-ord[b.level]||qIndex(a.q)-qIndex(b.q));
+  c.innerHTML=quartersStrip()+`
+    <div class="kpis" style="margin-bottom:16px">
+      ${kpi('מדד עקביות',r.score+'/100',r.score>=85?'נתונים אמינים':'דרוש טיפול')}
+      ${kpi('רבעונים נבדקו',r.quarters,'')}
+      ${kpi('ממצאים קריטיים',r.reds,r.reds?'תקן לפני קבלת החלטות':'')}
+      ${kpi('אי-עקביות',r.ambers,'')}
+    </div>
+    <div class="card">
+      <div class="ch"><h3>${IC('check')} ממצאי בקרת נתונים</h3><span class="small muted">${r.findings.length} בדיקות · כל ממצא עם מקור</span></div>
+      <div class="cb"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>רבעון</th><th>סטטוס</th><th>בדיקה</th><th>פירוט</th></tr></thead>
+        <tbody>${sorted.map(x=>`<tr><td><span class="chip">${x.q}</span></td><td><span class="tag ${lvl[x.level].c}">${lvl[x.level].t}</span></td><td><b>${esc(x.title)}</b></td><td class="small" style="line-height:1.6">${x.detail}</td></tr>`).join('')}</tbody></table></div></div>
+    </div>
+    <div class="card pad" style="margin-top:16px"><b>מה נבדק</b><div class="small muted" style="margin-top:6px;line-height:1.9">
+      בתוך כל רבעון: מזומן מאוחד מול סכום האזורים בשערי המרה · זהות מאזנית (נכסים = הון+התחייבויות) · מלאי ללא מחיר · MR74 (השורה שלנו) מול הספרים · מחזור מול יחידות שנמכרו · ROS מחושב מול מדווח.<br>
+      בין רבעונים: רציפות רווחים צבורים (RE + רווח נקי) · דרגה טכנולוגית לא יורדת · הון מניות קבוע · קפיצות מזומן ללא הסבר · פערים ברצף הקליטה.</div></div>`;
+};
+
 PAGE_RENDER.financials = (c)=>{
   const q = (S.cumulative?latestEntered():S.activeQuarter) || S.activeQuarter;
   if(!q || !S.quarters[q].entered){
