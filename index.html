@@ -1203,20 +1203,41 @@ function chainStage(q){ // where are we on the mandatory build-up path?
   if((op.factories||0)>0) return {stage:1,txt:'מפעלים קיימים — הרבעון מייצרים שבבים',pcs,chips};
   return {stage:0,txt:'בונים מפעלים — ייצור שבבים ברבעון הבא',pcs,chips};
 }
-/* One-click: apply a recommendation's concrete levers onto the working scenario and open it. */
+/* One-click apply: the user picks the target scenario (existing or new); the
+   recommendation's concrete levers merge into that scenario's target quarter. */
 window._recSims=[];
+let _lastRecTarget=null;
 window.applyRecToSim=(idx)=>{
   const rec=window._recSims[idx]; if(!rec) return;
-  const name='תוכנית הרבעון — מההמלצות';
-  let sc=S.scenarios.find(s=>s.name===name);
-  if(!sc){ sc={id:uid(),name,base:S.activeQuarter,levers:{},createdAt:Date.now()}; S.scenarios.push(sc); }
-  sc.base=S.activeQuarter;
+  const opts=S.scenarios.map(s=>`<option value="${s.id}" ${_lastRecTarget===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  openModal('לאיזה תרחיש להחיל את ההמלצה?',`
+    <div class="field"><label class="fl">תרחיש יעד</label>
+      <select class="f" id="recTarget" onchange="document.getElementById('recNewWrap').style.display=this.value==='__new__'?'block':'none'">
+        ${opts}
+        <option value="__new__" ${!S.scenarios.length?'selected':''}>+ תרחיש חדש…</option>
+      </select></div>
+    <div class="field" id="recNewWrap" style="display:${S.scenarios.length?'none':'block'}">
+      <label class="fl">שם התרחיש החדש</label><input class="f" id="recNewName" value="תוכנית הרבעון — מההמלצות"></div>
+    <div class="small muted">ההמלצה תמוזג לרבעון <b>${rec.q}</b> בתרחיש הנבחר — מנופים אחרים שכבר הוזנו בו יישמרו.</div>`,
+    `<button class="btn primary" onclick="applyRecConfirm(${idx})">${IC('zap')} החל ופתח בסימולטור</button>`);
+};
+window.applyRecConfirm=(idx)=>{
+  const rec=window._recSims[idx]; if(!rec) return;
+  const sel=document.getElementById('recTarget'); let sc=null;
+  if(!sel || !sel.value || sel.value==='__new__'){
+    const name=(document.getElementById('recNewName')?.value||'').trim()||'תוכנית הרבעון — מההמלצות';
+    sc=S.scenarios.find(s=>s.name===name);
+    if(!sc){ sc={id:uid(),name,base:S.activeQuarter,levers:{},createdAt:Date.now()}; S.scenarios.push(sc); }
+  } else sc=S.scenarios.find(s=>s.id===sel.value);
+  if(!sc) return;
+  _lastRecTarget=sc.id;
   const tq=rec.q;
-  if(!sc.levers[tq]){ sc.levers[tq]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[tq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}); }
+  if(!sc.levers[tq]){ sc.levers[tq]={rd:0,regions:{}}; }
+  REGIONS.forEach(r=>{ if(!sc.levers[tq].regions[r.id]) sc.levers[tq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}; });
   const lev=sc.levers[tq];
   if(rec.rd!=null) lev.rd=rec.rd;
   Object.entries(rec.regions||{}).forEach(([rid,patch])=>{ lev.regions[rid]=Object.assign(lev.regions[rid]||{},patch); });
-  save(); toast('הוחל על "'+name+'" — נפתח בסימולטור ✓','g');
+  closeModal(); save(); toast('הוחל על "'+sc.name+'" — נפתח בסימולטור ✓','g');
   go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
 };
 /* Concrete sell-plan per region from finished-PC inventory: units, price (best source available), advertising. */
