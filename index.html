@@ -563,14 +563,17 @@ function projectCashflow(baseQuarter, leversByQuarter){
   const push=(region,fromIdx,amount)=>{ const sched=p.collection[region]||[100,0,0];
     sched.forEach((pct,k)=>{ if(pct>0 && fromIdx+k<QUARTERS.length) pipeline.push({region,q:QUARTERS[fromIdx+k],amount:amount*pct/100}); }); };
   for(let i=startIdx+1;i<QUARTERS.length;i++){
-    const q=QUARTERS[i]; const lev=(leversByQuarter&&leversByQuarter[q])||{};
+    const q=QUARTERS[i]; const lev=(leversByQuarter&&leversByQuarter[q])||{}; let taxSF=0;
     REGIONS.forEach(r=>{
       const rl=(lev.regions&&lev.regions[r.id])||{};
       const sales=rl.sales||0, prodCost=(rl.production||0)*(rl.unitCost||0), adv=rl.advertising||0,
             invest=rl.invest||0, transferIn=rl.transferIn||0, rd=(lev.rd||0)/REGIONS.length;
       const facCost=(rl.newFac||0)*(p.factoryCost||0), offCost=(rl.offices||0)*(p.officeCost||0); // WS-4: A2-1 build + A1-3 operating
+      // regional differential tax on operating profit (facCost is capex, excluded). Paid in cash when earned.
+      const pretax=sales - prodCost - adv - rd - offCost;
+      const tax=pretax>0 ? pretax*((p.tax[r.id]||0)/100) : 0; taxSF += tax*fxRate(r.cur);
       if(sales) push(r.id,i,sales);
-      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost - transferIn;
+      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost + tax - transferIn;
     });
     pipeline.filter(x=>x.q===q).forEach(x=> bal[x.region]+=x.amount);
     const loans=S.quarters[baseQuarter].financial.loans||0;
@@ -578,7 +581,7 @@ function projectCashflow(baseQuarter, leversByQuarter){
     const cashByRegion={...bal};
     let unified=0; REGIONS.forEach(r=> unified += cashByRegion[r.id]*fxRate(r.cur));
     const floor=S.config.goals.floors[q]||0;
-    out.push({q,cashByRegion,unified,floor,breach:unified<floor,distance:unified-floor});
+    out.push({q,cashByRegion,unified,floor,breach:unified<floor,distance:unified-floor,tax:Math.round(taxSF)});
   }
   return out;
 }
@@ -1783,20 +1786,21 @@ PAGE_RENDER.cashflow = (c)=>{
       <div class="ch"><h3>פירוק לפי רבעון ואזור</h3><span class="small muted">רצפות ממסך היעדים</span></div>
       <div class="cb" style="overflow-x:auto">
         <table class="tbl wide">
-          <thead><tr><th>רבעון</th>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד</th><th>רצפה</th><th>מרחק</th><th>סטטוס</th></tr></thead>
+          <thead><tr><th>רבעון</th>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד</th><th>מס משוער</th><th>רצפה</th><th>מרחק</th><th>סטטוס</th></tr></thead>
           <tbody>
-            <tr style="background:rgba(79,140,255,.06)"><td><b>${q} (בסיס)</b></td>${REGIONS.map(r=>`<td class="num">${fmt(S.quarters[q].financial.cash[r.id]||0)}</td>`).join('')}<td class="num"><b>${fmt(unifiedCashOf(q))}</b></td><td class="num">${fmt(S.config.goals.floors[q]||0)}</td><td class="num">${fmt(unifiedCashOf(q)-(S.config.goals.floors[q]||0))}</td><td>—</td></tr>
+            <tr style="background:rgba(79,140,255,.06)"><td><b>${q} (בסיס)</b></td>${REGIONS.map(r=>`<td class="num">${fmt(S.quarters[q].financial.cash[r.id]||0)}</td>`).join('')}<td class="num"><b>${fmt(unifiedCashOf(q))}</b></td><td class="num">—</td><td class="num">${fmt(S.config.goals.floors[q]||0)}</td><td class="num">${fmt(unifiedCashOf(q)-(S.config.goals.floors[q]||0))}</td><td>—</td></tr>
             ${proj.map(p=>`<tr>
               <td>${p.q}</td>
               ${REGIONS.map(r=>`<td class="num" style="${p.cashByRegion[r.id]<0?'color:var(--red)':''}">${fmt(p.cashByRegion[r.id])}</td>`).join('')}
               <td class="num"><b>${fmt(p.unified)}</b></td>
+              <td class="num" style="color:var(--amber)">${p.tax?'−'+fmt(p.tax):'0'}</td>
               <td class="num">${fmt(p.floor)}</td>
               <td class="num" style="color:${p.distance<0?'var(--red)':'var(--green)'}">${p.distance>=0?'+':''}${fmt(p.distance)}</td>
               <td>${p.breach?'<span class="tag r">שבירה</span>':'<span class="tag g">תקין</span>'}</td>
             </tr>`).join('')}
           </tbody>
         </table>
-        <div class="small muted" style="margin-top:10px">${IC('warn')} הקרנה במצב "כפי שהוא" (ללא מנופי תרחיש). להערכת השפעת החלטות — עבור לסימולטור. פרמטרי גבייה/ריבית נערכים במסך היעדים.</div>
+        <div class="small muted" style="margin-top:10px">${IC('warn')} הקרנה במצב "כפי שהוא" (ללא מנופי תרחיש). <b>מס אזורי דיפרנציאלי</b> (ארה״ב 34% · אירופה 30% · ברזיל 25% · מטה 0%) מנוכה מהמזומן ברבעון שבו הרווח נוצר — לכן התחזית שמרנית ואמינה יותר. פרמטרי מס/גבייה/ריבית נערכים במסך "הגדרות ויעדים".</div>
       </div>
     </div>`;
   const labels=[q,...proj.map(p=>p.q)];
