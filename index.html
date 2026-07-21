@@ -1320,6 +1320,8 @@ PAGE_RENDER.plan = (c)=>{
   const targetQ=nextQuarters(q)[0]||q;
   const items=buildActionPlan(q,targetQ);
   window._recSims=items.map(it=>it.sim||null);
+  // register each action's option sims for one-click apply from the drill-down
+  items.forEach(it=>{ if(it.options) it.options.forEach(o=>{ o._idx=window._recSims.length; window._recSims.push(o.sim||null); }); });
   // 3 pricing options for finished stock — each option's sim registered for one-click apply
   const sellGroups=pcSellOptions(q); const sellRows=[];
   sellGroups.forEach(g=>g.opts.forEach(o=>{ const idx=window._recSims.length;
@@ -1342,8 +1344,11 @@ PAGE_RENDER.plan = (c)=>{
         <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
           ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
           ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
+          ${it.options?`<details class="fverd" style="margin-top:9px"><summary>${IC('sliders')} ${it.options.length} אופציות ומספרים — לחץ לפירוט ⌄</summary>
+            <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>אופציה</th>${it.optionCols.map(cc=>`<th>${cc}</th>`).join('')}<th></th></tr></thead>
+            <tbody>${it.options.map(o=>`<tr><td style="text-align:start"><b>${o.name}</b>${o.favors?`<div class="small muted" style="white-space:normal;max-width:220px">${o.favors}</div>`:''}</td>${o.cells.map(cell=>`<td class="num">${cell}</td>`).join('')}<td>${o.sim?`<button class="btn sm primary" onclick="applyRecToSim(${o._idx})">${IC('zap')} החל</button>`:''}</td></tr>`).join('')}</tbody></table></div></details>`:''}
           <div class="row" style="gap:8px;margin-top:8px">
-            ${it.sim?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
+            ${(it.sim&&!it.options)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
             ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
           </div>
         </div></div>`; }).join('')
@@ -1563,6 +1568,55 @@ function sellOptionsCard(groups, rows, targetQ){
         </div></details>
     </div></div>`;
 }
+/* ===== Option generators for the core quarterly decisions — each returns
+   {optionCols, options:[{name,favors,cells,sim}]} so every action drills down
+   to concrete numeric variants with one-click apply, like the sell panel. ===== */
+// A2-4 — assemble finished PCs from chips already in inventory (the frequently-missed move).
+function assemblePcAction(q,targetQ){
+  const chips=(S.quarters[q].operational.inventory||[]).filter(i=>i.product==='X'&&(i.qty||0)>0);
+  if(!chips.length) return null;
+  const top=chips.slice().sort((a,b)=>b.qty-a.qty)[0];
+  const rid=top.region||'europe', reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
+  const avail=top.qty, chipCost=top.cost||0, pcCost=chipCost?Math.round(chipCost*1.5):0;
+  const mk=(nm,frac,fav)=>{ const qty=Math.round(avail*frac);
+    return {name:nm,favors:fav,cells:[fmt(qty),pcCost?fmt(pcCost)+' '+reg.cur:'—',pcCost?fmt(qty*pcCost):'—'],
+      sim:{q:targetQ,regions:{[rid]:{production:qty,product:'Y',model:'Standard',unitCost:pcCost}}}}; };
+  return { rid, reg, avail, pcCost,
+    optionCols:['יח׳ PC','עלות/יח׳','עלות כוללת'],
+    options:[ mk('כל השבבים → PC',1,'ממיר את כל המלאי למחשבים מוכנים למכירה'),
+              mk('70%',0.7,'משאיר חלק מהשבבים לגמישות'),
+              mk('50%',0.5,'שמרני — חצי מהשבבים') ] };
+}
+// A2-3 — chip production wave to keep the chip→PC pipeline full (proactive, not only at zero).
+function chipProdAction(q,targetQ){
+  let lastChips=0, chipCost=0, chipRegion='europe';
+  enteredQuarters().forEach(x=>{ (S.quarters[x].operational.inventory||[]).filter(i=>i.product==='X').forEach(i=>{ if((i.qty||0)>lastChips){ lastChips=i.qty; chipRegion=i.region||'europe'; } if(i.cost>0)chipCost=i.cost; }); });
+  const base=lastChips||10000; const reg=REGIONS.find(r=>r.id===chipRegion)||REGIONS[1]; const cc=chipCost||120;
+  const mk=(nm,mult,fav)=>{ const qty=Math.round(base*mult);
+    return {name:nm,favors:fav,cells:[fmt(qty),fmt(cc)+' '+reg.cur,fmt(qty*cc)],
+      sim:{q:targetQ,regions:{[chipRegion]:{production:qty,product:'X',model:'Standard',unitCost:cc}}}}; };
+  return { chipRegion, reg, base, cc,
+    optionCols:['יח׳ שבב','עלות/יח׳','עלות כוללת'],
+    options:[ mk('הרחבה (+50%)',1.5,'מגדיל את הפייפליין למכירות עתידיות'),
+              mk('כגודל הגל הקודם',1,'שומר על אותו קצב ייצור'),
+              mk('שמרני (−40%)',0.6,'חוסך מזומן, פייפליין דק יותר') ] };
+}
+// H1-1 — R&D investment tiers (SF).
+function rdActionOptions(targetQ,baseRd){
+  const mk=(nm,amt,fav)=>({name:nm,favors:fav,cells:[fmt(amt)+' SF'],sim:{q:targetQ,rd:amt}});
+  return { optionCols:['השקעת מו״פ'],
+    options:[ mk('האץ (+50%)',Math.round(baseRd*1.5),'סוגר פער דרגה מהר — מזין את מחצית העתיד'),
+              mk('שמור קצב',baseRd,'המשך באותה רמת השקעה'),
+              mk('מינימלי (−50%)',Math.round(baseRd*0.5),'חוסך מזומן, מאט התקדמות דרגה') ] };
+}
+// A3-2 — financing amount tiers (SF) for a given bridge need and region.
+function financeActionOptions(targetQ,need,region){
+  const mk=(nm,amt,fav)=>({name:nm,favors:fav,cells:[fmt(amt)+' SF'],sim:{q:targetQ,regions:{[region]:{transferIn:amt}}}});
+  return { optionCols:['סכום'],
+    options:[ mk('גישור מינימלי',need,'בדיוק כדי לא לשבור רצפה'),
+              mk('כרית נוחה (×1.5)',Math.round(need*1.5),'מרווח ביטחון נוסף'),
+              mk('אגרסיבי (×2)',need*2,'מימון גם להתרחבות מעבר לגישור') ] };
+}
 /* Full-scan verdict for every official form: recommended here / watch / not needed — with the reason. */
 const PLAN_CATS=[
   {id:'fin', name:'פיננסי · Financial', forms:['A3-1','A3-2','A3-3','W1','W3']},
@@ -1621,6 +1675,21 @@ function buildActionPlan(q,targetQ){
       dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2). ${fg.anyUnpriced?'המחיר החסר הוא מה שחוסם את המכירה כרגע.':''} ההכנסה תיגבה מדורג לפי לוח הגבייה האזורי.`,
       sim:{q:targetQ,regions:simRegions}});
   }
+  // 0b. PRODUCTION LOOP — the core operational decision each quarter. Assemble idle chips into
+  //     sellable PCs (A2-4), and keep the chip pipeline full (A2-3). Both carry option sets.
+  const asm=assemblePcAction(q,targetQ);
+  if(asm){ out.push({cat:'ops',level:'amber',conf:'data',
+    title:`עבד ${fmt(asm.avail)} שבבים למחשבים — A2-4`,form:'A2-4 (Computer Production)',
+    detail:`יש <b>${fmt(asm.avail)} שבבים ב${asm.reg.name}</b> שיושבים במלאי. שבב שלא הופך למחשב לא מייצר הכנסה — כל רבעון של המתנה הוא מכירה אבודה רבעון קדימה. עבד אותם למחשבים מוכנים למכירה (עלות משוערת ${asm.pcCost?fmt(asm.pcCost)+' '+asm.reg.cur+'/יח׳':'—'}). בחר כמות:`,
+    dep:`שבבים ✓ ⟵ עיבוד למחשבים (A2-4) ברבעון זה ⟵ מכירה (A1-2) ברבעון הבא. דורש שבבים במלאי — יש.`,
+    optionCols:asm.optionCols, options:asm.options, sim:asm.options[0].sim}); }
+  if((op.factories||0)>0){ const cp=chipProdAction(q,targetQ);
+    const chipsNow=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+    out.push({cat:'ops',level:chipsNow===0?'amber':'info',conf:'data',
+      title:`ייצר שבבים לפייפליין — A2-3`,form:'A2-3 (Chip Production)',
+      detail:`${chipsNow===0?'<b>מלאי השבבים ריק</b> — בלי שבבים ב-'+targetQ+' לא יהיו מחשבים ברבעון שאחריו, וכל שרשרת המכירות נעצרת. ':`יש ${fmt(chipsNow)} שבבים כרגע. `}שמור על הפייפליין מלא — ייצר את הגל הבא (בסיס: ${fmt(cp.base)} יח׳${cp.cc?', עלות ~'+fmt(cp.cc)+' '+cp.reg.cur+'/יח׳':''}). בחר היקף:`,
+      dep:`שבבים ב-${targetQ} ⟵ מחשבים ברבעון הבא ⟵ מכירה ברבעון שאחריו. כל דילוג = חור של רבעון בהכנסות.`,
+      optionCols:cp.optionCols, options:cp.options, sim:cp.options[1].sim}); }
   // 1. Cash floor risk
   if(brk) out.push({cat:'fin',level:'red',title:'סכנת שבירת רצפת מזומן',form:'A3-2 (הלוואה מקומית) / H4 (הלוואה בין-חברות)',
     detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`,
@@ -1657,50 +1726,36 @@ function buildActionPlan(q,targetQ){
     if(rank>comps.length/2) out.push({cat:'strat',level:'amber',conf:'data',title:`ברווחים צבורים אתה #${rank}/${comps.length} — עדיפות עליונה`,
       detail:`רווחים צבורים = 50% מהציון הסופי, ואתה בחצי התחתון (המוביל: חברה ${sorted[0].num}). כל רבעון בלי רווח מגדיל את הפער. זו הסיבה המרכזית להתחיל למכור ברווחיות.`,action:"go('intel')",actionLabel:'למודיעין'});
   }
-  // 6. R&D vs competitors
-  if(comps.length){ const chipLeaders=[...comps].filter(x=>x.num!==OUR_CO&&x.rdChip>0).sort((a,b)=>b.rdChip-a.rdChip).slice(0,2);
-    const ourRd=(op.rd||0), avgRd=comps.reduce((a,x)=>a+((x.rdChip||0)+(x.rdPc||0)),0)/comps.length*1000; // MR74 in 000s
-    if(chipLeaders.length) out.push({cat:'strat',level:'info',conf:'data',title:'לחץ טכנולוגי — החלטת מו״פ',form:'H1-1 (מו״פ, בליכטנשטיין)',
-      detail:`חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות בהשקעת מו״פ ב-Chip. ${ourRd>=avgRd?'אתה מעל ממוצע השוק — שמור על הקצב':'אתה מתחת לממוצע — סיכון לפיגור בדרגה'}. החלט על מו״פ ל-${targetQ} בטופס H1-1.`,
-      dep:`מו״פ היום ⟵ הדרגה זמינה לייצור ומכירה רק ברבעון הבא. השקעה זו מקדימה ומאפשרת את החלטות הייצור/התמחור של הדרגה הגבוהה.`});
-  }
-  // 7. Tech targets
-  if(g.techXTarget>op.techX || g.techYTarget>op.techY || (op.rd||0)===0){
+  // 6+7. R&D (H1-1) — one decision with amount options + competitor context
+  {
     let lastRd=0; enteredQuarters().forEach(x=>{ const v=S.quarters[x].operational.rd||0; if(v>0) lastRd=v; });
-    const rdSuggest=lastRd||800000;
-    const tgt=(g.techXTarget||g.techYTarget)?`היעד ${g.techXTarget||'—'}/${g.techYTarget||'—'}`:'יעדי דרגה טרם הוגדרו (הגדרות ויעדים)';
-    out.push({cat:'strat',level:(op.rd||0)===0?'amber':'info',conf:lastRd?'data':'est',title:`${(op.rd||0)===0?'מו״פ נעצר (0)':'פער מול יעד הדרגה'} — חדש מו״פ של ${fmt(rdSuggest)} SF`,form:'H1-1 (מו״פ)',
-      detail:`אתה ברמות Chip ${op.techX}/Computer ${op.techY}, ${tgt}${(op.rd||0)===0?' — והמו״פ ברבעון זה 0, מחצית הפוטנציאל נתקעת':''}. מוצע ל-${targetQ}: <b>${fmt(rdSuggest)} SF</b> (${lastRd?'הקצב האחרון שלך':'ברירת מחדל'}).`,
-      dep:`שרשרת: מו״פ ⟵ דרגה ⟵ ייצור הדרגה החדשה ⟵ תמחור פרמיום. מו״פ שמוזן ב-${targetQ} מבשיל רבעון קדימה.`,
-      sim:{q:targetQ,rd:rdSuggest}});
+    const baseRd=lastRd||800000;
+    const chipLeaders=comps.filter(x=>x.num!==OUR_CO&&x.rdChip>0).sort((a,b)=>b.rdChip-a.rdChip).slice(0,2);
+    const ourRd=(op.rd||0), avgRd=comps.length?comps.reduce((a,x)=>a+((x.rdChip||0)+(x.rdPc||0)),0)/comps.length*1000:0;
+    const tgt=(g.techXTarget||g.techYTarget)?`יעד ${g.techXTarget||'—'}/${g.techYTarget||'—'}`:'יעדי דרגה טרם הוגדרו';
+    const ro=rdActionOptions(targetQ,baseRd);
+    out.push({cat:'strat',level:(op.rd||0)===0?'amber':'info',conf:lastRd?'data':'est',
+      title:`${(op.rd||0)===0?'מו״פ נעצר (0) — חדש השקעה':'החלטת מו״פ לרבעון'} — H1-1`,form:'H1-1 (מו״פ, בליכטנשטיין)',
+      detail:`רמות נוכחיות Chip ${op.techX}/Computer ${op.techY} · ${tgt}.${chipLeaders.length?` חברות ${chipLeaders.map(x=>x.num).join(', ')} מובילות במו״פ Chip — ${ourRd>=avgRd?'אתה מעל ממוצע השוק':'אתה מתחת לממוצע, סיכון לפיגור דרגה'}.`:''}${(op.rd||0)===0?' <b>המו״פ ברבעון זה 0 — מחצית הפוטנציאל נתקעת.</b>':''} בחר רמת השקעה ל-${targetQ}:`,
+      dep:`מו״פ ⟵ דרגה זמינה רבעון קדימה ⟵ ייצור/תמחור פרמיום. משפיע על מחצית העתיד (טכנולוגיה).`,
+      optionCols:ro.optionCols, options:ro.options, sim:ro.options[1].sim});
   }
   // Financing bridge (A3-2) — judged vs a safety cushion even when floors are unset
   const safety=Math.max(0,...Object.values(g.floors||{}))||250000;
   const minProj=proj.length?Math.min(...proj.map(x=>x.unified)):unifiedCashOf(q);
   if(minProj<safety){
     const need=Math.ceil((safety-minProj)/50000)*50000;
-    out.push({cat:'fin',level:'amber',conf:'data',title:`מימון גישור — לווה ${fmt(need)} SF`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
-      detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. מוצע: הלוואה מקומית של <b>${fmt(need)} SF</b> באזור הפעילות (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה מהמכירות. חלופה: H4 הלוואה בין-חברות בריבית מוסכמת.`,
+    const fo=financeActionOptions(targetQ,need,'europe');
+    out.push({cat:'fin',level:'amber',conf:'data',title:`מימון גישור — A3-2`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
+      detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. הלוואה מקומית (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה. חלופה: H4 בין-חברות. בחר סכום:`,
       dep:`קח את המימון רבעון לפני הצורך — הגבייה המדורגת מעכבת את המזומן גם אחרי שהמכירות מתחילות.`,
-      sim:{q:targetQ,regions:{europe:{transferIn:need}}}});
+      optionCols:fo.optionCols, options:fo.options, sim:fo.options[0].sim});
   }
   // Market research to buy (H1-2) — close the most expensive information gap
   const gaps=(S.learning&&S.learning.gaps)||[];
   if(gaps.length) out.push({cat:'strat',level:'info',conf:'data',title:`קנה מחקרי שוק ב-${targetQ}: ${gaps.map(x=>x.mr).join(' + ')}`,form:'H1-2 (Market Research — עד 3 בתשלום לרבעון)',
     detail:gaps.map(x=>`<b>${x.mr}</b> — ${x.why}`).join('<br>'),
     dep:`תוצאות המחקר הן קלט חובה להמלצות הרבעון הבא — בלעדיהן מנוע הביקוש נשאר לא מכויל.`});
-  // Next production wave (A2-3) — keep the chip->PC pipeline full
-  const chipsNow=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
-  if(chipsNow===0 && (op.factories||0)>0){
-    let lastChips=0, chipRegion='europe';
-    enteredQuarters().forEach(x=>{ (S.quarters[x].operational.inventory||[]).filter(i=>i.product==='X').forEach(i=>{ if((i.qty||0)>lastChips){ lastChips=i.qty; chipRegion=i.region||'europe'; } }); });
-    if(lastChips>0){ const regName=(REGIONS.find(r=>r.id===chipRegion)||{}).name||chipRegion;
-      out.push({cat:'ops',level:'amber',conf:'data',title:`גל ייצור הבא — ייצר ${fmt(lastChips)} שבבים ב${regName}`,form:'A2-3 (Chip Production)',
-        detail:`מלאי השבבים התרוקן (עובד למחשבים). בלי שבבים ב-${targetQ} לא יהיו מחשבים ברבעון שאחריו — צוואר הבקבוק של כל המכירות העתידיות. מוצע: <b>${fmt(lastChips)} יח׳</b> (כגודל הגל הקודם). השלם עלות/יח׳ בסימולטור.`,
-        dep:`שבבים ב-${targetQ} ⟵ מחשבים ברבעון הבא ⟵ מכירה ברבעון שאחריו. כל דילוג = חור של רבעון בהכנסות.`,
-        sim:{q:targetQ,regions:{[chipRegion]:{production:lastChips,product:'X',model:'Standard'}}}});
-    }
-  }
   // Sales offices (A1-3) — needed where we plan to sell
   const pcsNow=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
   if(pcsNow>0 && (op.offices||0)===0){
@@ -1716,9 +1771,10 @@ function buildActionPlan(q,targetQ){
     const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
     if(inv<(ct.qty||0)) out.push({cat:'ops',level:'amber',title:`חוזה בסיכון — ${ct.counterparty||'צד נגדי'}`,form:'A2-3/A2-4 (ייצור)',
       detail:`התחייבת ל-${ct.qty} × ${ct.product||'—'} עד ${ct.deliveryQuarter}, במלאי ${inv} בלבד. תזמן ייצור (A2-3 שבב / A2-4 מחשב) כדי לעמוד באספקה.`}); } });
-  // 9. Debt
-  if((f.loans||0)>0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2) out.push({cat:'fin',level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
-    detail:`יש חוב ${fmt(f.loans)} וריבית שוטפת. עם עודף מזומן נוכחי, פירעון חלקי חוסך ריבית ומשפר יחסים — אם אין שימוש טוב יותר למזומן.`});
+  // 9. Debt — only worth raising when the company is actually cash-healthy (positive RE, ample cash)
+  if((f.loans||0)>0 && (f.retainedEarnings||0)>=0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2 && !brk && minProj>=safety)
+    out.push({cat:'fin',level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
+      detail:`יש חוב ${fmt(f.loans)} וריבית שוטפת. עם עודף מזומן ורווחים צבורים חיוביים, פירעון חלקי חוסך ריבית ומשפר יחסים — אם אין שימוש טוב יותר למזומן.`});
   // 10. MAX plan reference
   const maxSc=S.scenarios.find(s=>s.name==='MAX — מיקסום Q9');
   if(maxSc){ const sp=scoreProxy(maxSc.levers);
