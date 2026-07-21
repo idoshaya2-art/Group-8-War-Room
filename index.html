@@ -366,7 +366,7 @@ const REGIONS  = [
   {id:'hq',     name:'מטה (ליכטנשטיין)',    cur:'CHF'},
 ];
 const PERSONAS = ['CEO','CFO','COO','CMO','R&D/מודיעין'];
-const FX_DEFAULT = {USD:1, EUR:0.667, BRL:2.0, CHF:1}; // SF-per-unit — verified vs Data Log 01_ExchangeRates (1 USD=1 SF, 1 EUR=0.667 SF, 1 BRL=2 SF)
+const FX_DEFAULT = {USD:1, EUR:1.5, BRL:0.5, CHF:1}; // SF-per-unit — cross-verified against real Q1/Q3 reports: EU 151,050×1.5+HQ=consol 6,562,577; BR 2,094,904×0.5+HQ=consol 1,067,452. (Data Log 01 matrix was OCR-garbled/self-contradictory; its parity note and the real reports agree on 1.5/0.5.)
 function fxRate(cur){ const fx=(S&&S.config&&S.config.params&&S.config.params.fx)||FX_DEFAULT; return fx[cur]!==undefined?fx[cur]:(FX_DEFAULT[cur]||1); }
 
 /* ============================================================================
@@ -377,7 +377,7 @@ function fxRate(cur){ const fx=(S&&S.config&&S.config.params&&S.config.params.fx
    in the source Data Log and flagged there as approximate.
    ============================================================================ */
 const DATALOG = {
-  fx:{ USD:1, EUR:0.667, BRL:2.0, SF:1 },                               // 01_ExchangeRates
+  fx:{ USD:1, EUR:1.5, BRL:0.5, SF:1 },                                 // cross-verified vs real reports (Data Log 01 matrix was OCR-garbled; reports confirm EUR 1.5, BRL 0.5)
   tax:{ us:50, europe:40, brazil:30, hq:15 },                          // 07_Finance (Liechtenstein 15%)
   collection:{ us:[40,60,0], europe:[50,20,30], brazil:[30,30,40] },   // 09_AR_AP  Cash/AR1/AR2 %
   interest:{ // quarterly %, 07_Finance
@@ -442,7 +442,7 @@ function defaultState(){
         interest:{bank:5.5, supplierCredit:7, h4:5.5, securities:2}, // HO loan 5.5% · supplier ~7% · HO securities 2% (per-region rates in DATALOG.interest)
         productionPay:[100,0],
         factoryCost:800000, officeCost:30000, // representative SF; authoritative per-region tables in DATALOG.plantAcqCost / officeFixedCost
-        fx:{USD:1, EUR:0.667, BRL:2.0, CHF:1},
+        fx:{USD:1, EUR:1.5, BRL:0.5, CHF:1},
       },
     },
     quarters:q,
@@ -472,12 +472,12 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
   // Fix #0: one-time correction of game constants that earlier builds had wrong (FX/tax/collection),
   // aligning saved states to the authoritative Data Log. Runs once; later user edits are preserved.
   if(S.config && S.config.params){ S.meta=S.meta||{};
-    if(S.meta.datalogV!==1){ const P=S.config.params;
-      P.fx={USD:1, EUR:0.667, BRL:2.0, CHF:1};
+    if(S.meta.datalogV!==2){ const P=S.config.params;
+      P.fx={USD:1, EUR:1.5, BRL:0.5, CHF:1}; // v2: re-correct FX after cross-check vs real reports (v1 had wrong 0.667/2.0)
       P.tax={...DATALOG.tax};
       P.collection={ us:[...DATALOG.collection.us], europe:[...DATALOG.collection.europe], brazil:[...DATALOG.collection.brazil], hq:[100,0,0] };
       P.interest={bank:5.5, supplierCredit:7, h4:5.5, securities:2};
-      S.meta.datalogV=1;
+      S.meta.datalogV=2;
     }
     // Strategy layer: seed Group 8's Q9 targets, X3 contract, and no-loans red line into existing states.
     if(S.config.goals && S.meta.strategyV!==1){ const G=S.config.goals;
@@ -1576,7 +1576,9 @@ function pcPlanFor(q){
     const rid=i.region||'europe'; const reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
     let price=0, src='';
     const a=S.learning.anchors&&S.learning.anchors[rid+'|Y'];
+    const dlPrice=(DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y[rid])||0;
     if(a&&a.price>0){ price=Math.round(a.price); src='עוגן ביקוש נלמד'; }
+    else if(dlPrice>0){ price=dlPrice; src='מחיר פתיחה מהמשחק (Data Log)'; }
     else if(i.cost>0){ price=Math.round(i.cost*2); src='עלות ×2'; }
     else { price=300; src='הנחת פתיחה — עדכן לפי עלות בפועל'; }
     out.push({rid, reg, units:i.qty, price, src, revenue:i.qty*price, adv:Math.round(i.qty*price*0.06), cost:i.cost||0});
@@ -1592,23 +1594,26 @@ function pcSellOptions(q){
   return ((S.quarters[q].operational.inventory)||[]).filter(i=>i.product==='Y'&&(i.qty||0)>0).map(item=>{
     const rid=item.region||'europe'; const reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
     const cost=item.cost||0, stock=item.qty;
-    const a=(L.anchors||{})[rid+'|Y']; let base, priceSrc, calibrated=false;
+    const a=(L.anchors||{})[rid+'|Y']; const dlPrice=(DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y[rid])||0;
+    let base, priceSrc, calibrated=false;
     if(a&&a.price>0){ base=Math.round(a.price); priceSrc='עוגן ביקוש נלמד'; calibrated=!!(L.market&&L.market[rid+'|Y']!=null); }
+    else if(dlPrice>0){ base=dlPrice; priceSrc='מחיר פתיחה מהמשחק (Data Log)'; }
     else if(cost>0){ base=Math.round(cost*2); priceSrc='עלות ×2 (לא מכויל)'; }
     else { base=300; priceSrc='הנחת פתיחה (לא מכויל)'; }
+    const mktCap=marketCapUnits('Y',rid); // Data Log sellable ceiling per quarter (real market potential)
     const specs=[
-      {key:'volume',  name:'חיסול מהיר · נפח',   mult:0.85, sell:0.90, advPct:8, favors:'מחצית העבר — מזומן ורווח מיידי, מנקה את המלאי מהר'},
-      {key:'balanced',name:'מאוזן',              mult:1.00, sell:0.65, advPct:6, favors:'איזון — שוליים סבירים עם קצב מכירה טוב'},
-      {key:'premium', name:'פרמיום · שוליים',    mult:1.15, sell:0.42, advPct:4, favors:'שוליים מרביים ומיצוב; משאיר מלאי לרבעון הבא'},
+      {key:'volume',  name:'חיסול מהיר · נפח',   mult:0.85, potFrac:1.00, advPct:8, favors:'מחצית העבר — מזומן ורווח מיידי, מנקה את המלאי מהר'},
+      {key:'balanced',name:'מאוזן',              mult:1.00, potFrac:0.80, advPct:6, favors:'איזון — שוליים סבירים עם קצב מכירה טוב'},
+      {key:'premium', name:'פרמיום · שוליים',    mult:1.15, potFrac:0.55, advPct:4, favors:'שוליים מרביים ומיצוב; משאיר מלאי לרבעון הבא'},
     ];
     const opts=specs.map(o=>{
       const price=Math.round(base*o.mult); let units=null, band=null, conf=null, volSrc;
       if(calibrated){ const pd=predictDemand(rid,'Y',{price}); if(pd){ units=Math.min(stock,pd.units); band=[Math.min(stock,pd.low),Math.min(stock,pd.high)]; conf=pd.confidence; volSrc='מנוע ביקוש מכויל'; } }
-      if(units==null){ units=Math.round(stock*o.sell); volSrc='הערכת מדרג (לא מכויל)'; }
+      if(units==null){ units=Math.min(stock, Math.round(mktCap*o.potFrac)); volSrc='פוטנציאל שוק (Data Log)'; } // capped by real market potential, not % of stock
       const revenue=units*price, adv=Math.round(revenue*o.advPct/100), grossMargin=(price-cost)*units;
       return {...o, price, units, band, conf, volSrc, revenue, adv, grossMargin, cleared:stock?units/stock:0, cost};
     });
-    return {rid, reg, stock, cost, base, priceSrc, calibrated, opts};
+    return {rid, reg, stock, cost, base, priceSrc, calibrated, mktCap, opts};
   });
 }
 function sellOptionsCard(groups, rows, targetQ){
@@ -1630,15 +1635,15 @@ function sellOptionsCard(groups, rows, targetQ){
           <td class="num">${fmt(o.adv)}</td>
           <td><button class="btn sm primary" onclick="applyRecToSim(${row.idx})">${IC('zap')} החל</button></td>
         </tr>`; }).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:6px">${IC('warn')} ${g.calibrated?`הכמויות נגזרות ממנוע הביקוש המכויל (גמישות מחיר ${el!=null?el.toFixed(2):'—'}). המחיר, ההכנסה והרווח מדויקים.`:'המחיר, ההכנסה והרווח הגולמי מדויקים. הכמויות הן <b>הערכת מדרג</b> עד שייקלט MR עם מחירי מתחרים — אז המנוע יכייל אותן לפי גמישות אמיתית.'}</div>`).join('<hr class="hr">')}
+      <div class="small muted" style="margin-top:6px">${IC('warn')} ${g.calibrated?`הכמויות נגזרות ממנוע הביקוש המכויל (גמישות מחיר ${el!=null?el.toFixed(2):'—'}). המחיר, ההכנסה והרווח מדויקים.`:`המחיר, ההכנסה והרווח הגולמי מדויקים. הכמויות מבוססות על <b>פוטנציאל השוק מה-Data Log</b> (${fmt(g.mktCap)} יח׳/רבעון ב${g.reg.name}) — אומדן טוב, אך יתכייל למחיר מדויק כשייקלט MR עם מחירי מתחרים.`}</div>`).join('<hr class="hr">')}
       <details class="sec" style="margin:12px 0 0"><summary>${IC('search')} מקור המספרים וההנחות — מאיפה כל מספר</summary>
         <div class="secbody small" style="line-height:1.9">
-          <b>מחיר בסיס</b> — לפי סדר עדיפות: (1) <b>עוגן ביקוש נלמד</b> מדוחות ה-MR שנקלטו (המחיר שבו נמכר בפועל בשוק); (2) אם אין MR — <b>עלות/יח׳ × 2</b> (מסומן "לא מכויל"); (3) אם אין גם עלות — 300 (ברירת מחדל). כרגע: <b>${esc(groups[0].priceSrc)}</b>.<br>
-          <b>שלושת המחירים</b> — נגזרים מהבסיס: נפח = בסיס ×0.85 · מאוזן = בסיס ×1.00 · פרמיום = בסיס ×1.15. פריסת ±15% היא <b>מדרג תמחור מובנה</b> להצגת החלופות, לא נתון מהמשחק.<br>
-          <b>יח׳ למכירה</b> — ${groups.some(g=>g.calibrated)?'ממנוע הביקוש (גמישות מחיר שנלמדה מ-MR × גודל שוק).':'<b>הערכת מדרג</b> עד שייקלט MR: נפח 90% · מאוזן 65% · פרמיום 42% מהמלאי. אלה <b>הנחות ברירת-מחדל שלי, לא נתוני שוק</b> — מוחלפות בכמויות אמיתיות ברגע שנקלט דוח MR עם מחירי מתחרים.'}<br>
+          <b>מחיר בסיס</b> — לפי סדר עדיפות: (1) <b>עוגן ביקוש נלמד</b> מדוחות ה-MR שנקלטו; (2) אם אין MR — <b>מחיר הפתיחה מה-Data Log</b> (מחיר צרכן רשמי: PC אירופה 130 / ארה״ב 155 / ברזיל 800, מטבע מקומי); (3) אם אין — עלות×2; (4) 300. כרגע: <b>${esc(groups[0].priceSrc)}</b>.<br>
+          <b>שלושת המחירים</b> — נגזרים מהבסיס: נפח ×0.85 · מאוזן ×1.00 · פרמיום ×1.15. פריסת ±15% היא מדרג תמחור להצגת החלופות.<br>
+          <b>יח׳ למכירה</b> — ${groups.some(g=>g.calibrated)?'ממנוע הביקוש (גמישות מחיר שנלמדה מ-MR × גודל שוק).':`מבוססות על <b>פוטנציאל השוק מה-Data Log</b> (≈קיבולת מפעל אחד ×1.2 לכל חברה/דגם): נפח ≈ מלוא הפוטנציאל · מאוזן ≈80% · פרמיום ≈55%, מוגבל תמיד למלאי הקיים. זהו <b>נתון מהמשחק</b>, לא הנחה שרירותית — אך אינו מכויל לגמישות המחיר עד שייקלט MR.`}<br>
           <b>פרסום</b> — נפח 8% · מאוזן 6% · פרמיום 4% מההכנסה (הנחת ברירת מחדל; ערוך בסימולטור).<br>
           <b>רווח גולמי</b> = (מחיר − עלות/יח׳) × יח׳. <b>הכנסה</b> = מחיר × יח׳. שניהם מדויקים בהינתן המחיר והכמות.<br>
-          <span style="color:var(--amber)">${IC('warn')} בקצרה: המחיר-בסיס נשען על העלות שלך (${fmt(groups[0].cost)} ${groups[0].reg.cur}); המכפילים והאחוזים הם מדרג ברירת-מחדל שלי. עד שתקלוט MR — התייחס לכמויות כאומדן, לא כתחזית שוק.</span>
+          <span style="color:var(--amber)">${IC('warn')} בקצרה: המחיר והכמות נשענים כעת על נתוני Data Log אמיתיים (מחיר פתיחה + פוטנציאל שוק). מה שעדיין חסר לדיוק מלא: כיול גמישות המחיר מ-MR — עד אז הכמות היא אומדן טוב, לא תחזית מדויקת.</span>
         </div></details>
     </div></div>`;
 }
