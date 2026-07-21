@@ -110,6 +110,24 @@ a{color:var(--accent2)}
 .fchip{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;border:1px solid var(--line2);color:var(--muted2);white-space:nowrap;cursor:default}
 .fchip.rec{background:rgba(52,211,153,.14);color:var(--green);border-color:transparent}
 .fchip.watch{background:rgba(245,158,11,.14);color:var(--amber);border-color:transparent}
+/* clean method: consistent collapsible sections (progressive disclosure) */
+details.sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:14px;overflow:hidden}
+details.sec>summary{cursor:pointer;padding:13px 18px;font-weight:700;font-size:14px;list-style:none;display:flex;align-items:center;gap:9px;color:var(--muted)}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary::after{content:'⌄';margin-inline-start:auto;transition:transform .2s;color:var(--faint)}
+details.sec[open]>summary{border-bottom:1px solid var(--line);color:var(--ink)}
+details.sec[open]>summary::after{transform:rotate(180deg)}
+details.sec>summary:hover{color:var(--ink)}
+details.sec .secbody{padding:16px 18px}
+.fverd{margin-top:8px}
+.fverd>summary{cursor:pointer;font-size:12px;color:var(--faint);list-style:none}
+.fverd>summary::-webkit-details-marker{display:none}
+/* the primary status banner — layer 1, the one thing that matters */
+.planhero{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line2);border-radius:var(--radius);padding:16px 18px;margin-bottom:16px}
+.planhero .top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.planhero .sc{font-size:30px;font-weight:800;line-height:1}
+.planhero .arrow{color:var(--faint);font-weight:700}
+.planhero .urgent{margin-top:10px;font-size:14px;display:flex;gap:8px;align-items:flex-start}
 
 /* ===== Components ===== */
 .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -229,7 +247,7 @@ canvas{display:block;max-width:100%}
 
 /* toast */
 #toast{position:fixed;bottom:22px;inset-inline-start:50%;transform:translateX(50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center}
-.toast{background:#0f1730;border:1px solid var(--line2);border-inline-start:4px solid var(--accent);border-radius:10px;padding:11px 18px;box-shadow:var(--shadow);font-weight:600;animation:tin .3s}
+.toast{background:#0f1730;border:1px solid var(--line2);border-radius:10px;padding:11px 18px;box-shadow:var(--shadow);font-weight:600;animation:tin .3s}
 .toast.g{border-inline-start-color:var(--green)} .toast.r{border-inline-start-color:var(--red)}
 @keyframes tin{from{opacity:0;transform:translateY(10px)}}
 
@@ -930,7 +948,7 @@ PAGE_RENDER.dashboard = (c)=>{
   const cashPrev=(prevQ&&S.quarters[prevQ].entered)?unifiedCashOf(prevQ):null;
   const brief=autoBriefing(q);
   c.innerHTML=quartersStrip()+`
-    <div class="card pad" style="margin-bottom:18px;border-inline-start:4px solid var(--accent)">
+    <div class="card pad" style="margin-bottom:18px">
       <div class="between"><h3>${IC('clipboard')} תדריך פתיחה — ${q}</h3><span class="tag b">נוצר מהנתונים</span></div>
       <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">${brief.map(b=>`<li>${b}</li>`).join('')}</ul>
     </div>
@@ -988,7 +1006,7 @@ function renderCumulativeDashboard(c){
   const totalRD=ent.reduce((a,q)=>a+(S.quarters[q].operational.rd||0),0);
   const avgMargin=totalRevenue>0?(totalProfit/totalRevenue*100):null;
   c.innerHTML=`
-    <div class="card pad" style="margin-bottom:18px;border-inline-start:4px solid var(--accent)">
+    <div class="card pad" style="margin-bottom:18px">
       <div class="between"><h3>${IC('lineChart')} תמונה מצטברת — ${ent[0]}–${last}</h3><span class="tag b">${ent.length} רבעונים</span></div>
       <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">
         <li>רווח נקי מצטבר: <b class="num">${fmt(totalProfit)}</b> · מחזור מצטבר: <b class="num">${fmt(totalRevenue)}</b>${avgMargin!==null?` · שולי רווח ממוצע: <b class="num">${avgMargin.toFixed(1)}%</b>`:''}.</li>
@@ -1189,40 +1207,54 @@ PAGE_RENDER.plan = (c)=>{
   if(!Q.entered){ c.innerHTML=quartersStrip()+emptyBlock(IC('clipboard'),'אין בסיס לתוכנית','קלוט רבעון כדי לקבל תוכנית פעולה מעשית לרבעון הבא.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const targetQ=nextQuarters(q)[0]||q;
   const items=buildActionPlan(q,targetQ);
-  const reds=items.filter(i=>i.level==='red').length;
+  window._recSims=items.map(it=>it.sim||null);
+  const mp=masterPlanStatus();
+  const urgent=items.find(i=>i.level==='red')||items.find(i=>i.level==='amber')||items[0];
+  const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
+  const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר');
+  const V=formVerdicts(q,items); let n=0;
+  const catSections=PLAN_CATS.map(cat=>{
+    const catItems=items.map((it,i)=>({it,i})).filter(x=>(x.it.cat||'strat')===cat.id);
+    const recForms=cat.forms.filter(code=>(V[code]||{}).st==='rec');
+    return `<section class="pcat ${cat.id}">
+      <div class="cathead"><span class="catpill">${cat.name}</span><span class="small muted">${catItems.length? catItems.length+' פעולות':'אין פעולה נדרשת'}</span></div>
+      ${catItems.length? catItems.map(({it,i})=>{ n++;
+        return `<div class="act ${it.level}">
+        <div class="an">${n}</div>
+        <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
+          ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
+          ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
+          <div class="row" style="gap:8px;margin-top:8px">
+            ${it.sim?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
+            ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
+          </div>
+        </div></div>`; }).join('')
+      : `<div class="small muted">כל ${cat.forms.length} הטפסים נבחנו — אף אחד לא נדרש הרבעון.</div>`}
+      <details class="fverd"><summary>${cat.forms.length} הטפסים שנבחנו${recForms.length?' · מומלץ: '+recForms.join(', '):''} ⌄</summary>
+        <div class="fchips" style="margin-top:8px">${cat.forms.map(code=>{ const v=V[code]||{st:'skip',why:''};
+          return `<span class="fchip ${v.st}" title="${esc(v.why)}">${code} ${v.st==='rec'?'✔':(v.st==='watch'?'👁':'—')}</span>`; }).join('')}</div></details>
+    </section>`; }).join('');
   c.innerHTML=`
-    <div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--accent)">
-      <div class="between"><h3>${IC('clipboard')} תוכנית פעולה ל-${targetQ}</h3><span class="tag ${reds?'r':'b'}">${items.length} פעולות${reds?` · ${reds} דחופות`:''}</span></div>
-      <div class="small muted" style="margin-top:6px">כל פעולה (<b>מה</b>, <b>למה</b>, <b>איזה טופס</b>) מחושבת ב<b>מנוע דטרמיניסטי</b> — בלי הזיות. ה<b>יועץ</b> למטה מוסיף שכבת שיפוט מעל המספרים.</div>
+    <!-- Layer 1: the one thing that matters -->
+    <div class="planhero">
+      <div class="top">
+        <span class="sc">${mp.score.toFixed(0)}</span><span class="arrow">→ יעד ${mp.tScore}</span>
+        <span class="tag ${trackTag}">${trackTxt}</span>
+        <span class="small muted">עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)} · ${mp.remaining} רבעונים ל-Q9</span>
+      </div>
+      ${urgent?`<div class="urgent"><span class="tag ${urgent.level==='red'?'r':(urgent.level==='amber'?'a':'b')}">הפעולה הדחופה</span><span><b>${urgent.title}</b>${urgent.form?` · ${urgent.form}`:''}</span></div>`:''}
     </div>
+
+    <!-- Layer 2: judgment + the work -->
     ${renderAdvisorCard(q,targetQ)}
-    ${renderRoadmap(q)}
-    ${renderDependencies(q,targetQ)}
-    ${(window._recSims=items.map(it=>it.sim||null),'')}
-    ${(()=>{ const V=formVerdicts(q,items); let n=0;
-      return PLAN_CATS.map(cat=>{
-        const catItems=items.map((it,i)=>({it,i})).filter(x=>(x.it.cat||'strat')===cat.id);
-        const recs=catItems.filter(x=>x.it.sim||x.it.level==='red'||x.it.level==='amber').length;
-        return `<section class="pcat ${cat.id}">
-          <div class="cathead"><span class="catpill">${cat.name}</span><span class="small muted">${cat.forms.length} טפסים נבחנו · ${catItems.length} פעולות</span></div>
-          <div class="fchips">${cat.forms.map(code=>{ const v=V[code]||{st:'skip',why:''};
-            return `<span class="fchip ${v.st}" title="${esc(v.why)}">${code} ${v.st==='rec'?'✔':(v.st==='watch'?'👁':'—')}</span>`; }).join('')}</div>
-          ${catItems.length? catItems.map(({it,i})=>{ n++;
-            return `<div class="act ${it.level}">
-            <div class="an">${n}</div>
-            <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
-              ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
-              ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
-              <div class="row" style="gap:8px;margin-top:8px">
-                ${it.sim?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
-                ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
-              </div>
-            </div></div>`; }).join('')
-          : `<div class="small muted" style="padding:2px 4px">אין פעולה נדרשת בקטגוריה זו — ריחוף על הטפסים למעלה מציג את הסיבה לכל אחד.</div>`}
-        </section>`; }).join(''); })()}
-    <div class="card pad" style="margin-top:6px"><div class="small muted">אחרי שתחליט: הרץ את התרחיש ב<b>סימולטור</b>, ייצא <b>גיליון הזנה</b> ל-${targetQ}, ותעד ב<b>יומן ההחלטות</b>.</div>
-      <div class="row" style="margin-top:10px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('zap')} מיקסום Q9</button></div>
-    </div>`;
+    <div class="small muted" style="margin:2px 2px 10px">${items.filter(i=>i.sim||i.level==='red'||i.level==='amber').length} פעולות מומלצות ל-${targetQ}, לפי 4 קטגוריות ההחלטה. כל מספר מחושב במנוע.</div>
+    ${catSections}
+
+    <!-- Layer 3: reference, collapsed -->
+    <details class="sec"><summary>${IC('trendUp')} מפה אסטרטגית — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
+      <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}</div></details>
+
+    <div class="row" style="margin-top:6px;gap:8px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('target')} יעדים</button></div>`;
 };
 /* Decision-dependency layer: the canonical INTOPIA decision chain + the
    cross-decision prerequisites that are relevant to the current state, so the
@@ -1903,7 +1935,7 @@ PAGE_RENDER.intel = (c)=>{
     </div>
     ${comps.length? renderCompetitors(comps,fmtK) : `<div class="card"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}
     ${renderMarketShare(mi)}
-    <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--purple)">
+    <div class="card pad" style="margin-top:16px">
       <div class="between"><h3>${IC('search')} תובנות והמלצות מודיעין</h3><span class="tag b">F5.3</span></div>
       ${comps.length? `<ul style="padding-inline-start:20px;line-height:1.9;margin:10px 0 0">${intelInsights(comps,mi).map(i=>`<li>${i}</li>`).join('')}</ul>`
         : `<div class="small muted" style="margin:8px 0">קלוט דוח עם MR 74 כדי לקבל תובנות מבוססות-נתונים על המתחרים.</div>`}
@@ -1914,14 +1946,14 @@ PAGE_RENDER.intel = (c)=>{
 function renderDemandEngine(){
   const ls=learningSummary();
   const head=`<div class="between"><h3>${IC('cpu')} מנוע ביקוש ולמידה</h3><span class="tag ${ls&&ls.confidence>=0.5?'g':'a'}">${ls?`${ls.obs} רבעונים · ביטחון ${(ls.confidence*100).toFixed(0)}%`:'טרם נלמד'}</span></div>`;
-  if(!ls) return `<div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--accent2)">${head}
+  if(!ls) return `<div class="card pad" style="margin-top:16px">${head}
     <div class="small muted" style="margin-top:8px">קלוט רבעונים עם נתוני מכירות (MR17&28) ומחירים — המנוע ילמד את גמישות הביקוש ויזהה מגמות. עד אז ההמלצות על פריורים וחוקי-משחק.</div></div>`;
   const el=ls.priceElast.toFixed(2);
   const anchors=Object.entries(S.learning.anchors||{}).sort((a,b)=>b[1].units-a[1].units).slice(0,3);
   const rows=anchors.map(([k,a])=>{ const [region,product]=k.split('|'); const rn=(REGIONS.find(r=>r.id===region)||{}).name||region;
     const pd=predictDemand(region,product,{price:a.price,tech:a.tech});
     return `<tr><td><b>${esc(rn)}</b> · ${product==='X'?'Chip':'PC'}</td><td class="num">${a.price?fmt(Math.round(a.price)):'—'}</td><td class="num">${fmt(a.units)}</td><td class="num">${pd?fmt(pd.units):'—'}</td><td class="num small">${pd?fmt(pd.low)+'–'+fmt(pd.high):'—'}</td></tr>`; }).join('');
-  return `<div class="card" style="margin-top:16px;border-inline-start:4px solid var(--accent2)">
+  return `<div class="card" style="margin-top:16px">
     <div class="ch">${head}</div>
     <div class="cb">
       <div class="small" style="line-height:1.9;margin-bottom:10px">
@@ -2463,7 +2495,7 @@ function goalTab(t){
     const invCost=op.inventory.length?(op.inventory.reduce((a,i)=>a+(i.cost||0),0)/op.inventory.length):0;
     const defRd=op.rd||0;
     body.innerHTML=`
-    <div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--amber)">
+    <div class="card pad" style="margin-bottom:16px">
       <div class="between"><h3>${IC('zap')} MAX — מיקסום תוצאת סיום Q9</h3><span class="tag a">אופטימיזציה</span></div>
       <div class="small muted" style="margin:8px 0 0;line-height:1.7">
         המנוע סורק שילובי מנופים (עצימות ייצור, שולי מחיר, מו״פ) לרבעונים הבאים ובוחר את התוכנית
@@ -2786,7 +2818,7 @@ window.runQuarterAdvisor=async()=>{
 };
 function renderAdvisorCard(q,targetQ){
   const adv=S.ai&&S.ai.advisor, fresh=adv&&adv.q===q, hasKey=!!getApiKey();
-  return `<div class="card" style="margin-bottom:16px;border-inline-start:4px solid var(--purple)">
+  return `<div class="card" style="margin-bottom:16px">
     <div class="ch"><h3>${IC('cpu')} יועץ הרבעון <span class="tag b" style="margin-inline-start:6px">שיפוט מעל המנוע</span></h3>
       <div class="row" style="gap:8px"><span class="small muted">${AI_PROVIDERS[aiProvider()].short}</span>
         <button class="btn sm primary" id="advBtn" onclick="runQuarterAdvisor()">${IC('zap')} ${fresh?'רענן':(hasKey?'הפעל יועץ':'חבר AI')}</button></div></div>
@@ -2847,7 +2879,7 @@ PAGE_RENDER.ai = (c)=>{
         <button class="btn sm danger" onclick="clearChat()">נקה שיחה</button>
       </div>
     </div>
-    ${!hasKey? `<div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--amber)">
+    ${!hasKey? `<div class="card pad" style="margin-bottom:16px">
       <b>נדרש מפתח API — Anthropic (Claude) או OpenAI (GPT)</b>
       <div class="small muted" style="margin-top:6px">האפליקציה פונה לספק ה-AI ישירות מהדפדפן (bring-your-own-key). המפתח נשמר מקומית בלבד ואינו נכלל בגיבוי. לחצו "הגדרות AI" כדי לבחור ספק ולהזין מפתח.</div>
     </div>`:''}
@@ -2980,7 +3012,7 @@ window.runCouncil=async()=>{
     const synSys=AI_SYSTEM+`\n\nאתה יו״ר המועצה. קיבלת 5 ניתוחים אנונימיים. בצע ביקורת עמיתים קצרה, אתר הסכמות ומחלוקות, והכרע לפסק דין מעשי: המלצה, נימוק, וסיכון עיקרי. פורמט: "פסק דין" + "נימוק" + "מה לבדוק בסימולטור".`;
     const verdict=await callLLM([{role:'user',content:ctx+'\n\nהמהלך: '+q+'\n\nהניתוחים:\n'+anon}], synSys, {max_tokens:900});
     out.innerHTML=`
-      <div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--purple)">
+      <div class="card pad" style="margin-bottom:14px">
         <div class="between"><b>${IC('scale')} פסק דין המועצה</b><span class="tag b">סינתזה</span></div>
         <div style="margin-top:8px;line-height:1.7;white-space:pre-wrap">${esc(verdict)}</div>
       </div>
