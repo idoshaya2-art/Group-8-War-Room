@@ -1114,9 +1114,10 @@ function qaSectionHTML(){ // embedded in step 1 (ingest) — the check belongs r
 PAGE_RENDER.qa=(c,embed)=>{
   const r=runDataQA();
   if(!r.quarters){ c.innerHTML=quartersStrip()+emptyBlock(IC('check'),'אין רבעונים לבדיקה','קלוט לפחות רבעון אחד כדי להריץ בקרת עקביות.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
-  const lvl={red:{t:'קריטי',c:'r'},amber:{t:'אי-עקביות',c:'a'},info:{t:'לבדיקה',c:'b'},ok:{t:'תקין ✓',c:'g'}};
-  const ord={red:0,amber:1,info:2,ok:3};
-  const sorted=[...r.findings].sort((a,b)=>ord[a.level]-ord[b.level]||qIndex(a.q)-qIndex(b.q));
+  const lvl={red:{t:'קריטי',c:'r'},amber:{t:'אי-עקביות',c:'a'},info:{t:'לבדיקה',c:'b'}};
+  const ord={red:0,amber:1,info:2};
+  const passed=r.findings.filter(x=>x.level==='ok').length;
+  const sorted=[...r.findings].filter(x=>x.level!=='ok').sort((a,b)=>ord[a.level]-ord[b.level]||qIndex(a.q)-qIndex(b.q));
   c.innerHTML=(embed?'<div style="margin-top:18px"></div>':quartersStrip())+`
     <div class="kpis" style="margin-bottom:16px">
       ${kpi('מדד עקביות',r.score+'/100',r.score>=85?'נתונים אמינים':'דרוש טיפול')}
@@ -1125,9 +1126,10 @@ PAGE_RENDER.qa=(c,embed)=>{
       ${kpi('אי-עקביות',r.ambers,'')}
     </div>
     <div class="card">
-      <div class="ch"><h3>${IC('check')} ממצאי בקרת נתונים</h3><span class="small muted">${r.findings.length} בדיקות · כל ממצא עם מקור</span></div>
-      <div class="cb"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>רבעון</th><th>סטטוס</th><th>בדיקה</th><th>פירוט</th></tr></thead>
-        <tbody>${sorted.map(x=>`<tr><td><span class="chip">${x.q}</span></td><td><span class="tag ${lvl[x.level].c}">${lvl[x.level].t}</span></td><td><b>${esc(x.title)}</b></td><td class="small" style="line-height:1.6">${x.detail}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="ch"><h3>${IC('check')} ממצאי בקרת נתונים</h3><span class="small muted">${sorted.length?`${sorted.length} ממצאים לטיפול`:'לא נמצאו בעיות'}${passed?` · ${passed} בדיקות עברו ✓`:''}</span></div>
+      <div class="cb">${sorted.length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>רבעון</th><th>סטטוס</th><th>בדיקה</th><th>פירוט</th></tr></thead>
+        <tbody>${sorted.map(x=>`<tr><td><span class="chip">${x.q}</span></td><td><span class="tag ${lvl[x.level].c}">${lvl[x.level].t}</span></td><td><b>${esc(x.title)}</b></td><td class="small" style="line-height:1.6">${x.detail}</td></tr>`).join('')}</tbody></table></div>`
+        :`<div class="ok-clean" style="display:flex;align-items:center;gap:10px;padding:6px 2px"><span class="tag g">תקין ✓</span><span class="small muted">${passed?`כל ${passed} בדיקות העקביות עברו — `:''}לא נמצאו אי-עקביות בנתונים. אמינים לקבלת החלטות.</span></div>`}</div>
     </div>
     <div class="card pad" style="margin-top:16px"><b>מה נבדק</b><div class="small muted" style="margin-top:6px;line-height:1.9">
       בתוך כל רבעון: מזומן מאוחד מול סכום האזורים בשערי המרה · זהות מאזנית (נכסים = הון+התחייבויות) · מלאי ללא מחיר · MR74 (השורה שלנו) מול הספרים · מחזור מול יחידות שנמכרו · ROS מחושב מול מדווח.<br>
