@@ -1188,17 +1188,17 @@ PAGE_RENDER.financials = (c)=>{
         <div class="small muted" style="margin-top:12px">רמות טכנולוגיה: <b>Chip ${op.techX} / Computer ${op.techY}</b> · מפעלים ${op.factories} · מו״פ מצטבר עד כה: ${fmt(ent.reduce((a,x)=>a+(S.quarters[x].operational.rd||0),0))}</div>
       </div></div>
     </div>
-    <div class="card" style="margin-top:16px"><div class="ch"><h3>${IC('wallet')} מזומן לפי אזור — ${q}</h3></div>
-      <div class="cb" style="overflow-x:auto"><table class="tbl wide"><thead><tr>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד (CHF)</th></tr></thead>
+    <details class="sec" style="margin-top:16px"><summary>${IC('wallet')} מזומן לפי אזור — ${q}</summary>
+      <div class="secbody" style="overflow-x:auto"><table class="tbl wide"><thead><tr>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד (CHF)</th></tr></thead>
       <tbody><tr>${REGIONS.map(r=>`<td class="num" style="${(f.cash[r.id]||0)<0?'color:var(--red)':''}">${fmt(f.cash[r.id]||0)} ${r.cur}</td>`).join('')}<td class="num"><b>${fmt(f.consolidated||unifiedCashOf(q))}</b></td></tr></tbody></table></div>
-    </div>
-    <div class="card" style="margin-top:16px"><div class="ch"><h3>${IC('clipboard')} השוואה רבעונית</h3><span class="small muted">כל הרבעונים שנקלטו</span></div>
-      <div class="cb" style="overflow-x:auto"><table class="tbl wide"><thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>מחזור</th><th>רווח גולמי</th><th>רווח נקי</th><th>מו״פ</th><th>חוב</th><th>רווחים צבורים</th><th>Chip/Comp</th></tr></thead>
+    </details>
+    <details class="sec"><summary>${IC('clipboard')} השוואה רבעונית — כל הרבעונים שנקלטו</summary>
+      <div class="secbody" style="overflow-x:auto"><table class="tbl wide"><thead><tr><th>רבעון</th><th>מזומן מאוחד</th><th>מחזור</th><th>רווח גולמי</th><th>רווח נקי</th><th>מו״פ</th><th>חוב</th><th>רווחים צבורים</th><th>Chip/Comp</th></tr></thead>
       <tbody>${ent.map(x=>{ const ff=S.quarters[x].financial, oo=S.quarters[x].operational; return `<tr><td><b>${x}</b></td>
         <td class="num">${fmt(unifiedCashOf(x))}</td><td class="num">${fmt(ff.revenue)}</td><td class="num">${fmt(ff.grossMargin)}</td>
         <td class="num" style="${ff.netProfit<0?'color:var(--red)':''}">${fmt(ff.netProfit)}</td><td class="num">${fmt(oo.rd)}</td><td class="num">${fmt(ff.loans)}</td>
         <td class="num" style="${ff.retainedEarnings<0?'color:var(--red)':''}">${fmt(ff.retainedEarnings)}</td><td class="num">${oo.techX}/${oo.techY}</td></tr>`; }).join('')}</tbody></table></div>
-    </div>`;
+    </details>`;
 };
 
 /* ----- ACTION PLAN (practical: what to do next quarter + how to enter it) ----- */
@@ -1624,7 +1624,7 @@ PAGE_RENDER.ingest = (c)=>{
         <div id="sheetInfo" style="margin-top:14px"></div>
       </div>
       <div class="card">
-        <div class="ch"><h3>${IC('edit')} אימות ותיקון נתונים — ${q}</h3><span class="tag b">F1.4</span></div>
+        <div class="ch"><h3>${IC('edit')} אימות ותיקון נתונים — ${q}</h3></div>
         <div class="cb" id="verifyForm"></div>
       </div>
     </div>`;
@@ -1933,14 +1933,17 @@ PAGE_RENDER.intel = (c)=>{
     <div class="between" style="margin-bottom:14px">
       <div class="small muted">מודיעין מרבעון <b>${q}</b>${comps.length?` · מקורות: ${mi.sources.map(s=>`<span class="chip">${esc(s)}</span>`).join(' ')}`:''}</div>
     </div>
-    ${comps.length? renderCompetitors(comps,fmtK) : `<div class="card"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}
-    ${renderMarketShare(mi)}
-    <div class="card pad" style="margin-top:16px">
-      <div class="between"><h3>${IC('search')} תובנות והמלצות מודיעין</h3><span class="tag b">F5.3</span></div>
+    <!-- Layer 1/2: the actionable read — insights + demand engine -->
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="between"><h3>${IC('search')} תובנות והמלצות מודיעין</h3></div>
       ${comps.length? `<ul style="padding-inline-start:20px;line-height:1.9;margin:10px 0 0">${intelInsights(comps,mi).map(i=>`<li>${i}</li>`).join('')}</ul>`
         : `<div class="small muted" style="margin:8px 0">קלוט דוח עם MR 74 כדי לקבל תובנות מבוססות-נתונים על המתחרים.</div>`}
     </div>
-    ${renderDemandEngine()}`;
+    ${renderDemandEngine()}
+    <!-- Layer 3: the raw tables, collapsed -->
+    ${comps.length? `<details class="sec" style="margin-top:16px"><summary>${IC('landmark')} טבלת מתחרים מלאה — MR74 (10 חברות)</summary><div class="secbody" style="padding:0">${renderCompetitors(comps,fmtK)}</div></details>
+    <details class="sec"><summary>${IC('lineChart')} נתחי שוק לפי יחידות — MR17&28</summary><div class="secbody" style="padding:0">${renderMarketShare(mi)}</div></details>`
+    : `<div class="card" style="margin-top:16px"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}`;
 };
 /* WS-3 · Demand-engine panel — what the model has learned, its confidence, competitor trends, and which MR to buy. */
 function renderDemandEngine(){
@@ -2439,7 +2442,7 @@ function goalTab(t){
           </div>
           <div class="field"><label class="fl">תקרת חוב</label><input class="f" type="number" value="${g.debtCeiling}" oninput="setGoal('debtCeiling',this.value)"></div>
           <div class="field"><label class="fl">יעד מלאי סוף-משחק</label><input class="f" type="number" value="${g.endInventoryTarget}" oninput="setGoal('endInventoryTarget',this.value)"></div>
-          <div class="small muted">כל נורה והתרעה נמדדות מול היעדים כאן (F2.3). האסטרטגיה היא קונפיגורציה.</div>
+          <div class="small muted">כל נורה והתרעה נמדדות מול היעדים כאן. האסטרטגיה היא קונפיגורציה.</div>
         </div>
       </div>
     </div>`;
@@ -2900,7 +2903,7 @@ PAGE_RENDER.ai = (c)=>{
         </div>
       </div>
       <div class="card">
-        <div class="ch"><h3>${IC('users')} מצב מועצה — 5 פרספקטיבות</h3><span class="tag b">F7.2</span></div>
+        <div class="ch"><h3>${IC('users')} מצב מועצה — 5 פרספקטיבות</h3></div>
         <div class="cb">
           <div class="small muted" style="margin-bottom:10px">5 יועצים מנתחים מהלך במקביל, ביקורת עמיתים אנונימית, וסינתזה לפסק דין. (עד ~90 שניות, 6 קריאות API)</div>
           <div class="row" style="gap:8px">
