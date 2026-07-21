@@ -74,8 +74,8 @@ a{color:var(--accent2)}
 .qsel label{font-size:12px;color:var(--muted)}
 .qsel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font-weight:700}
 .content{padding:24px 26px 60px;max-width:1400px;width:100%}
-/* WS-6: persistent North-Star bar (always know the score) */
-.northstar{padding:12px 26px 0;max-width:1400px;width:100%}
+/* WS-6: persistent North-Star bar (always know the score) — sticky so it stays in view while scrolling */
+.northstar{padding:10px 26px 8px;max-width:1400px;width:100%;position:sticky;top:57px;z-index:15;background:var(--bg)}
 .ns-wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line2);border-radius:14px;padding:11px 16px}
 .ns-score{display:flex;align-items:center;gap:12px}
 .ns-num{font-size:27px;font-weight:800;line-height:1}
@@ -151,6 +151,9 @@ table.tbl th:first-child,table.tbl td:first-child{text-align:start}
 table.tbl tr:hover td{background:rgba(255,255,255,.02)}
 table.tbl input.f{padding:5px 7px}
 td.num,th.num{display:table-cell}  /* .num must not turn table cells into inline-blocks (breaks column layout) */
+/* Berg — visually separate editable input cells from computed/read cells */
+table.tbl.wide input.f,table.tbl.wide select.f{background:color-mix(in srgb,var(--accent) 7%,var(--panel2));border-color:color-mix(in srgb,var(--accent) 22%,var(--line2))}
+table.tbl.wide input.f:focus,table.tbl.wide select.f:focus{background:var(--panel2)}
 .qstrip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
 .qcell{flex:1;min-width:92px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer;transition:.15s;position:relative}
 .qcell:hover{border-color:var(--accent)}
@@ -358,7 +361,7 @@ function defaultState(){
     config:{
       goals:{ floors:{Q1:0,Q2:0,Q3:0,Q4:0,Q5:0,Q6:0,Q7:0,Q8:0,Q9:0},
         techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0,
-        scoreTargets:{roe:25, roi:15, ros:10} },
+        scoreTargets:{roe:25, roi:15, ros:10}, q9Score:75, q9Share:20 },
       contracts:[],
       params:{
         collection:{ us:[100,0,0], europe:[50,20,30], brazil:[30,30,40], hq:[100,0,0] },
@@ -375,11 +378,12 @@ function defaultState(){
     ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-5.6'}, chat:[] },
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
+    masterPlan:{ snapshots:[] },
     meta:{lastEditor:'', lastEdited:0},
   };
 }
 function load(){
-  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ S=deepMerge(defaultState(),JSON.parse(raw)); migrateIntel(); try{updateLearning();}catch(e){} return; } }
+  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ S=deepMerge(defaultState(),JSON.parse(raw)); migrateIntel(); try{updateLearning(); backfillMasterPlan();}catch(e){} return; } }
   catch(e){ console.warn('load failed',e); }
   S=defaultState();
 }
@@ -824,6 +828,50 @@ function runDataQA(){
   const score=Math.max(0,100-15*reds-7*ambers-2*infos);
   return {findings:F,score,quarters:eq.length,reds,ambers,infos};
 }
+/* ==========================================================================
+   Master plan Q1→Q9 — a persisted target trajectory that updates every quarter,
+   measures actual pace vs the pace required to hit Q9, and flags PIVOTS
+   (structural gaps that tuning can't close) as opposed to ordinary tuning.
+   ========================================================================== */
+function updateMasterPlan(){
+  const mp=S.masterPlan=S.masterPlan||{snapshots:[]}; const q=S.activeQuarter, Q=S.quarters[q]; if(!Q||!Q.entered) return;
+  const sp=scoreProxy(null), op=Q.operational;
+  const snap={q, ts:Date.now(), score:Math.round(sp.value), past:Math.round(sp.pastHalf), pot:Math.round(sp.potentialHalf),
+    cumNet:Math.round(sp.parts.cumNet), techX:op.techX||0, techY:op.techY||0,
+    share:sp.parts.share!=null?+(sp.parts.share*100).toFixed(1):null, rank:sp.parts.rank||null};
+  mp.snapshots=(mp.snapshots||[]).filter(s=>s.q!==q); mp.snapshots.push(snap);
+  mp.snapshots.sort((a,b)=>qIndex(a.q)-qIndex(b.q)); save(true);
+}
+function backfillMasterPlan(){ // snapshot every entered quarter as-of, without disturbing the active one
+  const cur=S.activeQuarter; S.masterPlan=S.masterPlan||{snapshots:[]};
+  enteredQuarters().forEach(q=>{ S.activeQuarter=q; try{ updateMasterPlan(); }catch(e){} });
+  S.activeQuarter=cur;
+}
+function masterPlanStatus(){
+  const q=S.activeQuarter, g=S.config.goals, op=S.quarters[q].operational;
+  const sp=scoreProxy(null); const remaining=(QUARTERS.length-1)-qIndex(q);
+  const snaps=(S.masterPlan&&S.masterPlan.snapshots)||[];
+  const tScore=g.q9Score||75;
+  // pace: recent score gain per quarter vs required
+  let pace=null; if(snaps.length>=2){ const a=snaps[snaps.length-2], b=snaps[snaps.length-1]; const dq=qIndex(b.q)-qIndex(a.q); if(dq>0) pace=(b.score-a.score)/dq; }
+  const required=remaining>0?(tScore-sp.value)/remaining:0;
+  const pivots=[];
+  // 1 · tech unreachable — grades can't skip and rise ≤1/quarter via R&D
+  const needX=(g.techXTarget||0)-(op.techX||0), needY=(g.techYTarget||0)-(op.techY||0);
+  if(needX>remaining) pivots.push(`יעד דרגת Chip ${g.techXTarget} לא ניתן להשגה עד Q9 (חסרים ${needX} דרגות, ${remaining} רבעונים — דרגה עולה ≤1/רבעון). Pivot: הורד יעד ל-${(op.techX||0)+remaining} או מקד את המשאבים ב-Y.`);
+  if(needY>remaining) pivots.push(`יעד דרגת PC ${g.techYTarget} לא ניתן להשגה עד Q9 (חסרים ${needY} דרגות ב-${remaining} רבעונים). Pivot: הורד יעד או ותר על ה-Deluxe הגבוה.`);
+  // 2 · score pace structurally behind (including flat/declining — the strongest signal)
+  if(remaining>0 && required>1 && pace!=null && pace<=0)
+    pivots.push(`הציון תקוע (${pace.toFixed(1)}/רבעון) בעוד נדרש ${required.toFixed(1)}/רבעון כדי להגיע ל-${tScore} עד Q9. זה לא פער כוונון — <b>נדרש שינוי אסטרטגיה</b>: התחל למכור ברווחיות (מחצית העבר תקועה) והפנה מו״פ ליעד שיבשיל בזמן.`);
+  else if(remaining>0 && required>0 && pace!=null && pace>0 && pace*1.5<required)
+    pivots.push(`קצב הציון (${pace.toFixed(1)}/רבעון) נמוך מהנדרש (${required.toFixed(1)}/רבעון) כדי להגיע ל-${tScore}. Pivot: שנה אסטרטגיה — לא כוונון. שקול מכירה אגרסיבית יותר (מחיר/נפח) או קיצוץ הוצאות עתיד שלא יבשילו.`);
+  // 3 · potential half capped low with little time
+  if(remaining<=3 && sp.potentialHalf<40 && (op.rd||0)>0)
+    pivots.push(`מחצית הפוטנציאל תקועה נמוך (${sp.potentialHalf.toFixed(0)}) ונותרו ${remaining} רבעונים — השקעות עתיד לא יבשילו בזמן. Pivot: הסט מו״פ למזומן/רווח מיידי (מחצית העבר) שעוד ניתן לשפר.`);
+  const onTrack= remaining===0 ? sp.value>=tScore : (required<=0 || (pace!=null && pace>=required*0.8));
+  return {score:sp.value, tScore, remaining, pace, required, pivots, onTrack, snaps, past:sp.pastHalf, pot:sp.potentialHalf};
+}
+
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
 function computeAlerts(q){
   const Q=S.quarters[q], g=S.config.goals, out=[];
@@ -1222,11 +1270,20 @@ function maturationAdvice(q){
   return {n,out};
 }
 function renderRoadmap(q){
-  const mat=maturationAdvice(q);
-  const cells=QUARTERS.map(x=>{ const done=S.quarters[x].entered, cur=x===q;
-    return `<div class="rm-cell ${cur?'cur':(done?'done':'')}"><b>${x}</b><span>${cur?'נוכחי':(done?'✓ נקלט':'—')}</span></div>`; }).join('<span class="rm-ar">←</span>');
-  return `<div class="card" style="margin-bottom:16px"><div class="ch"><h3>${IC('trendUp')} תוכנית-אב Q1→Q9 · ספירת בשלות</h3><span class="tag ${mat.n<=2?'a':'b'}">${mat.n} רבעונים עד הסיום</span></div>
+  const mat=maturationAdvice(q); const mp=masterPlanStatus();
+  const cells=QUARTERS.map(x=>{ const done=S.quarters[x].entered, cur=x===q; const sn=mp.snaps.find(s=>s.q===x);
+    return `<div class="rm-cell ${cur?'cur':(done?'done':'')}"><b>${x}</b><span>${sn?('ציון '+sn.score):(cur?'נוכחי':'—')}</span></div>`; }).join('<span class="rm-ar">←</span>');
+  const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
+  const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר אחרי היעד');
+  return `<div class="card" style="margin-bottom:16px"><div class="ch"><h3>${IC('trendUp')} תוכנית-אב Q1→Q9</h3><span class="tag ${trackTag}">${trackTxt} · יעד Q9: ${mp.tScore}</span></div>
     <div class="cb"><div class="rm-strip">${cells}</div>
+      <div class="kpis" style="margin-top:12px">
+        ${kpi('ציון נוכחי',mp.score.toFixed(0),`עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)}`)}
+        ${kpi('נותרו עד Q9',mp.remaining+' רבעונים','')}
+        ${kpi('קצב מול נדרש',(mp.pace!=null?mp.pace.toFixed(1):'—')+' / '+(mp.required>0?mp.required.toFixed(1):'0'),mp.pace!=null&&mp.required>0?(mp.pace>=mp.required?'עומד בקצב':'איטי מדי'):'טרם נמדד')}
+      </div>
+      ${mp.pivots.length?`<div class="card pad" style="margin-top:12px;border-inline-start:4px solid var(--red)"><b style="color:var(--red)">${IC('warn')} דרוש שינוי אסטרטגיה (Pivot) — לא כוונון:</b>
+        <ul style="padding-inline-start:20px;line-height:1.85;margin:8px 0 0">${mp.pivots.map(x=>`<li class="small">${esc(x)}</li>`).join('')}</ul></div>`:''}
       <div class="small muted" style="margin-top:12px">מה עוד מבשיל עד Q9 אם מתחילים מ-${q}:</div>
       <ul style="padding-inline-start:20px;line-height:1.9;margin:6px 0 0">${mat.out.map(m=>`<li class="small"><span style="color:${m.ok?'var(--green)':'var(--red)'};font-weight:800">${m.ok?'✓':'✕'}</span> <b>${esc(m.t)}</b> — ${esc(m.d)}</li>`).join('')}</ul>
     </div></div>`;
@@ -1788,7 +1845,7 @@ window.addInventory=()=>{ S.quarters[S.activeQuarter].operational.inventory.push
 window.setInv=(i,k,v)=>{ const it=S.quarters[S.activeQuarter].operational.inventory[i]; it[k]=(k==='product'||k==='grade')?v:(parseFloat(v)||0); save(true);
   if(k==='price'||k==='qty'){ const el=$(`#invTable tbody tr:nth-child(${i+1}) td:nth-child(5) input`); if(el)el.style.borderColor=(!(it.price>0)&&it.qty>0)?'var(--red)':''; } };
 window.delInv=(i)=>{ S.quarters[S.activeQuarter].operational.inventory.splice(i,1); save(); renderInventoryTable(); };
-window.confirmQuarter=()=>{ S.quarters[S.activeQuarter].entered=true; updateLearning(); save(); toast('רבעון '+S.activeQuarter+' אושר ונקלט — מנוע הביקוש עודכן ✓','g'); renderQuarterSelect(); go('dashboard'); };
+window.confirmQuarter=()=>{ S.quarters[S.activeQuarter].entered=true; updateLearning(); updateMasterPlan(); save(); toast('רבעון '+S.activeQuarter+' אושר ונקלט — מנוע הביקוש ותוכנית-האב עודכנו ✓','g'); renderQuarterSelect(); go('dashboard'); };
 
 /* ----- CASHFLOW (F4) ----- */
 PAGE_RENDER.cashflow = (c)=>{
@@ -2207,10 +2264,10 @@ PAGE_RENDER.export = (c)=>{
         <div class="cb" id="checklist"></div>
       </div>
     </div>
-    <div class="card" style="margin-top:18px">
-      <div class="ch"><h3>${IC('book')} מקרא טפסי ההחלטה של INTOPIA</h3><span class="small muted">כל הקודים, האזורים והשדות הרשמיים</span></div>
+    <details class="card" style="margin-top:18px">
+      <summary style="cursor:pointer;padding:15px 18px;font-weight:800;display:flex;align-items:center;gap:8px">${IC('book')} מקרא טפסי ההחלטה של INTOPIA <span class="small muted" style="font-weight:400">— 19 הקודים והשדות (לחץ לפתיחה)</span></summary>
       <div class="cb" id="formsRef"></div>
-    </div>`;
+    </details>`;
   c.insertAdjacentHTML('beforeend', journalSectionHTML());
   refreshExport(); renderFormsReference($('#formsRef'));
 };
