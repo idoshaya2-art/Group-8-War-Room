@@ -429,9 +429,13 @@ function defaultState(){
     cumulative:false,
     config:{
       goals:{ floors:{Q1:0,Q2:0,Q3:0,Q4:0,Q5:0,Q6:0,Q7:0,Q8:0,Q9:0},
-        techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0,
-        scoreTargets:{roe:25, roi:15, ros:10}, q9Score:75, q9Share:20 },
-      contracts:[],
+        techXTarget:3, techYTarget:1, debtCeiling:0, endInventoryTarget:0,
+        scoreTargets:{roe:25, roi:15, ros:10}, q9Score:75, q9Share:20,
+        // Group 8 Q9 targets (Assignment 1, thousands SF → SF)
+        cumProfitTarget:7046000, finalRETarget:4616000, equityTarget:12616000, debtFreeFrom:'Q8', noExternalLoans:true },
+      contracts:[ // binding X3 supply commitment (Scenario 1)
+        {id:'x3q5',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q5',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'},
+        {id:'x3q6',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q6',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'} ],
       params:{ // sourced from DATALOG (Data Log v1) — see the DATALOG constant for provenance
         collection:{ us:[...DATALOG.collection.us], europe:[...DATALOG.collection.europe], brazil:[...DATALOG.collection.brazil], hq:[100,0,0] },
         tax:{...DATALOG.tax},
@@ -474,6 +478,19 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
       P.collection={ us:[...DATALOG.collection.us], europe:[...DATALOG.collection.europe], brazil:[...DATALOG.collection.brazil], hq:[100,0,0] };
       P.interest={bank:5.5, supplierCredit:7, h4:5.5, securities:2};
       S.meta.datalogV=1;
+    }
+    // Strategy layer: seed Group 8's Q9 targets, X3 contract, and no-loans red line into existing states.
+    if(S.config.goals && S.meta.strategyV!==1){ const G=S.config.goals;
+      G.cumProfitTarget=G.cumProfitTarget||7046000; G.finalRETarget=G.finalRETarget||4616000;
+      G.equityTarget=G.equityTarget||12616000; G.debtFreeFrom=G.debtFreeFrom||'Q8';
+      if(G.noExternalLoans===undefined) G.noExternalLoans=true;
+      if(!G.techXTarget) G.techXTarget=3; if(!G.techYTarget) G.techYTarget=1;
+      if(!Array.isArray(S.config.contracts)||!S.config.contracts.some(c=>c.id==='x3q5')){
+        S.config.contracts=[...(S.config.contracts||[]),
+          {id:'x3q5',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q5',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'},
+          {id:'x3q6',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q6',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'}];
+      }
+      S.meta.strategyV=1;
     }
   }
   // normalise legacy inventory product labels ("Chip אירופה") to canonical X/Y + region
@@ -1103,6 +1120,11 @@ function autoBriefing(q){
     out.push(`שינוי מול ${prevQ}: <b class="num">${d>=0?'+':''}${fmt(d)}</b> ${d>=0?IC('trendUp'):IC('trendDown')}.`); }
   const fg=finishedGoods(q);
   if(fg.hasFinished) out.push(`<span style="color:${fg.anyUnpriced?'var(--red)':'var(--green)'}">מלאי מוגמר:</span> <b class="num">${fmt(fg.pcUnits)}</b> מחשבים מוכנים למכירה${fg.anyUnpriced?' — <b style="color:var(--red)">עדיין ללא מחיר מוזן!</b> זו הפעולה הדחופה ביותר':''} (שווי פוטנציאלי ≈<b class="num">${fmt(fg.potentialRevenue)}</b>).`);
+  // Progress vs Group 8's Q9 targets (Assignment 1)
+  const g=S.config.goals;
+  if(g.cumProfitTarget){ const cumProfit=enteredQuarters().reduce((a,x)=>a+(S.quarters[x].financial.netProfit||0),0);
+    const pct=Math.round(cumProfit/g.cumProfitTarget*100);
+    out.push(`מול יעד Q9: רווח מצטבר <b class="num" style="color:${cumProfit<0?'var(--red)':'var(--green)'}">${fmt(Math.round(cumProfit))}</b> מתוך יעד <b class="num">${fmt(g.cumProfitTarget)}</b> (${pct}%)${g.noExternalLoans?' · קו אדום: ללא הלוואות חיצוניות':''}.`); }
   const reds=computeAlerts(q).filter(a=>a.level==='red');
   if(reds.length) out.push(`<span style="color:var(--red)">דחוף:</span> ${reds.length} נורות אדומות — ${reds[0].title}.`);
   else out.push(`אין נורות אדומות פעילות ברבעון זה. ${IC('check')}`);
@@ -1840,11 +1862,18 @@ function buildActionPlan(q,targetQ){
   const minProj=proj.length?Math.min(...proj.map(x=>x.unified)):unifiedCashOf(q);
   if(minProj<safety){
     const need=Math.ceil((safety-minProj)/50000)*50000;
-    const fo=financeActionOptions(targetQ,need,'europe');
-    out.push({cat:'fin',level:'amber',conf:'data',title:`מימון גישור — A3-2`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
-      detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. הלוואה מקומית (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה. חלופה: H4 בין-חברות. <b>מומלץ: לווה ${fmt(need)} SF</b> (גישור מינימלי). אופציות אחרות למטה.`,
-      dep:`קח את המימון רבעון לפני הצורך — הגבייה המדורגת מעכבת את המזומן גם אחרי שהמכירות מתחילות.`,
-      optionCols:fo.optionCols, options:fo.options, sim:fo.options[0].sim});
+    if(g.noExternalLoans){
+      // Red line: no external loans. Close the gap with supplier credit (automatic) + cash consolidation + cost cuts.
+      out.push({cat:'fin',level:'amber',conf:'data',title:`סגירת פער מזומן ללא הלוואה — ${fmt(need)} SF`,form:'A3-1 (העברות) + אשראי ספקים אוטומטי',
+        detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ${fmt(safety)}. <b>הקו האדום שלכם: אפס הלוואות חיצוניות.</b> סגרו את הפער (${fmt(need)} SF) בשלושה מהלכים במקום הלוואה: (1) <b>רכזו מזומן</b> מאזורים עשירים (A3-1 — ראו המלצות ההעברה); (2) הפער הנותר נגרר כ<b>אשראי ספקים אוטומטי</b> (${S.config.params.interest.supplierCredit}%/רבעון) שמתחסל מהמכירות; (3) <b>קצצו הוצאה לא-קריטית</b> (פרסום/מו״פ עודף) ברבעון זה.`,
+        dep:`אשראי הספקים יקר (${S.config.params.interest.supplierCredit}%) ופוגע ברכיב האיתנות — צמצמו את משכו ע״י האצת מכירות וגבייה. אין לבקש הלוואה מאף גורם.`});
+    } else {
+      const fo=financeActionOptions(targetQ,need,'europe');
+      out.push({cat:'fin',level:'amber',conf:'data',title:`מימון גישור — A3-2`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
+        detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. הלוואה מקומית (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה. חלופה: H4 בין-חברות. <b>מומלץ: לווה ${fmt(need)} SF</b> (גישור מינימלי). אופציות אחרות למטה.`,
+        dep:`קח את המימון רבעון לפני הצורך — הגבייה המדורגת מעכבת את המזומן גם אחרי שהמכירות מתחילות.`,
+        optionCols:fo.optionCols, options:fo.options, sim:fo.options[0].sim});
+    }
   }
   // Market research to buy (H1-2) — close the most expensive information gap
   const gaps=(S.learning&&S.learning.gaps)||[];
@@ -1864,8 +1893,14 @@ function buildActionPlan(q,targetQ){
   // 8. Contracts at risk
   S.config.contracts.forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
     const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
-    if(inv<(ct.qty||0)) out.push({cat:'ops',level:'amber',title:`חוזה בסיכון — ${ct.counterparty||'צד נגדי'}`,form:'A2-3/A2-4 (ייצור)',
-      detail:`התחייבת ל-${ct.qty} × ${ct.product||'—'} עד ${ct.deliveryQuarter}, במלאי ${inv} בלבד. תזמן ייצור (A2-3 שבב / A2-4 מחשב) כדי לעמוד באספקה.`}); } });
+    const lead=qIndex(ct.deliveryQuarter)-qIndex(q); // quarters until delivery (production must precede by ~1)
+    const short=(ct.qty||0)-inv; const prodGrade=(ct.product||'')+(ct.grade!=null?ct.grade:'');
+    if(short>0){ const urgent=lead<=1; // must be produced now to arrive on time
+      out.push({cat:'ops',level:urgent?'red':'amber',conf:'rule',
+      title:`${urgent?'⚠ ':''}התחייבות ${prodGrade} — ${fmt(ct.qty)} עד ${ct.deliveryQuarter}${urgent?' (ייצר עכשיו!)':''}`,form:'A2-3 (Chip Production)',
+      detail:`<b>${esc(ct.counterparty||'התחייבות')}</b>: ${fmt(ct.qty)} × ${prodGrade} עד ${ct.deliveryQuarter}, במלאי ${fmt(inv)} — חסרים <b>${fmt(short)}</b>. ${ct.note?ct.note+'. ':''}ייצור נכנס למלאי בסוף הרבעון וזמין למסירה רבעון אחריו — לכן ${lead<=1?`<b>הייצור חייב להתבצע ב-${q} כדי להספיק ל-${ct.deliveryQuarter}</b>`:`ייצר עד ${QUARTERS[qIndex(ct.deliveryQuarter)-1]||q}`}. דורש דרגת ${prodGrade} (מו״פ קודם אם הדרגה לא הושגה).`,
+      dep:`מו״פ→דרגה ${prodGrade} ⟵ ייצור (A2-3) ⟵ מלאי סוף רבעון ⟵ מסירה. אל תחמיץ — התחייבות ללא קנס תלויה בעמידה בזמן.`,
+      sim:{q:targetQ,regions:{europe:{production:short,product:ct.product||'X',model:'Deluxe',unitCost:0}}}}); } } });
   // 9. Debt — only worth raising when the company is actually cash-healthy (positive RE, ample cash)
   if((f.loans||0)>0 && (f.retainedEarnings||0)>=0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2 && !brk && minProj>=safety)
     out.push({cat:'fin',level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
