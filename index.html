@@ -693,13 +693,17 @@ function projectCashflow(baseQuarter, leversByQuarter){
     REGIONS.forEach(r=>{
       const rl=(lev.regions&&lev.regions[r.id])||{};
       const sales=rl.sales||0, prodCost=(rl.production||0)*(rl.unitCost||0), adv=rl.advertising||0,
-            invest=rl.invest||0, transferIn=rl.transferIn||0, rd=(lev.rd||0)/REGIONS.length;
+            invest=rl.invest||0, transferIn=rl.transferIn||0, transferOut=rl.transferOut||0, rd=(lev.rd||0)/REGIONS.length;
       const facCost=(rl.newFac||0)*(p.factoryCost||0), offCost=(rl.offices||0)*(p.officeCost||0); // WS-4: A2-1 build + A1-3 operating
       // regional differential tax on operating profit (facCost is capex, excluded). Paid in cash when earned.
       const pretax=sales - prodCost - adv - rd - offCost;
       const tax=pretax>0 ? pretax*((p.tax[r.id]||0)/100) : 0; taxSF += tax*fxRate(r.cur);
       if(sales) push(r.id,i,sales);
-      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost + tax - transferIn;
+      // Fix #1: A3-1 transfers conserve cash. transferIn credits this region (borrow inflows also use transferIn alone);
+      // transferOut debits the source region and pays the real exchange commission (Data Log 07) — so a Brazil→HQ
+      // move no longer creates money, it nets to ~zero minus the fee.
+      const commRate=(DATALOG.exchangeCommission[r.id]||0)/100;
+      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost + tax - transferIn + transferOut*(1+commRate);
     });
     pipeline.filter(x=>x.q===q).forEach(x=> bal[x.region]+=x.amount);
     const loans=S.quarters[baseQuarter].financial.loans||0;
@@ -1688,28 +1692,30 @@ function transferActions(q,targetQ){
     const src=rich[0], shortSF=hqNeedSF-hqSF;
     const full=Math.min(src.local, rnd(shortSF/fxRate(src.r.cur),1000));
     remaining[src.r.id]=Math.max(0,remaining[src.r.id]-full); // HQ funding consumes from the source first
+    const comm=(DATALOG.exchangeCommission[src.r.id]||0);
     const mk=(nm,frac,fav)=>{ const loc=rnd(full*frac,1000), sf=Math.round(loc*fxRate(src.r.cur));
-      return {name:nm,favors:fav,cells:[fmt(loc)+' '+src.r.cur,'≈'+fmt(sf)+' SF'],sim:{q:targetQ,regions:{hq:{transferIn:sf}}}}; };
+      return {name:nm,favors:fav,cells:[fmt(loc)+' '+src.r.cur,'≈'+fmt(sf)+' SF'],sim:{q:targetQ,regions:{hq:{transferIn:sf}, [src.r.id]:{transferOut:loc}}}}; };
     out.push({cat:'fin',level:'amber',conf:'data',
       title:`מַמֵּן את המטה — העבר ${fmt(full)} ${src.r.cur} מ${src.r.name} → מטה`,form:'A3-1 (Money Transfer — To Home Office)',
-      detail:`המטה צריך ≈<b>${fmt(hqNeedSF)} SF</b> (מו״פ ${fmt(lastRd||500000)} + ריבית ${fmt(interest)} + כרית) ומחזיק רק <b>${fmt(hqSF)} SF</b>. ב${src.r.name} יש ${fmt(src.local)} ${src.r.cur} (≈${fmt(src.sf)} SF) פנויים. <b>מומלץ: העבר ${fmt(full)} ${src.r.cur} (≈${fmt(Math.round(full*fxRate(src.r.cur)))} SF) To Home Office, Convert in Area? כן.</b>`,
-      dep:`חייב לקרות לפני מו״פ (H1-1) ותשלומי ריבית ברבעון הבא. המרה כרוכה בשער (${src.r.cur}→SF).`,
+      detail:`המטה צריך ≈<b>${fmt(hqNeedSF)} SF</b> (מו״פ ${fmt(lastRd||500000)} + ריבית ${fmt(interest)} + כרית) ומחזיק רק <b>${fmt(hqSF)} SF</b>. ב${src.r.name} יש ${fmt(src.local)} ${src.r.cur} (≈${fmt(src.sf)} SF) פנויים. <b>מומלץ: העבר ${fmt(full)} ${src.r.cur} (≈${fmt(Math.round(full*fxRate(src.r.cur)))} SF) To Home Office, Convert in Area? כן.</b> עמלת המרה ${comm}% (≈${fmt(Math.round(full*comm/100))} ${src.r.cur}) תנוכה במקור.`,
+      dep:`חייב לקרות לפני מו״פ (H1-1) ותשלומי ריבית ברבעון הבא. המרה כרוכה בשער (${src.r.cur}→SF) ובעמלה ${comm}%.`,
       optionCols:['סכום למקור','שווי SF'],options:[mk('כל הנדרש',1,'סוגר את מלוא הצורך של המטה'),mk('70%',0.7,'חלקי — משאיר מרווח במקור'),mk('50%',0.5,'מינימלי')],
-      sim:{q:targetQ,regions:{hq:{transferIn:Math.round(full*fxRate(src.r.cur))}}}});
+      sim:{q:targetQ,regions:{hq:{transferIn:Math.round(full*fxRate(src.r.cur))}, [src.r.id]:{transferOut:full}}}});
   }
   // 2. Consolidate idle cash from non-operating regions to the operating region — e.g. Brazil -> Europe
   //    (uses each region's REMAINING balance after HQ funding, so nothing is double-counted)
   regs.filter(x=>x.r.id!==opRegionId && Math.round(remaining[x.r.id]*fxRate(x.r.cur))>250000).forEach(x=>{
     const avail=remaining[x.r.id]; const full=rnd(avail*0.8,1000);
     const toOpLocal=amtSF=>Math.round(amtSF/fxRate(opReg.cur)); // credit destination in its own currency
+    const comm=(DATALOG.exchangeCommission[x.r.id]||0);
     const mk=(nm,frac,fav)=>{ const loc=rnd(full*frac,1000), sf=Math.round(loc*fxRate(x.r.cur));
-      return {name:nm,favors:fav,cells:[fmt(loc)+' '+x.r.cur,'≈'+fmt(sf)+' SF'],sim:{q:targetQ,regions:{[opRegionId]:{transferIn:toOpLocal(sf)}}}}; };
+      return {name:nm,favors:fav,cells:[fmt(loc)+' '+x.r.cur,'≈'+fmt(sf)+' SF'],sim:{q:targetQ,regions:{[opRegionId]:{transferIn:toOpLocal(sf)}, [x.r.id]:{transferOut:loc}}}}; };
     out.push({cat:'fin',level:'info',conf:'data',
       title:`רכז מזומן — העבר ${fmt(full)} ${x.r.cur} מ${x.r.name} → ${opReg.name}`,form:'A3-1 (Money Transfer)',
-      detail:`ב${x.r.name} ${avail<x.local?'נותרו':'מצטברים'} ${fmt(avail)} ${x.r.cur} (≈ ${fmt(Math.round(avail*fxRate(x.r.cur)))} SF)${avail<x.local?' לאחר מימון המטה':''} שאינם מנוצלים, בעוד הייצור והמכירה מרוכזים ב${opReg.name}. רכזו אותם לשם למימון ייצור/פרסום. <b>מומלץ: העבר ${fmt(full)} ${x.r.cur} (80% מהיתרה ≈ ${fmt(Math.round(full*fxRate(x.r.cur)))} SF) ל${opReg.name}.</b>`,
-      dep:`מזומן באזור לא-פעיל אינו מייצר תשואה. ${x.r.cur} חלש מול SF — קחו בחשבון את השער בהמרה.`,
+      detail:`ב${x.r.name} ${avail<x.local?'נותרו':'מצטברים'} ${fmt(avail)} ${x.r.cur} (≈ ${fmt(Math.round(avail*fxRate(x.r.cur)))} SF)${avail<x.local?' לאחר מימון המטה':''} שאינם מנוצלים, בעוד הייצור והמכירה מרוכזים ב${opReg.name}. רכזו אותם לשם למימון ייצור/פרסום. <b>מומלץ: העבר ${fmt(full)} ${x.r.cur} (80% מהיתרה ≈ ${fmt(Math.round(full*fxRate(x.r.cur)))} SF) ל${opReg.name}.</b> עמלת המרה ${comm}% תנוכה במקור.`,
+      dep:`מזומן באזור לא-פעיל אינו מייצר תשואה. המרה כרוכה בעמלה ${comm}% ובשער (${x.r.cur}→SF).`,
       optionCols:['סכום למקור','שווי SF'],options:[mk('סחוף 80%',1,'מרכז את רוב המזומן לאזור הפעיל'),mk('50%',0.625,'חלקי'),mk('מינימלי',0.375,'משאיר רוב במקור')],
-      sim:{q:targetQ,regions:{[opRegionId]:{transferIn:toOpLocal(Math.round(full*fxRate(x.r.cur)))}}}});
+      sim:{q:targetQ,regions:{[opRegionId]:{transferIn:toOpLocal(Math.round(full*fxRate(x.r.cur)))}, [x.r.id]:{transferOut:full}}}});
   });
   return out;
 }
@@ -1794,7 +1800,7 @@ function buildActionPlan(q,targetQ){
   REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0){ const need=Math.round(Math.abs(f.cash[r.id])*1.2);
     out.push({cat:'fin',level:'red',title:`גירעון מטבע — ${r.name}: העבר ${fmt(need)} ${r.cur}`,form:'A3-1 (Money Transfer אזור↔מטה)',
       detail:`יתרה שלילית ${fmt(f.cash[r.id])} ${r.cur}. סכום מוצע: <b>${fmt(need)} ${r.cur}</b> (הגירעון + כרית 20%) בהעברה מהמטה, Convert in Area? כן.`,
-      sim:{q:targetQ,regions:{[r.id]:{transferIn:need}}}}); } });
+      sim:{q:targetQ,regions:{[r.id]:{transferIn:need}, hq:{transferOut:Math.round(need*fxRate(r.cur))}}}}); } });
   // Capital allocation — fund HQ (R&D+interest) and consolidate idle regional cash (e.g. Brazil→Europe/HQ)
   transferActions(q,targetQ).forEach(t=>out.push(t));
   // 3. Revenue status — judged against the mandatory value-chain timeline
