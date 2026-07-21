@@ -717,6 +717,24 @@ function predictDemand(region,product,opt){
   const band=Math.round(units*(1-conf)*0.5);
   return {units, low:Math.max(0,units-band), high:units+band, share, confidence:conf, size, anchor:a};
 }
+// Competitor price move via an attraction model: rivals cutting price raises their
+// pull by (1-cut)^elast; we renormalise shares. Optionally we counter with the same cut.
+function simCompetitorPriceMove(region,product,cutPct,weMatch){
+  const L=S.learning, k=_lkey(region,product), a=L.anchors[k], size=L.market[k];
+  if(!a||size==null||a.share<=0) return null;
+  const elast=L.elast.price; // negative (price down -> demand up)
+  const sUs=a.share, sRivals=Math.max(1e-6,1-sUs);
+  const rivalMult=Math.pow(1-cutPct/100, elast); // cut>0 -> >1 (rivals more attractive)
+  const usMult=weMatch?Math.pow(1-cutPct/100, elast):1;
+  const Aus=sUs*usMult, Arivals=sRivals*rivalMult;
+  const newShare=Aus/(Aus+Arivals);
+  const baseUnits=Math.round(sUs*size), newUnits=Math.round(newShare*size);
+  // if we match, our unit price also drops by cutPct — revenue effect uses the anchor price
+  const price=a.price||0, newPrice=weMatch?Math.round(price*(1-cutPct/100)):price;
+  return { region, product, baseShare:sUs, newShare, baseUnits, newUnits, deltaUnits:newUnits-baseUnits,
+    price, newPrice, baseRev:Math.round(baseUnits*price), newRev:Math.round(newUnits*newPrice),
+    confidence:Math.min(1,L.obs/4)*(L.elast.priceObs>0?1:0.6) };
+}
 function learningSummary(){
   const L=S.learning; if(!L||!L.obs) return null;
   return { obs:L.obs, confidence:L.confidence, priceElast:L.elast.price, priceObs:L.elast.priceObs,
@@ -2135,11 +2153,36 @@ window.sensitivity=()=>{
         for(const k in v.mult) lev[q].regions[r.id][k]=(lev[q].regions[r.id][k]||0)*v.mult[k]; }); });
     const sp=scoreProxy(lev); return {name:v.name,endCash:sp.endCash,d:sp.endCash-bs.endCash,score:sp.value};
   });
-  openModal('± ניתוח רגישות (±10%)',`
-    <div class="small muted" style="margin-bottom:12px">מבוסס על התרחיש הראשון (או בסיס אפס). השפעה על מזומן סופי מוקרן:</div>
+  const hasDemand=S.learning&&Object.keys(S.learning.anchors||{}).length;
+  openModal('± ניתוח רגישות ומהלכי מתחרים',`
+    <div class="small muted" style="margin-bottom:10px">א. רגישות ההנחות שלנו — השפעה על מזומן סופי מוקרן:</div>
     <table class="tbl"><thead><tr><th>וריאציה</th><th>מזומן סופי</th><th>Δ מול בסיס</th><th>פרוקסי ציון</th></tr></thead>
     <tbody>${rows.map(r=>`<tr><td>${r.name}</td><td class="num">${fmt(r.endCash)}</td><td class="num" style="color:${r.d>=0?'var(--green)':'var(--red)'}">${r.d>=0?'+':''}${fmt(r.d)}</td><td class="num">${r.score.toFixed(0)}</td></tr>`).join('')}</tbody></table>
-    <div class="small muted" style="margin-top:12px">${IC('warn')} טווחי רגישות בלבד — לא תחזית נקודתית. מודל ביקוש מכויל יתווסף מנתוני מכירות אמיתיים.</div>`,'');
+    <div class="small muted" style="margin:16px 0 8px">ב. <b>מה אם מתחרה יחתוך מחיר?</b> — נגזר ממנוע הביקוש (גמישות ${S.learning?S.learning.elast.price.toFixed(2):'—'}):</div>
+    ${hasDemand?`
+    <div class="row" style="gap:10px;align-items:center;margin-bottom:10px">
+      <label class="small">חיתוך מחיר של המתחרים:</label>
+      <select class="f" id="compCut" style="width:90px" onchange="renderCompMove()">${[5,10,15,20,25].map(v=>`<option value="${v}" ${v===15?'selected':''}>${v}%</option>`).join('')}</select>
+      <label class="small"><input type="checkbox" id="weMatch" onchange="renderCompMove()"> אנחנו מגיבים באותו חיתוך</label>
+    </div>
+    <div id="compMoveOut"></div>`
+    :`<div class="tag a">${IC('warn')} אין עדיין עוגני ביקוש — קלוט רבעון עם מכירות (MR17&28) כדי להפעיל את סימולציית המתחרים.</div>`}
+    <div class="small muted" style="margin-top:12px">${IC('warn')} מודל אטרקציה מבוסס גמישות מוערכת; ${S.learning&&S.learning.elast.priceObs>0?`מכויל מ-${S.learning.elast.priceObs} תצפיות`:'על פריור עד שתצטבר תצפית מחיר'}.</div>`,'');
+  if(hasDemand) renderCompMove();
+};
+window.renderCompMove=()=>{
+  const out=$('#compMoveOut'); if(!out) return;
+  const cut=parseFloat($('#compCut').value)||15; const match=$('#weMatch').checked;
+  const keys=Object.keys(S.learning.anchors||{});
+  const rows=keys.map(k=>{ const [region,product]=k.split('|'); const m=simCompetitorPriceMove(region,product,cut,match); if(!m) return '';
+    const rn=(REGIONS.find(r=>r.id===region)||{}).name||region;
+    return `<tr><td><b>${esc(rn)}</b> · ${product==='X'?'Chip':'PC'}</td>
+      <td class="num">${fmt(m.baseUnits)}</td>
+      <td class="num" style="color:${m.deltaUnits<0?'var(--red)':'var(--green)'}">${m.deltaUnits>=0?'+':''}${fmt(m.deltaUnits)}</td>
+      <td class="num">${(m.newShare*100).toFixed(1)}%</td>
+      <td class="num" style="color:${m.newRev<m.baseRev?'var(--red)':'var(--green)'}">${fmt(m.newRev)}</td></tr>`; }).join('');
+  out.innerHTML=`<table class="tbl"><thead><tr><th>שוק</th><th>יח׳ בסיס</th><th>Δ יח׳</th><th>נתח חדש</th><th>הכנסה ${match?'(אחרי החיתוך שלנו)':''}</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="small muted" style="margin-top:8px">${match?'תרחיש: המתחרים חתכו ואנחנו מיישרים קו — מגן על נתח אך שוחק מחיר.':'תרחיש: המתחרים חתכו ואנחנו לא הגבנו — נתח השוק שלנו נשחק.'} השווה את שני המצבים כדי להחליט אם להגיב.</div>`;
 };
 window.pickForDecision=(id)=>{ const sc=S.scenarios.find(s=>s.id===id); if(sc)openDecisionModal(sc); };
 
