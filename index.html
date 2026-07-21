@@ -589,6 +589,7 @@ function renderNorthStar(){
     <div class="ns-kpi"><span class="k">מזומן מול רצפה</span><b class="num" style="color:${dist>=0?'var(--green)':'var(--red)'}">${dist>=0?'+':''}${fmt(Math.round(dist))} SF</b></div>
     ${sp.parts.rank?`<div class="ns-kpi"><span class="k">דירוג רווחים</span><b class="num">${sp.parts.rank}/${sp.parts.rankN}</b></div>`:''}
     ${sp.parts.share!=null?`<div class="ns-kpi"><span class="k">נתח שוק</span><b class="num">${(sp.parts.share*100).toFixed(1)}%</b></div>`:''}
+    ${(()=>{ const fg=finishedGoods(base); return fg.hasFinished?`<div class="ns-kpi"><span class="k">מלאי מוגמר PC</span><b class="num" style="color:${fg.anyUnpriced?'var(--red)':'var(--txt)'}">${fmt(fg.pcUnits)}${fg.anyUnpriced?' ⚠':''}</b></div>`:''; })()}
     ${top?`<div class="ns-alert ${tlvl}" onclick="go('${top.key==='floor'?'financials':(top.key==='noprice'?'ingest':'plan')}')">${IC(tlvl==='red'?'warn':'info')} ${esc(top.title)}</div>`:`<div class="ns-alert ok">${IC('check')} אין התראות פתוחות</div>`}
   </div>`;
 }
@@ -616,6 +617,22 @@ function unifiedCashOf(q){
   let sum=0; REGIONS.forEach(r=> sum += (fin.cash[r.id]||0)*fxRate(r.cur)); return sum;
 }
 function inventoryValue(q){ return S.quarters[q].operational.inventory.reduce((a,i)=>a+(i.qty||0)*(i.cost||0),0); }
+// Finished-goods primitive — the single most important standing state in INTOPIA.
+// Finished PCs (Y) already carry the full cost of the value chain; leaving them unsold
+// earns nothing and starves the 50% past-half (profit/ROE/ROI/ROS). This is TRUE regardless
+// of whether the company already has some revenue — the engine used to only "notice" selling
+// when revenue was exactly 0, so idle finished stock became invisible the moment sales began.
+function finishedGoods(q){
+  const inv=(S.quarters[q]&&S.quarters[q].operational&&S.quarters[q].operational.inventory)||[];
+  const pc=inv.filter(i=>i.product==='Y'&&(i.qty||0)>0);
+  const chip=inv.filter(i=>i.product==='X'&&(i.qty||0)>0);
+  const pcUnits=pc.reduce((a,i)=>a+(i.qty||0),0);
+  const chipUnits=chip.reduce((a,i)=>a+(i.qty||0),0);
+  const unpricedPc=pc.filter(i=>!(i.price>0));
+  const plan=(pcUnits>0)?pcPlanFor(q):[];
+  const potentialRevenue=plan.reduce((a,p)=>a+p.revenue,0);
+  return {pc,chip,pcUnits,chipUnits,unpricedPc,plan,potentialRevenue,hasFinished:pcUnits>0,anyUnpriced:unpricedPc.length>0};
+}
 
 function projectCashflow(baseQuarter, leversByQuarter){
   const p=S.config.params;
@@ -986,7 +1003,18 @@ PAGE_RENDER.dashboard = (c)=>{
   const cashNow=unifiedCashOf(q);
   const cashPrev=(prevQ&&S.quarters[prevQ].entered)?unifiedCashOf(prevQ):null;
   const brief=autoBriefing(q);
-  c.innerHTML=quartersStrip()+`
+  const fg=finishedGoods(q);
+  // Finished stock is the highest-value latent asset — give it a headline banner, not a buried row.
+  const fgBanner=fg.hasFinished?`
+    <div class="card pad" style="margin-bottom:18px;border-color:${fg.anyUnpriced?'var(--red)':'var(--green)'};background:linear-gradient(90deg,${fg.anyUnpriced?'var(--redbg)':'var(--greenbg)'},var(--panel))">
+      <div class="between" style="flex-wrap:wrap;gap:10px">
+        <div><div style="font-size:13px;color:var(--muted);font-weight:700">${IC('landmark')} מלאי מוגמר — הנכס שיש להמיר למזומן</div>
+          <div style="font-size:26px;font-weight:800;font-family:'Rubik';margin-top:2px">${fmt(fg.pcUnits)} מחשבים מוכנים <span style="font-size:14px;color:var(--muted2)">· שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}</span></div>
+          <div class="small" style="margin-top:4px;color:${fg.anyUnpriced?'var(--red)':'var(--green)'}">${fg.anyUnpriced?IC('warn')+' חלק/כל המלאי ללא מחיר — "אין מחיר = אין מכירה". זו הפעולה הדחופה ביותר.':IC('check')+' מתומחר — ודא שהמכירה בפועל מנקה את המלאי'}</div></div>
+        <button class="btn primary" onclick="go('plan')">${IC('zap')} לתוכנית המכירה</button>
+      </div>
+    </div>`:'';
+  c.innerHTML=quartersStrip()+fgBanner+`
     <div class="card pad" style="margin-bottom:18px">
       <div class="between"><h3>${IC('clipboard')} תדריך פתיחה — ${q}</h3><span class="tag b">נוצר מהנתונים</span></div>
       <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">${brief.map(b=>`<li>${b}</li>`).join('')}</ul>
@@ -996,7 +1024,7 @@ PAGE_RENDER.dashboard = (c)=>{
       ${kpi('מזומן מאוחד',fmt(cashNow),deltaTag(cashNow,cashPrev))}
       ${kpi('רווח נקי',fmt(fin.netProfit),'')}
       ${kpi('מחזור',fmt(fin.revenue),'')}
-      ${kpi('רווחים צבורים',fmt(fin.retainedEarnings),'')}
+      ${fg.hasFinished?kpi('מלאי מוגמר PC',fmt(fg.pcUnits),fg.anyUnpriced?'ללא מחיר — למכור!':'מוכן למכירה'):kpi('רווחים צבורים',fmt(fin.retainedEarnings),'')}
       ${kpi('חוב',fmt(fin.loans),'')}
       ${kpi('רמות Chip / Computer',`${op.techX} / ${op.techY}`,'')}
       ${kpi('ROE',fin.roe?fin.roe+'%':'—','')}
@@ -1021,6 +1049,8 @@ function autoBriefing(q){
   out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> ${Q.financial.consolidated?'(מאוחד מהדוח, SF)':'(שווי-SF מוערך)'}.`);
   if(prevQ&&S.quarters[prevQ].entered){ const d=cash-unifiedCashOf(prevQ);
     out.push(`שינוי מול ${prevQ}: <b class="num">${d>=0?'+':''}${fmt(d)}</b> ${d>=0?IC('trendUp'):IC('trendDown')}.`); }
+  const fg=finishedGoods(q);
+  if(fg.hasFinished) out.push(`<span style="color:${fg.anyUnpriced?'var(--red)':'var(--green)'}">מלאי מוגמר:</span> <b class="num">${fmt(fg.pcUnits)}</b> מחשבים מוכנים למכירה${fg.anyUnpriced?' — <b style="color:var(--red)">עדיין ללא מחיר מוזן!</b> זו הפעולה הדחופה ביותר':''} (שווי פוטנציאלי ≈<b class="num">${fmt(fg.potentialRevenue)}</b>).`);
   const reds=computeAlerts(q).filter(a=>a.level==='red');
   if(reds.length) out.push(`<span style="color:var(--red)">דחוף:</span> ${reds.length} נורות אדומות — ${reds[0].title}.`);
   else out.push(`אין נורות אדומות פעילות ברבעון זה. ${IC('check')}`);
@@ -1508,6 +1538,23 @@ function buildActionPlan(q,targetQ){
   const proj=projectCashflow(q,null); const brk=proj.find(x=>x.breach);
   const mi=Q.marketIntel; const comps=Object.values(mi.competitors||{});
   const us=comps.find(x=>x.num===OUR_CO);
+  // 0. TOP PRIORITY — sell the finished PCs already in inventory.
+  //    Fires whenever finished stock exists, INDEPENDENT of current revenue. Converting
+  //    finished goods to cash is the highest marginal return on the whole score: it feeds the
+  //    past-half directly (profit) and funds the potential-half (cash to invest). Ranked first.
+  const fg=finishedGoods(q);
+  if(fg.hasFinished){
+    const plan=fg.plan;
+    const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה פוטנציאלית ${fmt(p.revenue)} · פרסום 6% = ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src})</span>`).join('<br>');
+    const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:6}; });
+    const selling=(f.revenue||0)>0;
+    out.push({cat:'mkt',level:(fg.anyUnpriced||!selling)?'red':'amber',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
+      title:`מכור ${fmt(fg.pcUnits)} מחשבים מוגמרים במלאי${fg.anyUnpriced?' — ללא מחיר, לא נמכרים!':''}`,
+      form:'A1-2 (PC Prices & Advertising)',
+      detail:`<b>יש ${fmt(fg.pcUnits)} מחשבים מוכנים במלאי</b> (שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}). ${fg.anyUnpriced?'חלקם/כולם ללא מחיר מוזן — "אין מחיר = אין מכירה", והם יושבים ללא תשואה. ':''}${selling?'למרות שכבר יש מכירות, המלאי המוגמר הזה טרם נוקה — כל רבעון שהוא יושב הוא רווח אבוד. ':''}זו הפעולה בעלת התשואה הגבוהה ביותר על הציון: המרת מלאי מוגמר למזומן מזינה ישירות את מחצית העבר (רווח/ROE/ROI/ROS) ומממנת את מחצית העתיד. התוכנית ל-${targetQ}:<br>${planTxt}`,
+      dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2). ${fg.anyUnpriced?'המחיר החסר הוא מה שחוסם את המכירה כרגע.':''} ההכנסה תיגבה מדורג לפי לוח הגבייה האזורי.`,
+      sim:{q:targetQ,regions:simRegions}});
+  }
   // 1. Cash floor risk
   if(brk) out.push({cat:'fin',level:'red',title:'סכנת שבירת רצפת מזומן',form:'A3-2 (הלוואה מקומית) / H4 (הלוואה בין-חברות)',
     detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`,
@@ -1530,23 +1577,13 @@ function buildActionPlan(q,targetQ){
   // 3. Revenue status — judged against the mandatory value-chain timeline
   //    (factory Q1 -> chips Q2 -> PCs Q3 -> first possible sale Q4): zero revenue
   //    before PCs exist is ON PLAN, not an alarm.
-  if((f.revenue||0)===0){
-    const carried=pcCarriedInto(q), st=chainStage(q);
-    if(carried>0 || st.stage>=3){
-      const plan=pcPlanFor(q);
-      const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה ${fmt(p.revenue)} · פרסום 6% = ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src})</span>`).join('<br>');
-      const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:6}; });
-      out.push({cat:'mkt',level:'red',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
-        title: carried>0 ? 'מכירה הייתה אפשרית — ולא קרתה. הזן מחיר עכשיו' : `המכירה הראשונה האפשרית: ${targetQ} — תוכנית מכירה מוכנה`,
-        form:'A1-2 (PC Prices & Advertising)',
-        detail:`${carried>0?`נכנסת ל-${q} עם ${fmt(carried)} מחשבים והמחזור נשאר 0 — "אין מחיר = אין מכירה". `:`מחזור 0 עד כה היה מובנה (מפעל←שבבים←מחשבים). עכשיו יש מלאי מוכן — `}התוכנית הקונקרטית ל-${targetQ}:<br>${planTxt}`,
-        dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2) ב-${targetQ}. ההכנסה תיגבה מדורג לפי לוח הגבייה האזורי.`,
-        sim:{q:targetQ,regions:simRegions}});
-    } else {
-      out.push({cat:'ops',level:'info',conf:'rule',title:'מחזור 0 — במסלול ההבשלה, לא טעות',
-        detail:`אי-אפשר למכור לפני שיש מחשבים: מפעל (רבעון) ← שבבים (רבעון) ← מחשבים (רבעון) ← מכירה. מצב נוכחי: <b>${st.txt}</b>${st.chips?` (${fmt(st.chips)} שבבים)`:''}. שריפת המזומן (רווח נקי ${fmt(f.netProfit)}) היא עלות ההקמה המתוכננת — עקוב שהיא לא שוברת רצפה.`,
-        dep:`הכן מראש את החוליה הבאה בשרשרת, ואת המחיר — כדי שלא יאבד רבעון כשהמכירה תיפתח.`});
-    }
+  //    (the sell-down of existing finished PCs is handled above, priority 0). Here we only
+  //    explain a legitimately-zero revenue when there is nothing finished to sell yet.
+  if((f.revenue||0)===0 && !fg.hasFinished){
+    const st=chainStage(q);
+    out.push({cat:'ops',level:'info',conf:'rule',title:'מחזור 0 — במסלול ההבשלה, לא טעות',
+      detail:`אי-אפשר למכור לפני שיש מחשבים: מפעל (רבעון) ← שבבים (רבעון) ← מחשבים (רבעון) ← מכירה. מצב נוכחי: <b>${st.txt}</b>${st.chips?` (${fmt(st.chips)} שבבים)`:''}. שריפת המזומן (רווח נקי ${fmt(f.netProfit)}) היא עלות ההקמה המתוכננת — עקוב שהיא לא שוברת רצפה.`,
+      dep:`הכן מראש את החוליה הבאה בשרשרת, ואת המחיר — כדי שלא יאבד רבעון כשהמכירה תיפתח.`});
   }
   // 5. Retained-earnings rank (50% of final score)
   if(comps.length && us){ const sorted=[...comps].filter(x=>x.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
@@ -2859,6 +2896,8 @@ function buildAdvisorContext(q,targetQ,items){
   L.push(`## עמוד 3 · מזומן ונזילות לפי אזור [מחושב במנוע]`);
   REGIONS.forEach(r=>L.push(`- ${r.name}: ${fmt(f.cash[r.id]||0)} ${r.cur}`));
   L.push(`- מאוחד ${fmt(unifiedCashOf(q))} SF. "מאוחד" הוא סכום חשבונאי, לא ארנק. העברה בין אזורים = A3-1, בעיכוב ובשער.`);
+  const _fg=finishedGoods(q);
+  if(_fg.hasFinished) L.push(`## מלאי מוגמר — עדיפות עליונה [מחושב במנוע]\n- ${fmt(_fg.pcUnits)} מחשבים מוכנים במלאי (שווי פוטנציאלי ≈${fmt(_fg.potentialRevenue)})${_fg.anyUnpriced?', חלקם/כולם ללא מחיר מוזן — לא נמכרים':''}. המרתם למזומן (A1-2) היא התשואה הגבוהה ביותר על הציון; אל תדחג אותה מאחורי מו״פ/מפעלים.`);
   L.push(`## ההמלצות הקונקרטיות של המנוע ל-${targetQ} — עובדות, צטט מספרים אלה, בדוק כל אחת מול 4 העמודים`);
   items.forEach((it,i)=>{
     L.push(`${i+1}. [${it.cat||'?'}·${it.level}${it.sim?'·בר-הזנה':''}] ${it.title}${it.form?` · ${it.form}`:''} — ${it.detail.replace(/<[^>]+>/g,'')}`); });
