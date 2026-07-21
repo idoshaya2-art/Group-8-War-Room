@@ -18,6 +18,7 @@
   --red:#ef5568; --redbg:#34121c;
   --amber:#d9a441; --amberbg:#332609;
   --purple:#7f8bcb;
+  --ink:var(--txt); --faint:var(--muted2); /* semantic aliases used by disclosure/summary chrome */
   --radius:12px; --radius-sm:8px;
   --shadow:0 10px 30px rgba(0,0,0,.4);
 }
@@ -100,6 +101,19 @@ a{color:var(--accent2)}
 .rm-cell.done{border-color:color-mix(in srgb,var(--green) 40%,var(--line))}.rm-cell.done span{color:var(--green)}
 .rm-cell.cur{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
 .rm-ar{color:var(--muted2);font-weight:800}
+/* guided FLOW stepper — the quarterly loop, always visible on the 5 work steps */
+.flow{display:flex;align-items:center;gap:4px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:7px 12px;margin-bottom:16px}
+.fstep{display:flex;align-items:center;gap:8px;background:transparent;border:0;color:var(--muted);padding:6px 9px;border-radius:9px;font-weight:700;font-size:13px;transition:.15s}
+.fstep .fn{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--panel2);border:1px solid var(--line2);font-size:12px;color:var(--muted);flex-shrink:0}
+.fstep:hover{color:var(--txt)}
+.fstep.cur{color:#fff}
+.fstep.cur .fn{background:var(--accent);border-color:transparent;color:#fff;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+.fstep.done{color:var(--green)}
+.fstep.done .fn{background:var(--greenbg);border-color:transparent;color:var(--green)}
+.fsep{color:var(--muted2);font-weight:800;font-size:15px}
+.flownext{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.flownext .hint{color:var(--muted);font-size:13px}
+@media(max-width:860px){ .fstep .ft{display:none} .fstep.cur .ft{display:inline} .flow{gap:2px;padding:6px 8px} }
 /* decision categories — full-scan view (every form gets a visible verdict) */
 .pcat{border:1px solid var(--line2);border-radius:14px;padding:14px;margin-bottom:16px;background:var(--panel)}
 .pcat .cathead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
@@ -326,7 +340,7 @@ canvas{display:block;max-width:100%}
       <button class="btn sm ghost" id="btnExportData" title="הורדת גיבוי נתונים (JSON)"><svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> גיבוי</button>
       <button class="btn sm ghost" id="btnImportData" title="שחזור מגיבוי / טעינת מצב מהצוות"><svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> שחזור</button>
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
-      <button class="btn sm ghost" id="btnSync" title="סנכרון צוותי"><span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span> סנכרון</button>
+      <button class="btn sm ghost" id="btnSync" title="סנכרון צוותי" style="display:none"><span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span> סנכרון</button>
     </div>
     <div class="northstar" id="northstar"></div>
     <div class="content" id="content"></div>
@@ -343,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v5.6';
+const APP_VERSION = 'v5.7';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -502,14 +516,13 @@ const PAGES = [
   {id:'plan',       ic:'clipboard', name:'3 · החלטות',      sub:'המלצות קונקרטיות → בקליק לסימולטור', sec:'הלולאה הרבעונית'},
   {id:'sim',        ic:'sliders',   name:'4 · סימולטור',    sub:'כוונון, השוואה וכפתור קסם', sec:'הלולאה הרבעונית'},
   {id:'export',     ic:'share',     name:'5 · הזנה והגשה',  sub:'גיליון הזנה, צ׳ק-ליסט ויומן החלטות', sec:'הלולאה הרבעונית'},
-  {id:'financials', ic:'landmark',  name:'מצב פיננסי', sub:'רו״ה, מאזן ויחסים — תמונה מלאה', sec:'עומק'},
-  {id:'cashflow',   ic:'lineChart', name:'תזרים',      sub:'הקרנת מזומן עד Q9 מול רצפות', sec:'עומק'},
+  {id:'financials', ic:'landmark',  name:'פיננסי',    sub:'רו״ה, מאזן, יחסים והקרנת תזרים עד Q9', sec:'עומק'},
   {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מנוע ביקוש והמלצות MR', sec:'עומק'},
-  {id:'roles',      ic:'users',     name:'תצוגות תפקיד', sub:'CEO · CFO · COO · CMO · מודיעין', sec:'עומק'},
   {id:'ai',         ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'עומק'},
   {id:'goals',      ic:'target',    name:'הגדרות ויעדים', sub:'רצפות, חוזים, פרמטרים ומיקסום', sec:'קונפיגורציה'},
 ];
-const PAGE_ALIAS={qa:'ingest', journal:'export'}; // merged tabs keep their old links working
+// merged/removed tabs keep their old links working
+const PAGE_ALIAS={qa:'ingest', journal:'export', cashflow:'financials', roles:'dashboard'};
 let currentPage='dashboard';
 function renderNav(){
   const nav=$('#nav'); nav.innerHTML=''; let lastSec=null;
@@ -521,12 +534,38 @@ function renderNav(){
     b.onclick=()=>go(p.id); nav.appendChild(b);
   });
 }
+// the quarterly loop, in work order — the one sequence a team member follows each quarter
+const FLOW_STEPS=[
+  {id:'ingest',    n:'1', t:'קליטה'},
+  {id:'dashboard', n:'2', t:'אבחון'},
+  {id:'plan',      n:'3', t:'החלטות'},
+  {id:'sim',       n:'4', t:'סימולטור'},
+  {id:'export',    n:'5', t:'הזנה'},
+];
+function flowStepper(id){
+  const idx=FLOW_STEPS.findIndex(s=>s.id===id); if(idx<0) return '';
+  return `<div class="flow">${FLOW_STEPS.map((s,i)=>
+    `<button class="fstep ${i===idx?'cur':(i<idx?'done':'')}" onclick="go('${s.id}')"><span class="fn">${i<idx?'✓':s.n}</span><span class="ft">${s.t}</span></button>`+
+    (i<FLOW_STEPS.length-1?'<span class="fsep">‹</span>':'')
+  ).join('')}</div>`;
+}
+function flowNext(id){
+  const idx=FLOW_STEPS.findIndex(s=>s.id===id); if(idx<0) return '';
+  const nx=FLOW_STEPS[idx+1];
+  if(!nx) return `<div class="flownext"><span class="hint">${IC('check')} סיימת את הלולאה הרבעונית. חזור לשלב 1 בפתיחת הרבעון הבא.</span><button class="btn" onclick="go('ingest')">${IC('inbox')} רבעון חדש</button></div>`;
+  return `<div class="flownext"><span class="hint">השלב הבא ברצף:</span><button class="btn primary" onclick="go('${nx.id}')">שלב ${nx.n} · ${nx.t} ←</button></div>`;
+}
 function go(id){
   if(PAGE_ALIAS[id]) id=PAGE_ALIAS[id];
   currentPage=id; renderNav();
   const p=PAGES.find(x=>x.id===id);
   $('#pageTitle').textContent=p.name; $('#pageSub').textContent=p.sub;
-  const c=$('#content'); c.innerHTML=''; PAGE_RENDER[id](c); window.scrollTo(0,0);
+  const c=$('#content'); c.innerHTML=''; PAGE_RENDER[id](c);
+  if(FLOW_STEPS.some(s=>s.id===id)){ // wrap the 5 work steps in the guided flow
+    c.insertAdjacentHTML('afterbegin', flowStepper(id));
+    c.insertAdjacentHTML('beforeend', flowNext(id));
+  }
+  window.scrollTo(0,0);
   renderNorthStar();
 }
 // WS-6: the persistent North-Star bar — score (real 50/50), cash-vs-floor, and the top action, on every page.
@@ -550,7 +589,7 @@ function renderNorthStar(){
     <div class="ns-kpi"><span class="k">מזומן מול רצפה</span><b class="num" style="color:${dist>=0?'var(--green)':'var(--red)'}">${dist>=0?'+':''}${fmt(Math.round(dist))} SF</b></div>
     ${sp.parts.rank?`<div class="ns-kpi"><span class="k">דירוג רווחים</span><b class="num">${sp.parts.rank}/${sp.parts.rankN}</b></div>`:''}
     ${sp.parts.share!=null?`<div class="ns-kpi"><span class="k">נתח שוק</span><b class="num">${(sp.parts.share*100).toFixed(1)}%</b></div>`:''}
-    ${top?`<div class="ns-alert ${tlvl}" onclick="go('${top.key==='floor'?'cashflow':(top.key==='noprice'?'ingest':'plan')}')">${IC(tlvl==='red'?'warn':'info')} ${esc(top.title)}</div>`:`<div class="ns-alert ok">${IC('check')} אין התראות פתוחות</div>`}
+    ${top?`<div class="ns-alert ${tlvl}" onclick="go('${top.key==='floor'?'financials':(top.key==='noprice'?'ingest':'plan')}')">${IC(tlvl==='red'?'warn':'info')} ${esc(top.title)}</div>`:`<div class="ns-alert ok">${IC('check')} אין התראות פתוחות</div>`}
   </div>`;
 }
 function renderQuarterSelect(){
@@ -1200,8 +1239,49 @@ PAGE_RENDER.financials = (c)=>{
         <td class="num">${fmt(unifiedCashOf(x))}</td><td class="num">${fmt(ff.revenue)}</td><td class="num">${fmt(ff.grossMargin)}</td>
         <td class="num" style="${ff.netProfit<0?'color:var(--red)':''}">${fmt(ff.netProfit)}</td><td class="num">${fmt(oo.rd)}</td><td class="num">${fmt(ff.loans)}</td>
         <td class="num" style="${ff.retainedEarnings<0?'color:var(--red)':''}">${fmt(ff.retainedEarnings)}</td><td class="num">${oo.techX}/${oo.techY}</td></tr>`; }).join('')}</tbody></table></div>
-    </details>`;
+    </details>
+    ${cashflowSectionHTML(q)}`;
+  initCashflowChart(q);
 };
+
+/* ----- Cash-flow projection (nested under 'פיננסי' as depth) ----- */
+function cashflowSectionHTML(q){
+  if(!S.quarters[q]||!S.quarters[q].entered) return '';
+  const proj=projectCashflow(q,null);
+  const anyBreach=proj.some(p=>p.breach);
+  return `<details class="sec" ${anyBreach?'open':''}><summary>${IC('lineChart')} הקרנת תזרים מזומן עד Q9 מול רצפות ${anyBreach?'<span class="tag r" style="margin-inline-start:8px">שבירת רצפה צפויה</span>':'<span class="tag g" style="margin-inline-start:8px">מעל הרצפה</span>'}</summary>
+    <div class="secbody">
+      <canvas id="cfChart" height="220" style="margin-bottom:14px"></canvas>
+      <div style="overflow-x:auto"><table class="tbl wide">
+        <thead><tr><th>רבעון</th>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד</th><th>מס משוער</th><th>רצפה</th><th>מרחק</th><th>סטטוס</th></tr></thead>
+        <tbody>
+          <tr style="background:rgba(79,140,255,.06)"><td><b>${q} (בסיס)</b></td>${REGIONS.map(r=>`<td class="num">${fmt(S.quarters[q].financial.cash[r.id]||0)}</td>`).join('')}<td class="num"><b>${fmt(unifiedCashOf(q))}</b></td><td class="num">—</td><td class="num">${fmt(S.config.goals.floors[q]||0)}</td><td class="num">${fmt(unifiedCashOf(q)-(S.config.goals.floors[q]||0))}</td><td>—</td></tr>
+          ${proj.map(p=>`<tr>
+            <td>${p.q}</td>
+            ${REGIONS.map(r=>`<td class="num" style="${p.cashByRegion[r.id]<0?'color:var(--red)':''}">${fmt(p.cashByRegion[r.id])}</td>`).join('')}
+            <td class="num"><b>${fmt(p.unified)}</b></td>
+            <td class="num" style="color:var(--amber)">${p.tax?'−'+fmt(p.tax):'0'}</td>
+            <td class="num">${fmt(p.floor)}</td>
+            <td class="num" style="color:${p.distance<0?'var(--red)':'var(--green)'}">${p.distance>=0?'+':''}${fmt(p.distance)}</td>
+            <td>${p.breach?'<span class="tag r">שבירה</span>':'<span class="tag g">תקין</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div class="small muted" style="margin-top:10px">${IC('warn')} הקרנה במצב "כפי שהוא" (ללא מנופי תרחיש). <b>מס אזורי דיפרנציאלי</b> (ארה״ב 34% · אירופה 30% · ברזיל 25% · מטה 0%) מנוכה מהמזומן ברבעון שבו הרווח נוצר. פרמטרים נערכים ב"הגדרות ויעדים".</div>
+    </div>
+  </details>`;
+}
+function initCashflowChart(q){
+  const cv=$('#cfChart'); if(!cv||!S.quarters[q]||!S.quarters[q].entered) return;
+  const proj=projectCashflow(q,null);
+  const labels=[q,...proj.map(p=>p.q)];
+  const cashData=[unifiedCashOf(q),...proj.map(p=>p.unified)];
+  const floorData=[S.config.goals.floors[q]||0,...proj.map(p=>p.floor)];
+  lineChart(cv,{labels,series:[
+    {name:'מזומן מוקרן',data:cashData,color:'#4f8cff',fill:true},
+    {name:'רצפה',data:floorData,color:'#ff5d6c',dash:true},
+  ]});
+}
 
 /* ----- ACTION PLAN (practical: what to do next quarter + how to enter it) ----- */
 PAGE_RENDER.plan = (c)=>{
@@ -1883,45 +1963,6 @@ window.delInv=(i)=>{ S.quarters[S.activeQuarter].operational.inventory.splice(i,
 window.confirmQuarter=()=>{ S.quarters[S.activeQuarter].entered=true; updateLearning(); updateMasterPlan(); save(); toast('רבעון '+S.activeQuarter+' אושר ונקלט — מנוע הביקוש ותוכנית-האב עודכנו ✓','g'); renderQuarterSelect(); go('dashboard'); };
 
 /* ----- CASHFLOW (F4) ----- */
-PAGE_RENDER.cashflow = (c)=>{
-  const q=S.activeQuarter;
-  if(!S.quarters[q].entered){ c.innerHTML=emptyBlock(IC('lineChart'),'אין נתוני בסיס','קלוט את רבעון '+q+' כדי להקרין תזרים.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
-  const proj=projectCashflow(q,null);
-  c.innerHTML=`
-    <div class="card" style="margin-bottom:18px">
-      <div class="ch"><h3>${IC('lineChart')} הקרנת מזומן מאוחד עד Q9</h3><span class="tag b">מנוע דטרמיניסטי</span></div>
-      <div class="cb"><canvas id="cfChart" height="240"></canvas></div>
-    </div>
-    <div class="card">
-      <div class="ch"><h3>פירוק לפי רבעון ואזור</h3><span class="small muted">רצפות ממסך היעדים</span></div>
-      <div class="cb" style="overflow-x:auto">
-        <table class="tbl wide">
-          <thead><tr><th>רבעון</th>${REGIONS.map(r=>`<th>${r.name}</th>`).join('')}<th>מאוחד</th><th>מס משוער</th><th>רצפה</th><th>מרחק</th><th>סטטוס</th></tr></thead>
-          <tbody>
-            <tr style="background:rgba(79,140,255,.06)"><td><b>${q} (בסיס)</b></td>${REGIONS.map(r=>`<td class="num">${fmt(S.quarters[q].financial.cash[r.id]||0)}</td>`).join('')}<td class="num"><b>${fmt(unifiedCashOf(q))}</b></td><td class="num">—</td><td class="num">${fmt(S.config.goals.floors[q]||0)}</td><td class="num">${fmt(unifiedCashOf(q)-(S.config.goals.floors[q]||0))}</td><td>—</td></tr>
-            ${proj.map(p=>`<tr>
-              <td>${p.q}</td>
-              ${REGIONS.map(r=>`<td class="num" style="${p.cashByRegion[r.id]<0?'color:var(--red)':''}">${fmt(p.cashByRegion[r.id])}</td>`).join('')}
-              <td class="num"><b>${fmt(p.unified)}</b></td>
-              <td class="num" style="color:var(--amber)">${p.tax?'−'+fmt(p.tax):'0'}</td>
-              <td class="num">${fmt(p.floor)}</td>
-              <td class="num" style="color:${p.distance<0?'var(--red)':'var(--green)'}">${p.distance>=0?'+':''}${fmt(p.distance)}</td>
-              <td>${p.breach?'<span class="tag r">שבירה</span>':'<span class="tag g">תקין</span>'}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-        <div class="small muted" style="margin-top:10px">${IC('warn')} הקרנה במצב "כפי שהוא" (ללא מנופי תרחיש). <b>מס אזורי דיפרנציאלי</b> (ארה״ב 34% · אירופה 30% · ברזיל 25% · מטה 0%) מנוכה מהמזומן ברבעון שבו הרווח נוצר — לכן התחזית שמרנית ואמינה יותר. פרמטרי מס/גבייה/ריבית נערכים במסך "הגדרות ויעדים".</div>
-      </div>
-    </div>`;
-  const labels=[q,...proj.map(p=>p.q)];
-  const cashData=[unifiedCashOf(q),...proj.map(p=>p.unified)];
-  const floorData=[S.config.goals.floors[q]||0,...proj.map(p=>p.floor)];
-  lineChart($('#cfChart'),{labels,series:[
-    {name:'מזומן מוקרן',data:cashData,color:'#4f8cff',fill:true},
-    {name:'רצפה',data:floorData,color:'#ff5d6c',dash:true},
-  ]});
-};
-
 /* ----- INTEL (F5 basic) ----- */
 const OUR_CO=8; // Company 8 = us
 PAGE_RENDER.intel = (c)=>{
@@ -2778,33 +2819,50 @@ const AI_SYSTEM = `אתה ראש חדר-המלחמה האנליטי של צוו�
 /* ===== AI advisor layer — judgment ON TOP of the deterministic engine =====
    The engine computes every number; the advisor prioritises under constraint,
    red-teams, and briefs the team — citing engine numbers, never inventing. */
-const ADVISOR_SYSTEM = `אתה יועץ בכיר ומנוסה לצוות INTOPIA (חברה 8). קיבלת מ"המנוע" את המספרים המחושבים וההמלצות הקונקרטיות לרבעון. תפקידך שיפוט — לא חשבון.
-כללי ברזל:
-1. המספרים מהמנוע הם עובדות — צטט אותם. לעולם אל תמציא כמות/מחיר/סכום/קוד שלא סופק; אם חסר נתון, אמור "לא סופק" והמלץ לקנות את מחקר השוק שסוגר אותו.
-2. אל תסתור חוקי משחק או נתוני מחקרי שוק שסופקו. זכור: אין מכירה לפני שיש מלאי מוכן, ועיכוב רבעון בכל פעולה.
-ענֵה בעברית עסקית, RTL, בשלושה חלקים בדיוק — כל אחד קצר וחד:
-## 1. תעדוף
-בהינתן המזומן הזמין באזורים, אילו 2–3 פעולות לבצע ב-{targetQ} ובאיזה סדר, ולמה — כל אחת עם קוד הטופס והמספר מהמנוע. אם אין מזומן לכולן, אמור מה דוחים ולמה.
-## 2. סיכון נסתר
-סיכון אחד–שניים חדים שהמספרים לא מראים: תזמון, תגובת מתחרה, שכחת מחיר, תלות פתוחה, הסכם בין-קבוצתי אפשרי. לא רשימה — הדבר שהכי מסוכן.
-## 3. תדריך צוות (3 משפטים)
-היכן אנחנו מול Q9 · המהלך המרכזי של הרבעון · הסיכון לשים לב אליו.`;
+const ADVISOR_SYSTEM = `אתה יועץ בכיר ומנוסה לצוות INTOPIA (חברה 8). "המנוע" הדטרמיניסטי כבר חישב את המספרים וההמלצות הקונקרטיות לרבעון {targetQ}. תפקידך: לוודא שכל פעולה מדויקת, חוקית וכדאית — ולהוציא רשימת פעולות מוכנה-להזנה. שיפוט, לא חשבון.
+
+## איך אתה עובד — ביקורת 4 עמודים לכל פעולה
+עבור כל פעולה שהמנוע מציע, בדוק אותה מול ארבעת עמודי-ההצדקה, ותקן/דחה/אשר בהתאם:
+1. חוקים — חוקית ואפשרית בשלב הזה בשרשרת? (עיכוב רבעון בכל פעולה · אין מלאי מוכן = אין מכירה · מו״פ נספר רבעון קדימה · מכירה ראשונה אפשרית Q4). אם לא-אפשרי — דחה.
+2. מחקרי שוק — הכמות/המחיר עולים בקנה אחד עם הביקוש והגמישות שנלמדו? אם ה-MR הרלוונטי חסר — סמן "לא מכויל" והמלץ לקנות אותו (H1-2).
+3. מצב פיננסי — יש מזומן *באזור ובמטבע הנכונים* לממן? "מאוחד" אינו ארנק. אם האזור דק — מה מקדימים או מעבירים (A3-1, בעיכוב ושער).
+4. כדאיות מול 50/50 — כמה המהלך מזיז את מחצית העבר (רווח/מזומן/ROE/ROI/ROS) ואת מחצית העתיד (דרגת טכנולוגיה/נתח שוק/מיצוב Q7–Q9), ומהי התשואה השולית. דחה מהלך שמשפר חצי אחד ופוגע לא-מידתית בשני.
+
+## כללי ברזל
+- המספרים מהמנוע הם עובדות — צטט אותם. אל תמציא כמות/מחיר/סכום/קוד שלא סופק. אם אתה מכוונן כמות בגלל אילוץ מזומן, אמור זאת במפורש כ"אומדן" והישאר בגבולות המזומן שסופק.
+- אל תסתור חוק משחק או נתון MR שסופק.
+
+ענֵה בעברית עסקית, RTL, בשלושה חלקים בדיוק:
+## פעולות מאושרות ל-{targetQ} (מתועדפות)
+2–4 פעולות בסדר ביצוע. לכל אחת: **קוד טופס + שדות מדויקים** (אזור/מוצר/דגם/מספר/מטבע מהמנוע) · שורת אימות 4-עמודים קצרה (חוק✓ · MR✓/לא-מכויל · מזומן-אזור✓ · 50/50: איזו מחצית ובכמה) · אם אין מזומן לכולן — מה דוחים ולמה.
+## תיקונים ואזהרות
+פעולות שהמנוע הציע ואתה מתקן או דוחה — עם העמוד שנכשל (חוק/MR/מזומן/כדאיות) והתיקון המדויק.
+## סיכון נסתר + תדריך (3 משפטים)
+הסיכון היחיד שהכי מסוכן שהמספרים לא מראים · היכן אנחנו מול Q9 · המהלך המרכזי של {targetQ}.`;
 function mdLite(t){ return esc(t)
   .replace(/^##\s*(.+)$/gm,'<b style="display:block;margin:12px 0 4px;color:var(--purple);font-size:14px">$1</b>')
   .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); }
 function buildAdvisorContext(q,targetQ,items){
-  const L=[], mp=masterPlanStatus(), ls=learningSummary(), f=S.quarters[q].financial;
+  const L=[], mp=masterPlanStatus(), ls=learningSummary(), f=S.quarters[q].financial, sp=scoreProxy(null);
   L.push(`# הקשר ליועץ — חברה 8 · רבעון פעיל ${q} · רבעון החלטה ${targetQ}`);
-  L.push(`## מצב מול היעד [מחושב במנוע]`);
-  L.push(`- ציון נוכחי ${mp.score.toFixed(0)}/100 (עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)}) · יעד Q9 ${mp.tScore} · נותרו ${mp.remaining} רבעונים · קצב ${mp.pace!=null?mp.pace.toFixed(1):'טרם נמדד'} מול נדרש ${mp.required>0?mp.required.toFixed(1):'0'}/רבעון.`);
+  // Pillar 1 — rules digest (so the audit is grounded, not from memory)
+  L.push(`## עמוד 1 · חוקי המשחק הרלוונטיים [קבוע]`);
+  L.push(`- שרשרת ערך (כל שלב = רבעון): מפעל→שבבים→מחשבים→מכירה. מכירה ראשונה אפשרית Q4. מו״פ נספר רבעון קדימה. אין מלאי/מחיר = אין מכירה.`);
+  L.push(`- מזומן מפולח לפי אזור/מטבע, לא נזיל חופשית. שערים: USD 1 · EUR 1.5 · BRL 0.5 · SF 1. מס אזורי: US 34% · EU 30% · BR 25% · מטה 0%.`);
+  L.push(`- קודי הזנה: תמחור/פרסום A1-1(שבב)/A1-2(מחשב) · ייצור A2-3(שבב)/A2-4(מחשב) · משרדים A1-3 · מפעל A2-1 · מו״פ H1-1 · מחקר-שוק H1-2 · העברת כסף A3-1 · הלוואה/השקעה A3-2 · המרת מטבע A3-3.`);
+  // Pillar 4 — worthiness baseline (the 50/50 parts the moves must move)
+  L.push(`## עמוד 4 · בסיס הכדאיות — מצב הציון 50/50 [מחושב במנוע]`);
+  L.push(`- ציון ${mp.score.toFixed(0)}/100 (עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)}) · יעד Q9 ${mp.tScore} · נותרו ${mp.remaining} רבעונים · קצב ${mp.pace!=null?mp.pace.toFixed(1):'טרם נמדד'} מול נדרש ${mp.required>0?mp.required.toFixed(1):'0'}/רבעון.`);
+  if(sp.parts){ const pr=sp.parts; L.push(`- מרכיבי מחצית העבר: דירוג רווחים ${pr.rank?pr.rank+'/'+pr.rankN:'—'}. מרכיבי מחצית העתיד: נתח שוק ${pr.share!=null?(pr.share*100).toFixed(1)+'%':'—'}, דרגת טכנולוגיה Chip ${S.quarters[q].operational.techX}/PC ${S.quarters[q].operational.techY}.`); }
   if(mp.pivots.length) L.push(`- התראות שינוי-אסטרטגיה: ${mp.pivots.map(x=>x.replace(/<[^>]+>/g,'')).join(' | ')}`);
-  L.push(`## מזומן ונזילות [מחושב במנוע]`);
+  // Pillar 3 — regional liquidity
+  L.push(`## עמוד 3 · מזומן ונזילות לפי אזור [מחושב במנוע]`);
   REGIONS.forEach(r=>L.push(`- ${r.name}: ${fmt(f.cash[r.id]||0)} ${r.cur}`));
-  L.push(`- מאוחד ${fmt(unifiedCashOf(q))} SF. המזומן מפולח לפי מטבע ואינו נזיל חופשית בין אזורים (העברה = A3-1, בעיכוב).`);
-  L.push(`## ההמלצות הקונקרטיות של המנוע ל-${targetQ} — עובדות, צטט מספרים אלה`);
-  items.filter(it=>it.sim||it.level==='red'||it.level==='amber').forEach((it,i)=>{
-    L.push(`${i+1}. [${it.cat||'?'}·${it.level}] ${it.title}${it.form?` · ${it.form}`:''} — ${it.detail.replace(/<[^>]+>/g,'')}`); });
-  if(ls){ L.push(`## מנוע ביקוש [מחושב]`);
+  L.push(`- מאוחד ${fmt(unifiedCashOf(q))} SF. "מאוחד" הוא סכום חשבונאי, לא ארנק. העברה בין אזורים = A3-1, בעיכוב ובשער.`);
+  L.push(`## ההמלצות הקונקרטיות של המנוע ל-${targetQ} — עובדות, צטט מספרים אלה, בדוק כל אחת מול 4 העמודים`);
+  items.forEach((it,i)=>{
+    L.push(`${i+1}. [${it.cat||'?'}·${it.level}${it.sim?'·בר-הזנה':''}] ${it.title}${it.form?` · ${it.form}`:''} — ${it.detail.replace(/<[^>]+>/g,'')}`); });
+  if(ls){ L.push(`## עמוד 2 · מנוע ביקוש ומחקרי שוק [מחושב]`);
     L.push(`- תצפיות ${ls.obs} · ביטחון ${(ls.confidence*100).toFixed(0)}% · גמישות מחיר ${ls.priceElast.toFixed(2)} ${ls.priceObs>0?'(מכויל)':'(פריור — לא מכויל)'}.`);
     if(ls.trends.length) L.push(`- מגמות מתחרים: ${ls.trends.map(t=>t.msg).join(' ; ')}`);
     if(ls.gaps.length) L.push(`- פערי מידע (מחקרי שוק לקנות): ${ls.gaps.map(g=>g.mr).join(', ')}`); }
@@ -2816,7 +2874,7 @@ window.runQuarterAdvisor=async()=>{
   const box=$('#advOut'); if(box) box.innerHTML=`<div class="small muted">${IC('clock')} היועץ שוקל את ההמלצות מול המצב…</div>`;
   const btn=$('#advBtn'); if(btn){ btn.disabled=true; btn.textContent='מנתח…'; }
   try{
-    const txt=await callLLM([{role:'user',content:buildAdvisorContext(q,targetQ,items)+'\n\n---\nתן תעדוף, סיכון נסתר ותדריך.'}], ADVISOR_SYSTEM.replace(/\{targetQ\}/g,targetQ), {max_tokens:1000});
+    const txt=await callLLM([{role:'user',content:buildAdvisorContext(q,targetQ,items)+`\n\n---\nבצע ביקורת 4-עמודים על כל פעולה של המנוע והוצא רשימת פעולות מאושרות ל-${targetQ}, תיקונים/אזהרות, וסיכון+תדריך.`}], ADVISOR_SYSTEM.replace(/\{targetQ\}/g,targetQ), {max_tokens:1300});
     S.ai.advisor={q,targetQ,text:txt,ts:Date.now()}; save();
   }catch(e){ S.ai.advisor={q,targetQ,text:aiErr(e),ts:Date.now(),err:true}; }
   if(currentPage==='plan') go('plan');
@@ -2824,12 +2882,12 @@ window.runQuarterAdvisor=async()=>{
 function renderAdvisorCard(q,targetQ){
   const adv=S.ai&&S.ai.advisor, fresh=adv&&adv.q===q, hasKey=!!getApiKey();
   return `<div class="card" style="margin-bottom:16px">
-    <div class="ch"><h3>${IC('cpu')} יועץ הרבעון <span class="tag b" style="margin-inline-start:6px">שיפוט מעל המנוע</span></h3>
+    <div class="ch"><h3>${IC('cpu')} יועץ הרבעון <span class="tag b" style="margin-inline-start:6px">ביקורת 4 עמודים</span></h3>
       <div class="row" style="gap:8px"><span class="small muted">${AI_PROVIDERS[aiProvider()].short}</span>
         <button class="btn sm primary" id="advBtn" onclick="runQuarterAdvisor()">${IC('zap')} ${fresh?'רענן':(hasKey?'הפעל יועץ':'חבר AI')}</button></div></div>
     <div class="cb" id="advOut">${fresh
       ? `<div class="small muted" style="margin-bottom:6px">מבוסס על החלטת ${adv.targetQ} · ${new Date(adv.ts).toLocaleTimeString('he-IL')}</div><div style="line-height:1.75">${mdLite(adv.text)}</div>`
-      : `<div class="small muted">שכבת שיפוט מעל ההמלצות הדטרמיניסטיות: תעדוף תחת אילוץ מזומן · סיכון נסתר · תדריך צוות — מבוסס על מספרי המנוע, בלי להמציא. לחץ "הפעל יועץ" (קריאת API אחת).</div>`}</div>
+      : `<div class="small muted">ה-AI בודק כל פעולה של המנוע מול 4 עמודים — <b>חוקים · מחקרי שוק · נזילות אזורית · כדאיות מול 50/50</b> — ומוציא רשימת פעולות מדויקת ומוכנה-להזנה, עם תיקונים ואזהרות. המספרים מהמנוע; השיפוט מה-AI. לחץ "הפעל יועץ" (קריאת API אחת).</div>`}</div>
   </div>`;
 }
 async function callLLM(messages, system, opts={}){
