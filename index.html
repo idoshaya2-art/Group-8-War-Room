@@ -366,8 +366,45 @@ const REGIONS  = [
   {id:'hq',     name:'מטה (ליכטנשטיין)',    cur:'CHF'},
 ];
 const PERSONAS = ['CEO','CFO','COO','CMO','R&D/מודיעין'];
-const FX_DEFAULT = {USD:1, EUR:1.5, BRL:0.5, CHF:1}; // INTOPIA game rates — SF base (USD=1, EUR=1.5, BRL=0.5, SF/CHF=1)
+const FX_DEFAULT = {USD:1, EUR:0.667, BRL:2.0, CHF:1}; // SF-per-unit — verified vs Data Log 01_ExchangeRates (1 USD=1 SF, 1 EUR=0.667 SF, 1 BRL=2 SF)
 function fxRate(cur){ const fx=(S&&S.config&&S.config.params&&S.config.params.fx)||FX_DEFAULT; return fx[cur]!==undefined?fx[cur]:(FX_DEFAULT[cur]||1); }
+
+/* ============================================================================
+   DATALOG — authoritative INTOPIA game constants (Section VII Data Log v1).
+   Single source of truth, replacing earlier placeholder defaults. All currency
+   values are LOCAL to the area unless the key says SF. fx = SF value of 1 unit.
+   Note: a few capacity cells (X-BR 12k, Y-BR 14k, X-EU 35k) were OCR-reconstructed
+   in the source Data Log and flagged there as approximate.
+   ============================================================================ */
+const DATALOG = {
+  fx:{ USD:1, EUR:0.667, BRL:2.0, SF:1 },                               // 01_ExchangeRates
+  tax:{ us:50, europe:40, brazil:30, hq:15 },                          // 07_Finance (Liechtenstein 15%)
+  collection:{ us:[40,60,0], europe:[50,20,30], brazil:[30,30,40] },   // 09_AR_AP  Cash/AR1/AR2 %
+  interest:{ // quarterly %, 07_Finance
+    areaBankLoan:{ us:4, europe:3.5, brazil:6 }, govSecurities:{ us:2, europe:1.5, brazil:4.5 },
+    hoLoan:{ brl:6.5, other:5.5 }, hoSecurities:{ sf:2, eur:2, usd:2.25, brl:3 },
+    supplierCredit:{ below:{us:7,europe:6,brazil:8,hq:5.5}, switchover:{us:1200000,europe:700000,brazil:600000,hq:3000000}, above:{us:8,europe:7,brazil:9,hq:6.5} },
+    negBalance:{ below:{us:3.5,europe:3.5,brazil:4.5,hq:2.5}, above:{us:8,europe:7,brazil:9,hq:6.5} },
+  },
+  exchangeCommission:{ us:0.6, europe:0.6, brazil:0.8, hq:0.4 },        // 07_Finance, % of converted amount
+  capacity:{ X:{ us:50000, europe:35000, brazil:12000 }, Y:{ us:25000, europe:18000, brazil:14000 } }, // 03 units/plant/Q
+  plantAcqCost:{ X:{ us:2000000, europe:1000000, brazil:1600000 }, Y:{ us:1800000, europe:800000, brazil:1600000 } }, // 03 LC Q1
+  plantFixedCost:{ X:{ us:[80000,110000,120000], europe:[40000,54000,64000], brazil:[60000,100000,120000] },
+                   Y:{ us:[100000,125000,135000], europe:[30000,50000,60000], brazil:[60000,100000,120000] } },   // 03 LC/Q by plant #
+  depreciation:{ X:8, Y:5 },                                           // 10 % per Q
+  varMfgCostPctOfRetail:{ X:[0.11,0.20], Y:[0.20,0.45] },              // 10 (PC incl. component chips)
+  initialConsumerPrice:{ X:{ us:45, europe:40, brazil:150 }, Y:{ us:155, europe:130, brazil:800 } }, // 04 Standard, LC — real demand anchors
+  minPriceChange:{ X:{us:1,europe:1,brazil:10}, Y:{us:5,europe:10,brazil:20} },  // 04
+  maxPCPriceY0toY3:1400,                                               // 04/10 LC
+  sellingCostPerUnit:{ xOnly:{us:10,europe:10,brazil:32}, xyX:{us:7,europe:8,brazil:28}, yOnly:{us:40,europe:40,brazil:160}, xyY:{us:32,europe:33,brazil:140} }, // 04 LC/unit
+  officeFixedCost:{ central:{ us:80000, europe:40000, brazil:60000 }, regional:{ us:40000, europe:20000, brazil:30000 } }, // 04 LC/Q (central = 2 regional)
+  carryingCostPerUnit:{ X:{us:1,europe:0.8,brazil:1}, Y:{us:10,europe:8,brazil:16} }, // 06 LC/unit, unsold from prior Q
+  rdMinPerQuarter:{ X:40000, Y:70000 },                                // 06 SF per scientist per Q (minimum)
+  chipPerPC:[ // [Xgrade 0..9][Ygrade 0..9] = chips required per PC; 0 = incompatible (02)
+    [1,2,3,0,0,0,0,0,0,0],[1,1,2,3,4,0,0,0,0,0],[1,1,2,2,3,0,0,0,0,0],[0,1,1,2,2,3,3,5,0,0],[0,1,1,1,2,3,3,4,0,0],
+    [0,0,0,1,1,2,2,3,0,0],[0,0,0,0,0,2,2,2,3,0],[0,0,0,0,0,1,1,2,3,0],[0,0,0,0,0,0,0,1,2,3],[0,0,0,0,0,0,0,0,1,2] ],
+  startingCapitalSF:8000000, minHOCashSF:20000, brazilPlantDepositBRL:1000000, // 10
+};
 
 /* ---------- Persistence ---------- */
 const LS_KEY = 'intopia_warroom_v1';
@@ -395,13 +432,13 @@ function defaultState(){
         techXTarget:0, techYTarget:0, debtCeiling:0, endInventoryTarget:0,
         scoreTargets:{roe:25, roi:15, ros:10}, q9Score:75, q9Share:20 },
       contracts:[],
-      params:{
-        collection:{ us:[100,0,0], europe:[50,20,30], brazil:[30,30,40], hq:[100,0,0] },
-        tax:{us:34, europe:30, brazil:25, hq:0},
-        interest:{bank:10, supplierCredit:11, h4:12, securities:6},
+      params:{ // sourced from DATALOG (Data Log v1) — see the DATALOG constant for provenance
+        collection:{ us:[...DATALOG.collection.us], europe:[...DATALOG.collection.europe], brazil:[...DATALOG.collection.brazil], hq:[100,0,0] },
+        tax:{...DATALOG.tax},
+        interest:{bank:5.5, supplierCredit:7, h4:5.5, securities:2}, // HO loan 5.5% · supplier ~7% · HO securities 2% (per-region rates in DATALOG.interest)
         productionPay:[100,0],
-        factoryCost:500000, officeCost:80000, // A2-1 one-time build (SF) · A1-3 per-office per-quarter operating (SF)
-        fx:{USD:1, EUR:1.5, BRL:0.5, CHF:1},
+        factoryCost:800000, officeCost:30000, // representative SF; authoritative per-region tables in DATALOG.plantAcqCost / officeFixedCost
+        fx:{USD:1, EUR:0.667, BRL:2.0, CHF:1},
       },
     },
     quarters:q,
@@ -428,6 +465,17 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
   // WS-2: correct legacy USD-based FX to the game's SF rates (only if untouched old default)
   const fx=S.config&&S.config.params&&S.config.params.fx;
   if(fx && (fx.EUR===1.08 || fx.BRL===0.20 || fx.CHF===1.10)) S.config.params.fx={...FX_DEFAULT};
+  // Fix #0: one-time correction of game constants that earlier builds had wrong (FX/tax/collection),
+  // aligning saved states to the authoritative Data Log. Runs once; later user edits are preserved.
+  if(S.config && S.config.params){ S.meta=S.meta||{};
+    if(S.meta.datalogV!==1){ const P=S.config.params;
+      P.fx={USD:1, EUR:0.667, BRL:2.0, CHF:1};
+      P.tax={...DATALOG.tax};
+      P.collection={ us:[...DATALOG.collection.us], europe:[...DATALOG.collection.europe], brazil:[...DATALOG.collection.brazil], hq:[100,0,0] };
+      P.interest={bank:5.5, supplierCredit:7, h4:5.5, securities:2};
+      S.meta.datalogV=1;
+    }
+  }
   // normalise legacy inventory product labels ("Chip אירופה") to canonical X/Y + region
   QUARTERS.forEach(q=>{ const inv=(S.quarters[q]&&S.quarters[q].operational&&S.quarters[q].operational.inventory)||[];
     inv.forEach(it=>{ const s=String(it.product||'');
