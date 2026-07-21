@@ -2625,12 +2625,30 @@ function renderInputSheet(box,targetQ,sc){
 }
 // WS-2: chip→computer constraint. PCs (Y) produced in a quarter need chips (X) already in inventory
 // (1-quarter delay — chips produced this quarter are available only next quarter).
+// Fix #2: chip→PC guard uses the real Data Log grade matrix (chips-per-PC varies 1–5 by grade,
+// and some X/Y grade pairs are incompatible = 0), not a 1:1 assumption.
 function chipGuard(sc,targetQ){
   const op=S.quarters[S.activeQuarter].operational;
   const chipInv=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+  const gx=Math.max(0,Math.min(9,op.techX||0)), gy=Math.max(0,Math.min(9,op.techY||0));
+  const ratio=(DATALOG.chipPerPC[gx]&&DATALOG.chipPerPC[gx][gy])||0; // chips per PC for X{gx}→Y{gy}
   const lev=sc&&sc.levers[targetQ]; let pcPlanned=0;
   if(lev) REGIONS.forEach(r=>{ const rl=lev.regions[r.id]||{}; if(rl.product==='Y') pcPlanned+=(rl.production||0); });
-  return {chipInv,pcPlanned,ok:pcPlanned<=chipInv,gap:Math.max(0,pcPlanned-chipInv)};
+  const compatible=!(pcPlanned>0 && ratio===0);   // grade pair incompatible → illegal
+  const chipsNeeded=pcPlanned*ratio;
+  return {chipInv,pcPlanned,ratio,gx,gy,compatible,chipsNeeded,
+    ok:compatible && chipsNeeded<=chipInv, gap:Math.max(0,chipsNeeded-chipInv)};
+}
+// Per-plant capacity from the Data Log (units/plant/Q). The data model tracks only a total plant
+// count, so this flags production that exceeds ONE plant's capacity and reports the plants implied.
+function capacityCheck(sc,targetQ){
+  const lev=sc&&sc.levers[targetQ]; const issues=[];
+  if(lev) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{}; const prod=rl.production||0;
+    if(prod<=0) return; const prd=rl.product==='X'?'X':'Y';
+    const cap=(DATALOG.capacity[prd]&&DATALOG.capacity[prd][r.id])||0;
+    if(cap>0 && prod>cap) issues.push({region:r.id,name:(REGIONS.find(x=>x.id===r.id)||{}).name,product:prd,prod,cap,plants:Math.ceil(prod/cap)});
+  });
+  return issues;
 }
 function scenarioValidation(sc,targetQ){
   const lev=sc&&sc.levers[targetQ]; if(!lev) return {noNeg:true,hasCost:true};
@@ -2643,10 +2661,12 @@ function scenarioValidation(sc,targetQ){
 }
 function renderChecklist(box,targetQ,sc){
   const Q=S.quarters[S.activeQuarter];
-  const cg=chipGuard(sc,targetQ), val=scenarioValidation(sc,targetQ);
+  const cg=chipGuard(sc,targetQ), val=scenarioValidation(sc,targetQ), caps=capacityCheck(sc,targetQ);
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
-    {t:`מחשבים מתוכננים ≤ שבבים זמינים (מחשב דורש שבב)${cg.pcPlanned?` · ${fmt(cg.pcPlanned)} PC מול ${fmt(cg.chipInv)} שבבים`:''}`,ok:cg.ok},
+    {t:`דרגות תואמות: X${cg.gx}→Y${cg.gy}${cg.pcPlanned?(cg.compatible?` דורש ${cg.ratio} שבבים/מחשב`:' — לא תואם!'):''}`,ok:cg.compatible},
+    {t:`מחשבים ≤ שבבים זמינים${cg.pcPlanned?` · דרושים ${fmt(cg.chipsNeeded)} מול ${fmt(cg.chipInv)} במלאי`:''}`,ok:cg.compatible&&cg.chipsNeeded<=cg.chipInv},
+    {t:`ייצור בגבול הקיבולת (Data Log)${caps.length?` · ${caps[0].name} ${fmt(caps[0].prod)} > ${fmt(caps[0].cap)}/מפעל`:''}`,ok:caps.length===0},
     {t:'לכל ייצור מתוכנן יש עלות יח׳',ok:val.hasCost},
     {t:'אין ערכים שליליים בתרחיש',ok:val.noNeg},
     {t:'אין גירעון מטבע פתוח באף אזור',ok:REGIONS.every(r=>(Q.financial.cash[r.id]||0)>=0)},
@@ -2654,12 +2674,19 @@ function renderChecklist(box,targetQ,sc){
     {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
-    ${!cg.ok?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים לייצור המחשבים — ייצר/רכוש שבבים רבעון קודם (אין שבב = אין מחשב).</div>`:''}
+    ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
+      (cg.gap>0?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם. <b>ההגשה חסומה.</b></div>`:'')}
+    ${caps.length?`<div class="tag a" style="margin-top:8px">${IC('warn')} חריגת קיבולת: ${caps.map(c=>`${c.name} ${c.product} ${fmt(c.prod)} יח׳ > ${fmt(c.cap)}/מפעל → נדרשים ${c.plants} מפעלים`).join(' · ')}.</div>`:''}
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;
 }
 window.downloadInputSheet=(targetQ)=>{
   if(!xlsxReady()){ toast('ספריית האקסל לא נטענה — נסה שוב עם חיבור אינטרנט','r'); return; }
-  const sc=selectedExportScenario(); const rows=buildInputRows(targetQ,sc);
+  const sc=selectedExportScenario();
+  // Fix #2: hard-block export of an illegal production plan (grade-incompatible or chip-starved).
+  const cg=chipGuard(sc,targetQ);
+  if(!cg.compatible){ toast(`הגשה חסומה: דרגת שבב X${cg.gx} אינה תואמת למחשב Y${cg.gy} (טבלת ההמרה). נדרש מו״פ להתאמת דרגות.`,'r'); go('sim'); return; }
+  if(cg.gap>0){ toast(`הגשה חסומה: חסרים ${fmt(cg.gap)} שבבים (${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}). ייצר/רכוש שבבים קודם.`,'r'); go('sim'); return; }
+  const rows=buildInputRows(targetQ,sc);
   const aoa=[['טופס','פעולה','ערך','הערה','בוצע?'],...rows.map(r=>[r.form,r.action,r.value,r.note,''])];
   const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'הזנה '+targetQ); XLSX.writeFile(wb,`INTOPIA_input_${targetQ}.xlsx`);
