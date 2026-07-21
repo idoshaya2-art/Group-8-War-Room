@@ -2503,6 +2503,13 @@ window.setLeverAdv=(id,q,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id);
   if(rl.advPct!=null){ rl.advertising=Math.round((rl.sales||0)*rl.advPct/100); _patchInput(region,'advertising',rl.advertising); }
   save(true); renderImpactBoard(sc); };
 function refreshSimEditor(){ if(_simEditId&&window._simShowQ&&_simEditQ) window._simShowQ(_simEditQ); }
+// Fix #3: sellable-units ceiling per region/product from Data Log market potential
+// (PC ~ a bit above one plant's optimal capacity per company per model; chips ~1/4 of PC potential).
+// Stops the optimizer from assuming 100% sell-through of unlimited production.
+function marketCapUnits(product, regionId){
+  const cap=(DATALOG.capacity[product]&&DATALOG.capacity[product][regionId])||0;
+  return product==='X' ? Math.round(cap*0.25*1.2) : Math.round(cap*1.2);
+}
 window.magicOptimize=(id)=>{
   const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
   const base=S.activeQuarter, op=S.quarters[base].operational, qs=Object.keys(sc.levers);
@@ -2516,7 +2523,8 @@ window.magicOptimize=(id)=>{
   prodFracs.forEach(pf=>MARGIN_OPTS.forEach(mg=>{
     const production=Math.round(cap*pf), price=cost*mg, levers={};
     qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{}; const prod=r.id==='hq'?0:Math.round(production/3);
-      levers[q].regions[r.id]={production:prod,unitCost:cost,sales:prod*price,advertising:Math.round(prod*price*0.06),invest:0,transferIn:0,product:cur.product||'Y',model:cur.model||'Standard',margin:mg,advPct:6}; }); });
+      const _prd=cur.product||'Y', _sold=Math.min(prod, marketCapUnits(_prd,r.id)); // cap sales by market potential
+      levers[q].regions[r.id]={production:prod,unitCost:cost,sales:_sold*price,advertising:Math.round(_sold*price*0.06),invest:0,transferIn:0,product:_prd,model:cur.model||'Standard',margin:mg,advPct:6}; }); });
     const spv=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
     const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,mg};
     if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
@@ -2863,7 +2871,8 @@ window.runMaxOptimizer=()=>{
     const levers={};
     qs.forEach(q=>{ levers[q]={rd,regions:{}};
       REGIONS.forEach(r=>{ const prod=r.id==='hq'?0:Math.round(production/3); // HQ doesn't sell; split across 3 markets
-        levers[q].regions[r.id]={production:prod,unitCost:cost,sales:prod*price,advertising:Math.round(prod*price*0.06),invest:0,transferIn:0}; }); });
+        const _sold=Math.min(prod, marketCapUnits('Y',r.id)); // Fix #3: cap sales by market potential, not 100% sell-through
+        levers[q].regions[r.id]={production:prod,unitCost:cost,sales:_sold*price,advertising:Math.round(_sold*price*0.06),invest:0,transferIn:0}; }); });
     const sp=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
     const cand={levers,feasible,endCash:sp.endCash,score:sp.value,pf,mg,rd,minDist:Math.min(...proj.map(p=>p.distance))};
     if(!best){ best=cand; return; }
@@ -2922,7 +2931,7 @@ function renderContracts(){
    ========================================================================= */
 const AI_PROVIDERS={
   anthropic:{ label:'Anthropic (Claude)', short:'Claude', keyLS:'intopia_ai_key_anthropic', defModel:'claude-sonnet-5', keyHint:'sk-ant-...' },
-  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-5.6', keyHint:'sk-...' },
+  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-4o', keyHint:'sk-...' },
 };
 function aiProvider(){ const p=S.ai&&S.ai.provider; return AI_PROVIDERS[p]?p:'anthropic'; }
 function getApiKey(prov){ prov=prov||aiProvider(); try{
