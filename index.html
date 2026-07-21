@@ -1320,6 +1320,12 @@ PAGE_RENDER.plan = (c)=>{
   const targetQ=nextQuarters(q)[0]||q;
   const items=buildActionPlan(q,targetQ);
   window._recSims=items.map(it=>it.sim||null);
+  // 3 pricing options for finished stock — each option's sim registered for one-click apply
+  const sellGroups=pcSellOptions(q); const sellRows=[];
+  sellGroups.forEach(g=>g.opts.forEach(o=>{ const idx=window._recSims.length;
+    window._recSims.push({q:targetQ,regions:{[g.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g.cost,margin:null,advPct:o.advPct}}});
+    sellRows.push({g,o,idx}); }));
+  const sellHtml=sellGroups.length?sellOptionsCard(sellGroups,sellRows,targetQ):'';
   const mp=masterPlanStatus();
   const urgent=items.find(i=>i.level==='red')||items.find(i=>i.level==='amber')||items[0];
   const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
@@ -1358,6 +1364,7 @@ PAGE_RENDER.plan = (c)=>{
     </div>
 
     <!-- Layer 2: judgment + the work -->
+    ${sellHtml}
     ${renderAdvisorCard(q,targetQ)}
     <div class="small muted" style="margin:2px 2px 10px">${items.filter(i=>i.sim||i.level==='red'||i.level==='amber').length} פעולות מומלצות ל-${targetQ}, לפי 4 קטגוריות ההחלטה. כל מספר מחושב במנוע.</div>
     ${catSections}
@@ -1496,6 +1503,56 @@ function pcPlanFor(q){
     out.push({rid, reg, units:i.qty, price, src, revenue:i.qty*price, adv:Math.round(i.qty*price*0.06), cost:i.cost||0});
   });
   return out;
+}
+/* Three pricing options per region of finished PCs: volume / balanced / premium.
+   Price is exact (anchor or cost-based); units come from the calibrated demand model
+   when MR data exists, otherwise a clearly-flagged sell-through prior. Each option carries
+   revenue, gross margin, advertising and %-of-stock cleared so the team sees the tradeoff. */
+function pcSellOptions(q){
+  const L=S.learning||{};
+  return ((S.quarters[q].operational.inventory)||[]).filter(i=>i.product==='Y'&&(i.qty||0)>0).map(item=>{
+    const rid=item.region||'europe'; const reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
+    const cost=item.cost||0, stock=item.qty;
+    const a=(L.anchors||{})[rid+'|Y']; let base, priceSrc, calibrated=false;
+    if(a&&a.price>0){ base=Math.round(a.price); priceSrc='עוגן ביקוש נלמד'; calibrated=!!(L.market&&L.market[rid+'|Y']!=null); }
+    else if(cost>0){ base=Math.round(cost*2); priceSrc='עלות ×2 (לא מכויל)'; }
+    else { base=300; priceSrc='הנחת פתיחה (לא מכויל)'; }
+    const specs=[
+      {key:'volume',  name:'חיסול מהיר · נפח',   mult:0.85, sell:0.90, advPct:8, favors:'מחצית העבר — מזומן ורווח מיידי, מנקה את המלאי מהר'},
+      {key:'balanced',name:'מאוזן',              mult:1.00, sell:0.65, advPct:6, favors:'איזון — שוליים סבירים עם קצב מכירה טוב'},
+      {key:'premium', name:'פרמיום · שוליים',    mult:1.15, sell:0.42, advPct:4, favors:'שוליים מרביים ומיצוב; משאיר מלאי לרבעון הבא'},
+    ];
+    const opts=specs.map(o=>{
+      const price=Math.round(base*o.mult); let units=null, band=null, conf=null, volSrc;
+      if(calibrated){ const pd=predictDemand(rid,'Y',{price}); if(pd){ units=Math.min(stock,pd.units); band=[Math.min(stock,pd.low),Math.min(stock,pd.high)]; conf=pd.confidence; volSrc='מנוע ביקוש מכויל'; } }
+      if(units==null){ units=Math.round(stock*o.sell); volSrc='הערכת מדרג (לא מכויל)'; }
+      const revenue=units*price, adv=Math.round(revenue*o.advPct/100), grossMargin=(price-cost)*units;
+      return {...o, price, units, band, conf, volSrc, revenue, adv, grossMargin, cleared:stock?units/stock:0, cost};
+    });
+    return {rid, reg, stock, cost, base, priceSrc, calibrated, opts};
+  });
+}
+function sellOptionsCard(groups, rows, targetQ){
+  const el=S.learning&&S.learning.elast?S.learning.elast.price:null;
+  return `<div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+    <div class="ch"><h3>${IC('zap')} מכירת המלאי המוגמר — 3 אופציות תמחור ל-${targetQ}</h3><span class="tag b">A1-2</span></div>
+    <div class="cb">${groups.map(g=>`
+      <div class="between" style="flex-wrap:wrap;gap:6px;margin-bottom:8px"><b>${g.reg.name} · ${fmt(g.stock)} מחשבים במלאי</b>
+        <span class="small muted">מחיר בסיס ${fmt(g.base)} ${g.reg.cur} (${g.priceSrc}) · עלות/יח׳ ${fmt(g.cost)} ${g.reg.cur}</span></div>
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אופציה</th><th>מחיר/יח׳</th><th>יח׳ למכירה</th><th>% מהמלאי</th><th>הכנסה</th><th>רווח גולמי</th><th>פרסום</th><th></th></tr></thead>
+      <tbody>${g.opts.map(o=>{ const row=rows.find(r=>r.g===g&&r.o===o);
+        return `<tr>
+          <td style="text-align:start"><b>${o.name}</b><div class="small muted" style="max-width:210px;white-space:normal">${o.favors}</div></td>
+          <td class="num"><b>${fmt(o.price)}</b> ${g.reg.cur}</td>
+          <td class="num">${fmt(o.units)}${o.band?`<div class="small muted">${fmt(o.band[0])}–${fmt(o.band[1])}</div>`:''}</td>
+          <td class="num">${(o.cleared*100).toFixed(0)}%</td>
+          <td class="num">${fmt(o.revenue)}</td>
+          <td class="num" style="color:${o.grossMargin>=0?'var(--green)':'var(--red)'}">${fmt(o.grossMargin)}</td>
+          <td class="num">${fmt(o.adv)}</td>
+          <td><button class="btn sm primary" onclick="applyRecToSim(${row.idx})">${IC('zap')} החל</button></td>
+        </tr>`; }).join('')}</tbody></table></div>
+      <div class="small muted" style="margin-top:6px">${IC('warn')} ${g.calibrated?`הכמויות נגזרות ממנוע הביקוש המכויל (גמישות מחיר ${el!=null?el.toFixed(2):'—'}). המחיר, ההכנסה והרווח מדויקים.`:'המחיר, ההכנסה והרווח הגולמי מדויקים. הכמויות הן <b>הערכת מדרג</b> עד שייקלט MR עם מחירי מתחרים — אז המנוע יכייל אותן לפי גמישות אמיתית.'}</div>`).join('<hr class="hr">')}
+    </div></div>`;
 }
 /* Full-scan verdict for every official form: recommended here / watch / not needed — with the reason. */
 const PLAN_CATS=[
