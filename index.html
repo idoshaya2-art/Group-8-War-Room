@@ -466,7 +466,7 @@ function defaultState(){
     quarters:q,
     scenarios:[],
     decisions:[],
-    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-5.6'}, chat:[] },
+    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[] },
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
     masterPlan:{ snapshots:[] },
@@ -511,6 +511,8 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
       S.meta.strategyV=1;
     }
   }
+  // fix the stale fictitious OpenAI default model that earlier builds shipped
+  if(S.ai && S.ai.models && S.ai.models.openai==='gpt-5.6') S.ai.models.openai='gpt-4o';
   // normalise legacy inventory product labels ("Chip אירופה") to canonical X/Y + region
   QUARTERS.forEach(q=>{ const inv=(S.quarters[q]&&S.quarters[q].operational&&S.quarters[q].operational.inventory)||[];
     inv.forEach(it=>{ const s=String(it.product||'');
@@ -3024,13 +3026,16 @@ const AI_PROVIDERS={
   openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-4o', keyHint:'sk-...' },
 };
 function aiProvider(){ const p=S.ai&&S.ai.provider; return AI_PROVIDERS[p]?p:'anthropic'; }
+// Strip anything that isn't printable ASCII — API keys/model IDs are ASCII, and a stray
+// non-Latin-1 char (hidden space/newline/Hebrew from paste) makes fetch() headers throw.
+function cleanAscii(s){ return String(s||'').replace(/[^\x20-\x7E]/g,'').trim(); }
 function getApiKey(prov){ prov=prov||aiProvider(); try{
   let k=localStorage.getItem(AI_PROVIDERS[prov].keyLS)||'';
   if(!k && prov==='anthropic'){ const legacy=localStorage.getItem('intopia_ai_key'); if(legacy){ localStorage.setItem(AI_PROVIDERS.anthropic.keyLS,legacy); localStorage.removeItem('intopia_ai_key'); k=legacy; } }
-  return k;
+  return cleanAscii(k);
 }catch(e){ return ''; } }
-function setApiKey(prov,k){ try{ k?localStorage.setItem(AI_PROVIDERS[prov].keyLS,k):localStorage.removeItem(AI_PROVIDERS[prov].keyLS); }catch(e){} }
-function aiModel(prov){ prov=prov||aiProvider(); const m=S.ai&&S.ai.models&&S.ai.models[prov]; return m||AI_PROVIDERS[prov].defModel; }
+function setApiKey(prov,k){ try{ k=cleanAscii(k); k?localStorage.setItem(AI_PROVIDERS[prov].keyLS,k):localStorage.removeItem(AI_PROVIDERS[prov].keyLS); }catch(e){} }
+function aiModel(prov){ prov=prov||aiProvider(); const m=S.ai&&S.ai.models&&S.ai.models[prov]; return cleanAscii(m)||AI_PROVIDERS[prov].defModel; }
 
 /* ---------- Authoritative INTOPIA decision-form catalog (official codes/fields) ---------- */
 const INTOPIA_FORMS=[
@@ -3387,7 +3392,7 @@ function updateProviderHints(){
   note.textContent = prov==='openai'
     ? 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-platform.openai.com. הקריאה ישירה מהדפדפן.'
     : 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-console.anthropic.com.';
-  mh.textContent = prov==='openai' ? 'למשל gpt-5.6 / gpt-4o / gpt-4o-mini' : 'למשל claude-sonnet-5 / claude-opus-4-8';
+  mh.textContent = prov==='openai' ? 'מומלץ: gpt-4o · (או gpt-4o-mini לזול/מהיר). ודא שהמזהה קיים בחשבון OpenAI שלך.' : 'למשל claude-sonnet-5 / claude-opus-4-8';
 }
 window.aiProviderSwitch=()=>{
   const nv=$('#aiProvider').value;
