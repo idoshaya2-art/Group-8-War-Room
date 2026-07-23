@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.1';
+const APP_VERSION = 'v6.2';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -761,8 +761,9 @@ function _c01(v){ return Math.max(0,Math.min(1,isFinite(v)?v:0)); }
 function cumRealizedNet(base){ const bi=qIndex(base); let s=0;
   QUARTERS.forEach((q,i)=>{ if(i<=bi && S.quarters[q].entered) s+=(S.quarters[q].financial.netProfit||0); }); return s; }
 function competitorRankOf(base,ourValue){ // rank OUR (possibly projected) profit vs competitors' retained earnings
+  // MR74 stores competitor figures in 000s CHF; our cumNet is absolute SF — scale competitors ×1000 to match.
   const others=Object.values((S.quarters[base].marketIntel||{}).competitors||{})
-    .filter(c=>c.num!==OUR_CO && c.retainedEarnings!=null).map(c=>c.retainedEarnings);
+    .filter(c=>c.num!==OUR_CO && c.retainedEarnings!=null).map(c=>c.retainedEarnings*1000);
   if(others.length<1) return null;
   const n=others.length+1, beat=others.filter(v=>v<ourValue).length;
   return {score:beat/(n-1), rank:n-beat, n}; // 1=best; responsive to ourValue
@@ -1037,6 +1038,59 @@ function masterPlanStatus(){
   const onTrack= remaining===0 ? sp.value>=tScore : (required<=0 || (pace!=null && pace>=required*0.8));
   return {score:sp.value, tScore, remaining, pace, required, pivots, onTrack, snaps, past:sp.pastHalf, pot:sp.potentialHalf};
 }
+/* Goal optimizer — recompute the Q9 targets from the CURRENT state each quarter, benchmarked to
+   competitors (MR74) and physical limits, aimed at maximizing the 50/50 score. Honest ambition,
+   not proxy-gaming: profit target beats the leader; tech targets are the max reachable by Q9. */
+function recommendGoals(){
+  const base=S.activeQuarter, g=S.config.goals, op=S.quarters[base].operational, f=S.quarters[base].financial;
+  const remaining=Math.max(0,(QUARTERS.length-1)-qIndex(base));
+  const entered=enteredQuarters();
+  const cumNet=cumRealizedNet(base);
+  const profPace=entered.length?cumNet/entered.length:0;
+  const comps=Object.values((S.quarters[base].marketIntel||{}).competitors||{}).filter(c=>c.num!==OUR_CO&&c.retainedEarnings!=null);
+  const compREabs=comps.map(c=>c.retainedEarnings*1000); // 000s → absolute SF
+  const topRE=compREabs.length?Math.max(...compREabs):null;
+  const nCo=comps.length+1;
+  const paceProj=Math.round(cumNet+profPace*remaining);
+  const beatLeader=topRE!=null?Math.round(topRE*1.10):null;              // 10% above the current leader
+  const cumProfitTarget=Math.max(paceProj, beatLeader!=null?beatLeader:paceProj);
+  const finalRETarget=cumProfitTarget;
+  const equityTarget=Math.round(START_CAPITAL+cumProfitTarget);
+  const techXTarget=Math.min(9,(op.techX||0)+remaining);                 // ≤1 grade/quarter
+  const techYTarget=Math.min(9,(op.techY||0)+remaining);
+  const shareObj=marketShareScore(base); const curShare=shareObj?shareObj.share:null;
+  const q9Share=Math.round(Math.max(curShare||0, 2/nCo)*100);            // 2× fair share = full marks
+  const roe=Math.max(g.scoreTargets.roe, Math.ceil((f.roe||0)*1.1));
+  const roi=Math.max(g.scoreTargets.roi, Math.ceil((f.roi||0)*1.1));
+  const ros=Math.max(g.scoreTargets.ros, Math.ceil((f.ros||0)*1.1));
+  return { remaining, cumNet, profPace, topRE, nCo, cumProfitTarget, finalRETarget, equityTarget,
+    techXTarget, techYTarget, q9Share, scoreTargets:{roe,roi,ros} };
+}
+window.openGoalOptimizer=()=>{ const panel=$('#goalOptPanel'); if(!panel)return; const rec=recommendGoals(); window._goalRec=rec; const g=S.config.goals;
+  const line=(label,cur,next,pct)=>{ const dir=next>cur?'↑':(next<cur?'↓':'='); const col=next>cur?'var(--green)':(next<cur?'var(--amber)':'var(--muted)');
+    return `<tr><td>${label}</td><td class="num">${fmt(cur)}${pct?'%':''}</td><td class="num" style="color:var(--purple)"><b>${fmt(next)}${pct?'%':''}</b></td><td style="color:${col}">${dir}</td></tr>`; };
+  panel.innerHTML=`<div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--purple)">
+    <div class="between" style="flex-wrap:wrap;gap:8px"><b>${IC('zap')} יעדים מומלצים — לפי ${enteredQuarters().length} רבעונים שנקלטו · ${rec.remaining} עד Q9</b>
+      <div class="row" style="gap:8px"><button class="btn sm primary" onclick="applyRecommendedGoals()">החל יעדים אלה</button><button class="btn sm" onclick="$('#goalOptPanel').innerHTML=''">בטל</button></div></div>
+    <div style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>יעד Q9</th><th>נוכחי</th><th>מומלץ</th><th></th></tr></thead><tbody>
+      ${line('רווח מצטבר',g.cumProfitTarget,rec.cumProfitTarget)}
+      ${line('רווחים צבורים',g.finalRETarget,rec.finalRETarget)}
+      ${line('הון עצמי',g.equityTarget,rec.equityTarget)}
+      ${line('דרגת Chip (X)',g.techXTarget,rec.techXTarget)}
+      ${line('דרגת PC (Y)',g.techYTarget,rec.techYTarget)}
+      ${line('נתח שוק',g.q9Share,rec.q9Share,true)}
+      ${line('ROE יעד',g.scoreTargets.roe,rec.scoreTargets.roe,true)}
+      ${line('ROI יעד',g.scoreTargets.roi,rec.scoreTargets.roi,true)}
+      ${line('ROS יעד',g.scoreTargets.ros,rec.scoreTargets.ros,true)}
+    </tbody></table></div>
+    <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')} <b>הבסיס:</b> רווח מצטבר = ${rec.topRE!=null?`לנצח את המוביל (רווחים צבורים ${fmt(rec.topRE)}) ב-10%`:'הרחבת הקצב הנוכחי'} או המשך הקצב שלנו (${fmt(Math.round(rec.profPace))}/רבעון) — הגבוה מביניהם. דרגות טק = המקסימום שניתן להשיג פיזית עד Q9 (עולה ≤1/רבעון). נתח שוק = פי-2 מהנתח ההוגן (${rec.nCo} חברות). יעילות = מעל הביצוע הנוכחי שלנו. <b>שים לב:</b> העלאת יעד מגדילה את הפער המוצג — זו שאיפה כנה, לא ניפוח ציון.</div>
+  </div>`;
+};
+window.applyRecommendedGoals=()=>{ const rec=window._goalRec; if(!rec)return; const g=S.config.goals;
+  g.cumProfitTarget=rec.cumProfitTarget; g.finalRETarget=rec.finalRETarget; g.equityTarget=rec.equityTarget;
+  g.techXTarget=rec.techXTarget; g.techYTarget=rec.techYTarget; g.q9Share=rec.q9Share;
+  g.scoreTargets={...g.scoreTargets,...rec.scoreTargets};
+  save(); toast('היעדים עודכנו לפי התוצאות ✓','g'); goalTab('floors'); };
 
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
 function computeAlerts(q){
@@ -3066,7 +3120,7 @@ window.saveDecision=()=>{
 PAGE_RENDER.goals = (c)=>{
   c.innerHTML=`
     <div class="pill-tabs" id="goalTabs" style="margin-bottom:18px">
-      <button class="active" data-t="floors">רצפות ויעדים</button>
+      <button class="active" data-t="floors">${IC('target')} יעדי Q9</button>
       <button data-t="contracts">חוזים והתחייבויות</button>
       <button data-t="params">פרמטרי מודל</button>
       <button data-t="max">${IC('zap')} MAX — מיקסום Q9</button>
@@ -3079,25 +3133,49 @@ PAGE_RENDER.goals = (c)=>{
 function goalTab(t){
   const body=$('#goalBody'), g=S.config.goals, p=S.config.params;
   if(t==='floors'){
+    const mp=masterPlanStatus(), base=S.activeQuarter, op=S.quarters[base].operational, f=S.quarters[base].financial;
+    const cumNet=cumRealizedNet(base), shareObj=marketShareScore(base);
+    const gi=(path,val)=>`<input class="f" style="width:130px" type="number" value="${val}" oninput="setGoal('${path}',this.value)">`;
+    const st=(ok)=>ok?'<span class="tag g">✓ הושג</span>':'<span class="tag a">בפער</span>';
+    const row=(label,cur,inp,status,note)=>`<tr><td><b>${label}</b>${note?`<div class="small muted">${note}</div>`:''}</td><td class="num">${cur}</td><td>${inp}</td><td>${status}</td></tr>`;
     body.innerHTML=`
-    <div class="grid" style="grid-template-columns:1fr 1fr">
-      <div class="card">
-        <div class="ch"><h3>${IC('dollar')} רצפות מזומן לכל רבעון</h3></div>
-        <div class="cb"><div class="grid" style="grid-template-columns:repeat(3,1fr)">
-          ${QUARTERS.map(q=>`<div class="field"><label class="fl">${q}</label><input class="f" type="number" value="${g.floors[q]||0}" oninput="setGoal('floors.${q}',this.value)"></div>`).join('')}
-        </div></div>
+    <div class="card pad" style="margin-bottom:14px">
+      <div class="between" style="flex-wrap:wrap;gap:10px"><h3 style="margin:0">${IC('target')} יעדי סיום Q9 — מצב מול יעד</h3>
+        <div class="row" style="gap:8px;align-items:center"><span class="tag ${mp.score>=mp.tScore?'g':(mp.onTrack?'b':'a')}">ציון ${mp.score.toFixed(0)} → ${mp.tScore}</span><button class="btn sm primary" onclick="openGoalOptimizer()">${IC('zap')} אופטימיזציה לפי התוצאות</button></div></div>
+      <div class="small muted" style="margin-top:8px;line-height:1.7">כל יעד = מה שנדרש ב-<b>Q9</b> כדי למקסם את הציון (50% כסף · 50% עתיד). "נוכחי" מתעדכן מהרבעונים שנקלטו · נותרו <b>${mp.remaining}</b> רבעונים. לחץ "אופטימיזציה" כדי לחשב יעדים מומלצים מהמצב הנוכחי ומהמתחרים.</div>
+    </div>
+    <div id="goalOptPanel"></div>
+    <div class="card">
+      <div class="ch"><h3>${IC('dollar')} 50% ביצועי עבר — כסף ויעילות</h3></div>
+      <div class="cb" style="overflow-x:auto"><table class="tbl"><thead><tr><th>יעד</th><th>נוכחי</th><th>יעד Q9</th><th>סטטוס</th></tr></thead><tbody>
+        ${row('רווח מצטבר (לנצח את המוביל)',fmt(Math.round(cumNet)),gi('cumProfitTarget',g.cumProfitTarget),st(cumNet>=g.cumProfitTarget),'סכום הרווח הנקי מכל הרבעונים')}
+        ${row('רווחים צבורים',fmt(f.retainedEarnings||0),gi('finalRETarget',g.finalRETarget),st((f.retainedEarnings||0)>=g.finalRETarget))}
+        ${row('הון עצמי',fmt(f.totalEquity||0),gi('equityTarget',g.equityTarget),st((f.totalEquity||0)>=g.equityTarget))}
+        ${row('יעילות ROE',(f.roe||0)+'%',gi('scoreTargets.roe',g.scoreTargets.roe),st((f.roe||0)>=g.scoreTargets.roe))}
+        ${row('יעילות ROI',(f.roi||0)+'%',gi('scoreTargets.roi',g.scoreTargets.roi),st((f.roi||0)>=g.scoreTargets.roi))}
+        ${row('יעילות ROS',(f.ros||0)+'%',gi('scoreTargets.ros',g.scoreTargets.ros),st((f.ros||0)>=g.scoreTargets.ros))}
+      </tbody></table></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="ch"><h3>${IC('trendUp')} 50% פוטנציאל עתידי — טכנולוגיה, שוק</h3></div>
+      <div class="cb" style="overflow-x:auto"><table class="tbl"><thead><tr><th>יעד</th><th>נוכחי</th><th>יעד Q9</th><th>סטטוס</th></tr></thead><tbody>
+        ${row('דרגת Chip (X)',op.techX||0,gi('techXTarget',g.techXTarget),st((op.techX||0)>=g.techXTarget),'עולה ≤1 דרגה/רבעון · מקס׳ בר-השגה '+Math.min(9,(op.techX||0)+mp.remaining))}
+        ${row('דרגת PC (Y)',op.techY||0,gi('techYTarget',g.techYTarget),st((op.techY||0)>=g.techYTarget),'עולה ≤1 דרגה/רבעון · מקס׳ בר-השגה '+Math.min(9,(op.techY||0)+mp.remaining))}
+        ${row('נתח שוק (%)',(shareObj?(shareObj.share*100).toFixed(1)+'%':'—'),gi('q9Share',g.q9Share),st(shareObj&&shareObj.share*100>=g.q9Share))}
+        ${row('ציון סיום יעד',mp.score.toFixed(0),gi('q9Score',g.q9Score),st(mp.score>=g.q9Score))}
+      </tbody></table></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="ch"><h3>${IC('dollar')} רצפות מזומן ומשמעת חוב</h3></div>
+      <div class="cb"><div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        ${QUARTERS.map(q=>`<div class="field"><label class="fl">${q}${q===base?' ●':''}</label><input class="f" type="number" value="${g.floors[q]||0}" oninput="setGoal('floors.${q}',this.value)"></div>`).join('')}
       </div>
-      <div class="card">
-        <div class="ch"><h3>${IC('target')} יעדי סוף-משחק</h3></div>
-        <div class="cb">
-          <div class="row" style="gap:10px">
-            <div class="field" style="flex:1"><label class="fl">יעד רמת Chip (X)</label><input class="f" type="number" value="${g.techXTarget}" oninput="setGoal('techXTarget',this.value)"></div>
-            <div class="field" style="flex:1"><label class="fl">יעד רמת Computer (Y)</label><input class="f" type="number" value="${g.techYTarget}" oninput="setGoal('techYTarget',this.value)"></div>
-          </div>
-          <div class="field"><label class="fl">תקרת חוב</label><input class="f" type="number" value="${g.debtCeiling}" oninput="setGoal('debtCeiling',this.value)"></div>
-          <div class="field"><label class="fl">יעד מלאי סוף-משחק</label><input class="f" type="number" value="${g.endInventoryTarget}" oninput="setGoal('endInventoryTarget',this.value)"></div>
-          <div class="small muted">כל נורה והתרעה נמדדות מול היעדים כאן. האסטרטגיה היא קונפיגורציה.</div>
-        </div>
+      <div class="row" style="gap:10px;margin-top:12px;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:130px"><label class="fl">תקרת חוב</label>${gi('debtCeiling',g.debtCeiling)}</div>
+        <div class="field" style="flex:1;min-width:130px"><label class="fl">חופש מחוב מרבעון</label><input class="f" value="${g.debtFreeFrom||''}" oninput="setGoalStr('debtFreeFrom',this.value)"></div>
+        <div class="field" style="flex:1;min-width:130px"><label class="fl">יעד מלאי סוף-משחק</label>${gi('endInventoryTarget',g.endInventoryTarget)}</div>
+      </div>
+      <div class="small muted" style="margin-top:6px">${g.noExternalLoans?IC('warn')+' קו אדום פעיל: ללא הלוואות חיצוניות.':''} ● = הרבעון הפעיל.</div>
       </div>
     </div>`;
   }
@@ -3231,6 +3309,7 @@ window.runMaxOptimizer=()=>{
 };
 window.setFx=(cur,val)=>{ S.config.params.fx=S.config.params.fx||{...FX_DEFAULT}; S.config.params.fx[cur]=parseFloat(val)||0; save(true); };
 window.setGoal=(path,val)=>{ const parts=path.split('.'); let o=S.config.goals; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=parseFloat(val)||0; save(true); };
+window.setGoalStr=(path,val)=>{ const parts=path.split('.'); let o=S.config.goals; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=String(val||'').trim(); save(true); };
 window.setParam=(path,val)=>{ const parts=path.split('.'); let o=S.config.params; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=parseFloat(val)||0; save(true); };
 window.setCollection=(r,k,val)=>{ S.config.params.collection[r][k]=parseFloat(val)||0; save(true); };
 window.addContract=()=>{ S.config.contracts.push({id:uid(),counterparty:'',product:'',qty:0,price:0,deliveryQuarter:'Q5',terms:'',advance:0}); save(); renderContracts(); };
