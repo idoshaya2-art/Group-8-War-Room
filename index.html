@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v5.8';
+const APP_VERSION = 'v5.9';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2533,6 +2533,14 @@ window.editScenario=(id)=>{
       } else if(sf.kind==='transfer'){ body=`<div class="field" style="max-width:200px"><label class="fl">סכום העברה מהמטה (${cur})</label><input class="f" type="number" value="${rl.transferIn||0}" oninput="setLever('${sc.id}','${q}','transferIn','${rid}',this.value)"><div class="small muted">עיכוב רבעון + עמלת המרה</div></div>`;
       } else if(sf.kind==='invest'){ body=`<div class="field" style="max-width:200px"><label class="fl">השקעה/הלוואה (${cur})</label><input class="f" type="number" value="${rl.invest||0}" oninput="setLever('${sc.id}','${q}','invest','${rid}',this.value)"><div class="small muted">חיובי = השקעה/מזומן יוצא</div></div>`;
       } else if(sf.kind==='rd'){ body=`<div class="field" style="max-width:240px"><label class="fl">השקעת מו״פ כוללת X+Y (SF)</label><input class="f" type="number" value="${lv.rd||0}" oninput="setLever('${sc.id}','${q}','rd',null,this.value)"><div class="small muted">מינ׳ חוקי: X 40,000 · Y 70,000 · מבשיל רבעון קדימה</div></div>`;
+      } else if(sf.form==='H1-2'){ const sel=mrListOf(act); const avail=MR_STUDIES.filter(m=>!sel.includes(m.code));
+        body=`<div class="small muted" style="margin-bottom:8px">בחר עד <b>3</b> מחקרי שוק לרכישה הרבעון · נבחרו <b>${sel.length}/3</b></div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${sel.length?sel.map(code=>{ const m=MR_STUDIES.find(x=>x.code===code); return `<span class="tag b" style="display:inline-flex;gap:6px;align-items:center;padding:5px 9px">${code}${m?' · '+m.short:''} <span style="cursor:pointer;font-weight:700" onclick="removeMR('${sc.id}','${q}','${act.aid}','${code}')">✕</span></span>`; }).join(''):'<span class="small muted">טרם נבחרו מחקרים</span>'}</div>
+        ${sel.length<3?`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+          <select class="f" style="max-width:300px" onchange="if(this.value){addMR('${sc.id}','${q}','${act.aid}',this.value);}"><option value="">➕ הוסף מחקר מהרשימה…</option>${avail.map(m=>`<option value="${m.code}">${m.code} · ${m.label}</option>`).join('')}</select>
+          <input class="f" style="max-width:130px" id="mrcustom_${act.aid}" placeholder="מס׳ MR מהקטלוג"><button class="btn sm" onclick="addCustomMR('${sc.id}','${q}','${act.aid}')">הוסף מס׳</button>
+        </div>`:'<div class="small muted">הגעת ל-3 מחקרים (המקסימום לרבעון). הסר אחד כדי להחליף.</div>'}
+        <div class="small muted" style="margin-top:8px">${IC('info')} נרשם לגיליון ההזנה (H1-2) — <b>לא משפיע ישירות על תחזית הציון</b>, אך תוצאותיו מכיילות את מנוע הביקוש ברבעון הבא. הקטלוג במשחק ממוספר; לכל מחקר אחר הזן מספר מותאם.</div>`;
       } else { body=`<div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start"><div class="field" style="max-width:150px"><label class="fl">סכום (${cur})</label><input class="f" type="number" value="${act.amount||0}" oninput="setSimNote('${sc.id}','${q}','${act.aid}','amount',this.value)"></div><div class="field" style="flex:1;min-width:180px"><label class="fl">הערה / פרטים לגיליון</label><input class="f" value="${esc(act.note||'')}" oninput="setSimNote('${sc.id}','${q}','${act.aid}','note',this.value)" placeholder="פרטי הטופס"></div></div><div class="small muted" style="margin-top:6px">${IC('info')} נרשם לגיליון ההזנה — <b>לא משפיע על תחזית הציון/תזרים</b> (המנוע אינו מדמה טופס זה).</div>`;
       }
       const brd=sf.kind==='note'?'var(--muted)':(sf.grp==='מכירות'?'var(--green)':sf.grp==='ייצור'?'var(--accent)':'var(--purple)');
@@ -2732,6 +2740,30 @@ window.setSimActionRegion=(id,q,aid,region)=>{ const sc=S.scenarios.find(s=>s.id
   clearActionFields(lv,act); act.region=region; if(sf.product) lv.regions[region].product=sf.product; save(); refreshSimEditor(); };
 window.setSimNote=(id,q,aid,k,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const act=(sc.levers[q].actions||[]).find(a=>a.aid===aid);
   if(act){ act[k]=(k==='amount')?(parseFloat(val)||0):val; save(true); } };
+/* Market-research (H1-2) — the studies the platform parses & uses. The game catalog is numbered
+   (up to 3 per quarter); other studies can be added by number via the custom field, so we never
+   invent MR numbers we don't actually recognize. */
+const MR_STUDIES=[
+  {code:'MR17',short:'יחידות',label:'מכירות יחידות לצרכן לפי אזור/דגם — נתח שוק'},
+  {code:'MR28',short:'מחירים',label:'מחירי צרכן של מתחרים לפי אזור/דגם — עוגן מחיר'},
+  {code:'MR74',short:'כספי',label:'מאזן ורו״ח של מתחרים — דירוג רווחים ומגמות'},
+];
+function mrListOf(act){ if(Array.isArray(act.mrList)) return act.mrList.slice(0,3);
+  const codes=[], t=act.note||''; ['MR17','MR28','MR74'].forEach(c=>{ if(t.includes(c))codes.push(c); });
+  if(t.includes('מחירי מתחרים')&&!codes.includes('MR28')) codes.push('MR28');
+  return codes.slice(0,3);
+}
+function _mrAct(id,q,aid){ const sc=S.scenarios.find(s=>s.id===id); return sc?((sc.levers[q].actions||[]).find(a=>a.aid===aid)||null):null; }
+window.addMR=(id,q,aid,code)=>{ const act=_mrAct(id,q,aid); if(!act)return; act.mrList=mrListOf(act);
+  if(act.mrList.length>=3){ toast('אפשר עד 3 מחקרי שוק לרבעון (H1-2)','a'); return; }
+  if(!act.mrList.includes(code)) act.mrList.push(code); act.note=act.mrList.join(', '); save(); refreshSimEditor(); };
+window.removeMR=(id,q,aid,code)=>{ const act=_mrAct(id,q,aid); if(!act)return; act.mrList=mrListOf(act).filter(c=>c!==code); act.note=act.mrList.join(', '); save(); refreshSimEditor(); };
+window.addCustomMR=(id,q,aid)=>{ const el=document.getElementById('mrcustom_'+aid); let v=(el&&el.value||'').trim(); if(!v)return;
+  v=v.toUpperCase().replace(/\s+/g,''); if(!v.startsWith('MR')) v='MR'+v.replace(/[^0-9]/g,'');
+  if(v==='MR'){ toast('הזן מספר מחקר תקין (למשל 41)','a'); return; }
+  const act=_mrAct(id,q,aid); if(!act)return; act.mrList=mrListOf(act);
+  if(act.mrList.length>=3){ toast('אפשר עד 3 מחקרי שוק לרבעון','a'); return; }
+  if(!act.mrList.includes(v)) act.mrList.push(v); act.note=act.mrList.join(', '); save(); refreshSimEditor(); };
 window.magicOptimize=(id)=>{
   const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
   const base=S.activeQuarter, op=S.quarters[base].operational, qs=Object.keys(sc.levers);
