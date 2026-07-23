@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.8';
+const APP_VERSION = 'v6.9';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2213,7 +2213,8 @@ const MG_MAIN=[1,4,7], MG_PC=[3,6,9];
 function extractMgmt(rows,scan,f){
   const sumCols=(re,cols)=>{ const r=findRow(rows,re); if(!r)return null; return cols.reduce((a,c)=>a+(parseNumber(r[c])||0),0); };
   const maxCols=(re,cols)=>{ const r=findRow(rows,re); if(!r)return null; return Math.max(...cols.map(c=>parseNumber(r[c])||0)); };
-  const plants=sumCols(/^PLANTS BUILT AND BUILDING/,MG_MAIN); if(plants!==null){ scan.factories=plants; f.push('מפעלים'); }
+  const plants=sumCols(/^PLANTS BUILT AND BUILDING/,MG_MAIN); if(plants!==null){ scan.factories=plants; f.push('מפעלים');
+    const pr=findRow(rows,/^PLANTS BUILT AND BUILDING/); if(pr){ scan.plantsByRegion={us:parseNumber(pr[1])||0,europe:parseNumber(pr[4])||0,brazil:parseNumber(pr[7])||0}; } }
   const offices=sumCols(/REG.? SALES OFFICES/,MG_MAIN); if(offices!==null){ scan.offices=offices; f.push('משרדים'); }
   const ownChip=maxCols(/^MAX.? OWNED GRADE/,MG_MAIN), ownPc=maxCols(/^MAX.? OWNED GRADE/,MG_PC);
   if(ownChip!==null){ scan.techX=ownChip; scan.techY=ownPc; f.push('רמות Chip/Computer'); }
@@ -2251,7 +2252,7 @@ function applyParsed({scan}){
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
   if(scan.cash){ REGIONS.forEach(r=>{ if(scan.cash[r.id]!==undefined) f.cash[r.id]=scan.cash[r.id]; }); }
   ['consolidated','netProfit','revenue','grossMargin','retainedEarnings','loans','ap','ar','supplierCredit','securities','netPlant','totalAssets','commonStock','totalEquity','interestExp','marketResearch'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) f[k]=scan[k]; });
-  ['techX','techY','maxProducible','factories','offices','rd'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) op[k]=scan[k]; });
+  ['techX','techY','maxProducible','factories','offices','rd','plantsByRegion'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) op[k]=scan[k]; });
   if(scan.inventory&&scan.inventory.length) op.inventory=scan.inventory;
   if(scan.gameRates) S.config.params.gameRates=scan.gameRates;
   save();
@@ -2600,7 +2601,7 @@ window.editScenario=(id)=>{
       <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
         <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
-        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg} · מכירה מפוצלת על 3 שווקים (לא מטה).</div></div>`:''}
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg}${m.regions&&m.regions.length?` · ייצור רק באזורים עם מפעלים/פעילות: <b>${m.regions.join(', ')}</b>`:''}.</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
         <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
@@ -2913,20 +2914,31 @@ window.magicOptimize=(id)=>{
   if(!qs.length){ toast('אין רבעונים עתידיים לאופטימיזציה','a'); return; }
   let cost=simCost(op);
   if(!cost){ const uc=[]; qs.forEach(q=>REGIONS.forEach(r=>{ const u=sc.levers[q].regions[r.id].unitCost; if(u>0)uc.push(u); })); cost=uc.length?Math.round(uc.reduce((a,b)=>a+b,0)/uc.length):Math.round(((DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y.us)||150)*0.35); } // Data Log: ~35% of retail
+  // Only optimize production where the company ACTUALLY operates now — regions with plants (per-region
+  // from the report) or, failing that, existing inventory. Plants take a quarter to build, so the plan
+  // for the next quarters is bound to current capacity. This makes "מקסם ציון" relative to the real state.
+  const plantsBy=op.plantsByRegion||null;
+  const activeRegions=REGIONS.filter(r=>r.id!=='hq').filter(r=>
+    (plantsBy && plantsBy[r.id]>0) || (op.inventory||[]).some(i=>(i.region||'')===r.id && (i.qty||0)>0) );
+  const prodRegions=activeRegions.length?activeRegions:REGIONS.filter(r=>r.id!=='hq'); // no signal → all
+  const regionCap=r=>{ const perPlant=(DATALOG.capacity.Y||{})[r.id]||0;
+    return (plantsBy && plantsBy[r.id]>0) ? plantsBy[r.id]*perPlant : perPlant; }; // real ceiling per region
   let cap=0; qs.forEach(q=>REGIONS.forEach(r=>{ cap=Math.max(cap,sc.levers[q].regions[r.id].production||0); }));
-  if(!cap) cap=simCap(op)||REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((DATALOG.capacity.Y||{})[r.id]||0),0)||8000; // Data Log total PC capacity
+  if(!cap) cap=simCap(op)||prodRegions.reduce((a,r)=>a+regionCap(r),0)||8000; // Data Log capacity of ACTIVE regions
   const rd=op.rd||0, before=scoreProxy(sc.levers).value;
   const prodFracs=[1.0,0.9,0.8,0.65]; let best=null;
   prodFracs.forEach(pf=>MARGIN_OPTS.forEach(mg=>{
     const production=Math.round(cap*pf), price=cost*mg, levers={};
-    qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{}; const prod=r.id==='hq'?0:Math.round(production/3);
+    qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{};
+      const isActive=r.id!=='hq' && prodRegions.some(x=>x.id===r.id);
+      const prod=isActive?Math.min(Math.round(production/prodRegions.length), regionCap(r)):0; // 0 where no plants
       const _prd=cur.product||'Y', _sold=Math.min(prod, marketCapUnits(_prd,r.id)); // cap sales by market potential
       levers[q].regions[r.id]={production:prod,unitCost:cost,sales:_sold*price,advertising:Math.round(_sold*price*0.06),invest:0,transferIn:0,product:_prd,model:cur.model||'Standard',margin:mg,advPct:6}; }); });
     const spv=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
     const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,mg};
     if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
   }));
-  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg}; save();
+  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg,regions:prodRegions.map(r=>r.name)}; save();
   renderScenarios(); editScenario(id);
   toast('קסם: ציון '+before.toFixed(0)+' → '+best.score.toFixed(0)+(best.feasible?'':' (שובר רצפה)'), best.feasible?'g':'a');
 };
