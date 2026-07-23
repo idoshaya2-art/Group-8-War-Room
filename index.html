@@ -1419,63 +1419,54 @@ PAGE_RENDER.plan = (c)=>{
   window._recSims=items.map(it=>it.sim||null);
   // register each action's option sims for one-click apply from the drill-down
   items.forEach(it=>{ if(it.options) it.options.forEach(o=>{ o._idx=window._recSims.length; window._recSims.push(o.sim||null); }); });
-  // 3 pricing options for finished stock — each option's sim registered for one-click apply
-  const sellGroups=pcSellOptions(q); const sellRows=[];
-  sellGroups.forEach(g=>g.opts.forEach(o=>{ const idx=window._recSims.length;
-    window._recSims.push({q:targetQ,regions:{[g.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g.cost,margin:null,advPct:o.advPct}}});
-    sellRows.push({g,o,idx}); }));
-  const sellHtml=sellGroups.length?sellOptionsCard(sellGroups,sellRows,targetQ):'';
   const mp=masterPlanStatus();
-  const urgent=items.find(i=>i.level==='red')||items.find(i=>i.level==='amber')||items[0];
   const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
   const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר');
-  const V=formVerdicts(q,items); let n=0;
-  const catSections=PLAN_CATS.map(cat=>{
-    const catItems=items.map((it,i)=>({it,i})).filter(x=>(x.it.cat||'strat')===cat.id);
-    const recForms=cat.forms.filter(code=>(V[code]||{}).st==='rec');
-    return `<section class="pcat ${cat.id}">
-      <div class="cathead"><span class="catpill">${cat.name}</span><span class="small muted">${catItems.length? catItems.length+' פעולות':'אין פעולה נדרשת'}</span></div>
-      ${catItems.length? catItems.map(({it,i})=>{ n++;
-        return `<div class="act ${it.level}">
-        <div class="an">${n}</div>
-        <div class="at"><b>${it.title}</b> ${confTag(it.conf||'rule')}<p>${it.detail}</p>
-          ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
-          ${it.dep?`<div class="dep">${IC('sliders')} תלות: ${it.dep}</div>`:''}
-          ${it.options?`<details class="fverd" style="margin-top:9px"><summary>${IC('sliders')} ${it.options.length} אופציות ומספרים — לחץ לפירוט ⌄</summary>
-            <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>אופציה</th>${it.optionCols.map(cc=>`<th>${cc}</th>`).join('')}<th></th></tr></thead>
-            <tbody>${it.options.map(o=>`<tr><td style="text-align:start"><b>${o.name}</b>${o.favors?`<div class="small muted" style="white-space:normal;max-width:220px">${o.favors}</div>`:''}</td>${o.cells.map(cell=>`<td class="num">${cell}</td>`).join('')}<td>${o.sim?`<button class="btn sm primary" onclick="applyRecToSim(${o._idx})">${IC('zap')} החל</button>`:''}</td></tr>`).join('')}</tbody></table></div></details>`:''}
-          <div class="row" style="gap:8px;margin-top:8px">
-            ${(it.sim&&!it.options)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} החל בסימולטור</button>`:''}
-            ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
-          </div>
-        </div></div>`; }).join('')
-      : `<div class="small muted">כל ${cat.forms.length} הטפסים נבחנו — אף אחד לא נדרש הרבעון.</div>`}
-      <details class="fverd"><summary>${cat.forms.length} הטפסים שנבחנו${recForms.length?' · מומלץ: '+recForms.join(', '):''} ⌄</summary>
-        <div class="fchips" style="margin-top:8px">${cat.forms.map(code=>{ const v=V[code]||{st:'skip',why:''};
-          return `<span class="fchip ${v.st}" title="${esc(v.why)}">${code} ${v.st==='rec'?'✔':(v.st==='watch'?'👁':'—')}</span>`; }).join('')}</div></details>
-    </section>`; }).join('');
+  const badge=lvl => lvl==='red'?{t:'חובה',c:'r'} : lvl==='amber'?{t:'מומלץ',c:'a'} : lvl==='good'?{t:'תקין',c:'g'} : {t:'אופציונלי',c:'b'};
+  const catName={fin:'פיננסי',strat:'אסטרטגי',ops:'תפעול',mkt:'שיווק'};
+  // ONE numbered priority list (buildActionPlan already sorts by severity)
+  const actionList = items.map((it,i)=>{ const bd=badge(it.level); const blk=it.blocked;
+    const optDrill = it.options ? `<details class="fverd" style="margin-top:9px"><summary>${IC('sliders')} ${it.options.length} אופציות ומספרים — לחץ לפירוט ⌄</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>אופציה</th>${it.optionCols.map(cc=>`<th>${cc}</th>`).join('')}<th></th></tr></thead>
+      <tbody>${it.options.map(o=>`<tr><td style="text-align:start"><b>${o.name}</b>${o.favors?`<div class="small muted" style="white-space:normal;max-width:220px">${o.favors}</div>`:''}</td>${o.cells.map(cell=>`<td class="num">${cell}</td>`).join('')}<td>${o.sim&&!blk?`<button class="btn sm primary" onclick="applyRecToSim(${o._idx})">${IC('zap')} שלח</button>`:''}</td></tr>`).join('')}</tbody></table></div></details>` : '';
+    return `<div class="act ${blk?'':it.level}" style="${blk?'opacity:.9':''}">
+      <div class="an">${i+1}</div>
+      <div class="at">
+        <div class="between" style="gap:8px;flex-wrap:wrap"><b style="flex:1;min-width:170px">${it.title}</b>
+          <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}<span class="fchip">${catName[it.cat]||'—'}</span></span></div>
+        <p>${it.detail}</p>
+        ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
+        ${it.dep?`<div class="dep">${IC('sliders')} תלוי ב: ${it.dep}</div>`:''}
+        ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
+        ${optDrill}
+        <div class="row" style="gap:8px;margin-top:10px">
+          ${(it.sim&&!it.options&&!blk)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} שלח לסימולטור</button>`:''}
+          ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
+        </div>
+      </div></div>`; }).join('');
+  const V=formVerdicts(q,items);
+  const allForms=PLAN_CATS.flatMap(cat=>cat.forms.map(code=>({code,v:V[code]||{st:'skip',why:''}})));
+  const notNeeded=allForms.filter(f=>f.v.st==='skip').length;
+  const mustCount=items.filter(i=>i.level==='red'&&!i.blocked).length;
   c.innerHTML=`
-    <!-- Layer 1: the one thing that matters -->
-    <div class="planhero">
-      <div class="top">
-        <span class="sc">${mp.score.toFixed(0)}</span><span class="arrow">→ יעד ${mp.tScore}</span>
-        <span class="tag ${trackTag}">${trackTxt}</span>
-        <span class="small muted">עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)} · ${mp.remaining} רבעונים ל-Q9</span>
-      </div>
-      ${urgent?`<div class="urgent"><span class="tag ${urgent.level==='red'?'r':(urgent.level==='amber'?'a':'b')}">הפעולה הדחופה</span><span><b>${urgent.title}</b>${urgent.form?` · ${urgent.form}`:''}</span></div>`:''}
-    </div>
-
-    <!-- Layer 2: judgment + the work -->
-    ${sellHtml}
+    <div class="planhero"><div class="top">
+      <span class="sc">${mp.score.toFixed(0)}</span><span class="arrow">→ יעד ${mp.tScore}</span>
+      <span class="tag ${trackTag}">${trackTxt}</span>
+      <span class="small muted">עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)} · ${mp.remaining} רבעונים ל-Q9</span></div></div>
+    <div class="card pad" style="margin-bottom:14px;border-color:var(--line2)"><div class="small" style="line-height:2">
+      <b>${IC('clipboard')} איך עובדים כאן (הזנות ל-${targetQ}):</b><br>
+      <b>1.</b> רשימה <b>ממוספרת לפי עדיפות</b> — עבור מלמעלה למטה. <b>2.</b> תגית לכל פעולה: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (חסום = אסור עד שהתלות מתקיימת).<br>
+      <b>3.</b> "<b>שלח לסימולטור</b>" מעביר את המספרים של <b>אותה פעולה בלבד</b> לתרחיש. יש אופציות? בחר אחת בפירוט. <b>4.</b> "תלוי ב:" = מה חייב קודם. <b>5.</b> היועץ (למטה) נותן חוות-דעת — <b>לא משנה</b> את הרשימה.</div></div>
+    <div class="between" style="margin:2px 2px 10px"><b>${items.length} פעולות ל-${targetQ}${mustCount?` · ${mustCount} חובה`:''}</b><span class="small muted">כל מספר מחושב במנוע</span></div>
+    ${actionList}
+    <div class="small muted" style="margin:16px 2px 6px">${IC('cpu')} <b>חוות דעת שנייה (לא משנה את הרשימה למעלה):</b> היועץ בודק את הפעולות מול חוקים · שוק · נזילות · כדאיות 50/50.</div>
     ${renderAdvisorCard(q,targetQ)}
-    <div class="small muted" style="margin:2px 2px 10px">${items.filter(i=>i.sim||i.level==='red'||i.level==='amber').length} פעולות מומלצות ל-${targetQ}, לפי 4 קטגוריות ההחלטה. כל מספר מחושב במנוע.</div>
-    ${catSections}
-
-    <!-- Layer 3: reference, collapsed -->
+    <details class="sec" style="margin-top:14px"><summary>${IC('check')} מה נבחן ולא נדרש הרבעון (${notNeeded} טפסים)</summary>
+      <div class="secbody"><div class="fchips">${allForms.map(f=>`<span class="fchip ${f.v.st}" title="${esc(f.v.why)}">${f.code} ${f.v.st==='rec'?'✔':(f.v.st==='watch'?'👁':'—')}</span>`).join('')}</div>
+      <div class="small muted" style="margin-top:8px">✔ מומלץ (מופיע בפעולות) · 👁 לבדיקה · — לא נדרש. ריחוף מציג את הסיבה.</div></div></details>
     <details class="sec"><summary>${IC('trendUp')} מפה אסטרטגית — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
       <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}</div></details>
-
-    <div class="row" style="margin-top:6px;gap:8px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button><button class="btn" onclick="go('goals')">${IC('target')} יעדים</button></div>`;
+    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button></div>`;
 };
 /* Decision-dependency layer: the canonical INTOPIA decision chain + the
    cross-decision prerequisites that are relevant to the current state, so the
@@ -1822,12 +1813,18 @@ function buildActionPlan(q,targetQ){
     const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה פוטנציאלית ${fmt(p.revenue)} · פרסום 6% = ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src})</span>`).join('<br>');
     const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:6}; });
     const selling=(f.revenue||0)>0;
+    // attach the 3 pricing options (volume/balanced/premium) so the sell action carries its own drill-down
+    const so=pcSellOptions(q); const g0=so[0]; let sellOpts=null, sellCols=null;
+    if(g0){ sellCols=['מחיר/יח׳','יח׳','הכנסה','רווח גולמי'];
+      sellOpts=g0.opts.map(o=>({ name:o.name, favors:o.favors,
+        cells:[fmt(o.price)+' '+g0.reg.cur, fmt(o.units), fmt(o.revenue), fmt(o.grossMargin)],
+        sim:{q:targetQ,regions:{[g0.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g0.cost,margin:null,advPct:o.advPct}}} })); }
     out.push({cat:'mkt',level:(fg.anyUnpriced||!selling)?'red':'amber',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
       title:`מכור ${fmt(fg.pcUnits)} מחשבים מוגמרים במלאי${fg.anyUnpriced?' — ללא מחיר, לא נמכרים!':''}`,
       form:'A1-2 (PC Prices & Advertising)',
-      detail:`<b>יש ${fmt(fg.pcUnits)} מחשבים מוכנים במלאי</b> (שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}). ${fg.anyUnpriced?'חלקם/כולם ללא מחיר מוזן — "אין מחיר = אין מכירה", והם יושבים ללא תשואה. ':''}${selling?'למרות שכבר יש מכירות, המלאי המוגמר הזה טרם נוקה — כל רבעון שהוא יושב הוא רווח אבוד. ':''}זו הפעולה בעלת התשואה הגבוהה ביותר על הציון: המרת מלאי מוגמר למזומן מזינה ישירות את מחצית העבר (רווח/ROE/ROI/ROS) ומממנת את מחצית העתיד. התוכנית ל-${targetQ}:<br>${planTxt}`,
-      dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2). ${fg.anyUnpriced?'המחיר החסר הוא מה שחוסם את המכירה כרגע.':''} ההכנסה תיגבה מדורג לפי לוח הגבייה האזורי.`,
-      sim:{q:targetQ,regions:simRegions}});
+      detail:`<b>יש ${fmt(fg.pcUnits)} מחשבים מוכנים במלאי</b> (שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}). ${fg.anyUnpriced?'חלקם/כולם ללא מחיר מוזן — "אין מחיר = אין מכירה". ':''}זו הפעולה בעלת התשואה הגבוהה ביותר: המרת מלאי מוגמר למזומן מזינה ישירות את מחצית העבר (רווח) ומממנת את מחצית העתיד.${g0?` מחיר בסיס ${fmt(g0.base)} ${g0.reg.cur} (${g0.priceSrc}). בחר אופציה:`:''}`,
+      dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2). ${fg.anyUnpriced?'המחיר החסר הוא מה שחוסם את המכירה כרגע.':''}`,
+      optionCols:sellCols, options:sellOpts, sim:{q:targetQ,regions:simRegions}});
   }
   // 0b. PRODUCTION LOOP — the core operational decision each quarter. Assemble idle chips into
   //     sellable PCs (A2-4), and keep the chip pipeline full (A2-3). Both carry option sets.
@@ -1933,6 +1930,7 @@ function buildActionPlan(q,targetQ){
       const plants=cap?Math.ceil(short/cap):null;
       const capNote=cap?`קיבולת מפעל אירופה ${fmt(cap)} ${prd}/רבעון → ${fmt(short)} ${plants>1?`דורש ${plants} מפעלים`:'נכנס במפעל אחד'}`:'';
       out.push({cat:'ops',level:(urgent||!gradeReady)?'red':'amber',conf:'data',
+      blocked: !gradeReady ? `נדרש קודם מו״פ להעלאת דרגה ל-${prodGrade} (אתה ב-${prd}${curGrade}). בצע את פעולת המו״פ (H1-1) לפני שאפשר לייצר.` : null,
       title:`${(urgent||!gradeReady)?'⚠ ':''}התחייבות ${prodGrade} — ייצר ${fmt(short)} (Deluxe) עד ${ct.deliveryQuarter}${urgent?' — עכשיו!':''}`,form:`A2-3 (${prd==='X'?'Chip':'Computer'} Production) · דגם Deluxe`,
       detail:`<b>${esc(ct.counterparty||'התחייבות')}</b>: ${fmt(ct.qty)} × <b>${prodGrade} Deluxe</b> עד ${ct.deliveryQuarter}, במלאי ${fmt(inv)} — חסרים <b>${fmt(short)}</b>. ${ct.note?ct.note+'. ':''}${!gradeReady?`<b style="color:var(--red)">⚠ הדרגה טרם הושגה: אתה ב-${prd}${curGrade}, נדרש ${prodGrade} — חובה מו״פ (H1-1) עכשיו כדי לפתוח את הייצור.</b> `:''}${capNote?capNote+'. ':''}ייצור נכנס למלאי בסוף הרבעון וזמין למסירה רבעון אחריו — לכן ${lead<=1?`<b>הייצור חייב להתבצע ב-${q}</b>`:`ייצר עד ${QUARTERS[qIndex(ct.deliveryQuarter)-1]||q}`}.`,
       dep:`מו״פ→דרגה ${prodGrade} ⟵ ייצור A2-3 דגם Deluxe ⟵ מלאי סוף רבעון ⟵ מסירה. התחייבות ללא קנס — עמידה בזמן קריטית.`,
