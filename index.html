@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.0';
+const APP_VERSION = 'v6.1';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2537,8 +2537,8 @@ window.editScenario=(id)=>{
         body=`<div class="small muted" style="margin-bottom:8px">בחר עד <b>3</b> מחקרי שוק לרכישה הרבעון · נבחרו <b>${sel.length}/3</b></div>
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${sel.length?sel.map(code=>{ const m=MR_STUDIES.find(x=>x.code===code); return `<span class="tag b" style="display:inline-flex;gap:6px;align-items:center;padding:5px 9px">${code}${m?' · '+m.short:''} <span style="cursor:pointer;font-weight:700" onclick="removeMR('${sc.id}','${q}','${act.aid}','${code}')">✕</span></span>`; }).join(''):'<span class="small muted">טרם נבחרו מחקרים</span>'}</div>
         ${sel.length<3?`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-          <select class="f" style="max-width:300px" onchange="if(this.value){addMR('${sc.id}','${q}','${act.aid}',this.value);}"><option value="">➕ הוסף מחקר מהרשימה…</option>${avail.map(m=>`<option value="${m.code}">${m.code} · ${m.label}</option>`).join('')}</select>
-          <input class="f" style="max-width:130px" id="mrcustom_${act.aid}" placeholder="מס׳ MR מהקטלוג"><button class="btn sm" onclick="addCustomMR('${sc.id}','${q}','${act.aid}')">הוסף מס׳</button>
+          <select class="f" style="max-width:340px" onchange="if(this.value){addMR('${sc.id}','${q}','${act.aid}',this.value);}"><option value="">➕ הוסף מחקר מהקטלוג…</option>${MR_GROUPS.map(g=>{ const inG=avail.filter(m=>m.grp===g); return inG.length?`<optgroup label="${g}">${inG.map(m=>`<option value="${m.code}">${m.code}${m.free?' ◦חינם':''} · ${m.label}</option>`).join('')}</optgroup>`:''; }).join('')}</select>
+          <input class="f" style="max-width:130px" id="mrcustom_${act.aid}" placeholder="מס׳ MR אחר"><button class="btn sm" onclick="addCustomMR('${sc.id}','${q}','${act.aid}')">הוסף מס׳</button>
         </div>`:'<div class="small muted">הגעת ל-3 מחקרים (המקסימום לרבעון). הסר אחד כדי להחליף.</div>'}
         <div class="small muted" style="margin-top:8px">${IC('info')} נרשם לגיליון ההזנה (H1-2) — <b>לא משפיע ישירות על תחזית הציון</b>, אך תוצאותיו מכיילות את מנוע הביקוש ברבעון הבא. הקטלוג במשחק ממוספר; לכל מחקר אחר הזן מספר מותאם.</div>`;
       } else { body=`<div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start"><div class="field" style="max-width:150px"><label class="fl">סכום (${cur})</label><input class="f" type="number" value="${act.amount||0}" oninput="setSimNote('${sc.id}','${q}','${act.aid}','amount',this.value)"></div><div class="field" style="flex:1;min-width:180px"><label class="fl">הערה / פרטים לגיליון</label><input class="f" value="${esc(act.note||'')}" oninput="setSimNote('${sc.id}','${q}','${act.aid}','note',this.value)" placeholder="פרטי הטופס"></div></div><div class="small muted" style="margin-top:6px">${IC('info')} נרשם לגיליון ההזנה — <b>לא משפיע על תחזית הציון/תזרים</b> (המנוע אינו מדמה טופס זה).</div>`;
@@ -2743,11 +2743,43 @@ window.setSimNote=(id,q,aid,k,val)=>{ const sc=S.scenarios.find(s=>s.id===id); c
 /* Market-research (H1-2) — the studies the platform parses & uses. The game catalog is numbered
    (up to 3 per quarter); other studies can be added by number via the custom field, so we never
    invent MR numbers we don't actually recognize. */
+/* Full Standard Market Research catalog from the INTOPIA Data Log / Guide (back of Form H1, §III.9E).
+   grp = optgroup; free = provided free in standard runs. Per-grade families (31–39 test-marketing,
+   51–69 cost estimates) are represented by their first item — use the custom field for a specific grade. */
 const MR_STUDIES=[
-  {code:'MR17',short:'יחידות',label:'מכירות יחידות לצרכן לפי אזור/דגם — נתח שוק'},
-  {code:'MR28',short:'מחירים',label:'מחירי צרכן של מתחרים לפי אזור/דגם — עוגן מחיר'},
-  {code:'MR74',short:'כספי',label:'מאזן ורו״ח של מתחרים — דירוג רווחים ומגמות'},
+  // מכירות ומחירים
+  {code:'MR3', short:'מכירות תעשייה', grp:'מכירות ומחירים', free:true,  label:'מכירות צרכן תעשייתיות כוללות — מוצר/דגם/אזור'},
+  {code:'MR17',short:'דרגות נמכרו', grp:'מכירות ומחירים', free:true,  label:'דרגות שנמכרו לפי חברה (יחידות קמעונאיות) — נתח שוק'},
+  {code:'MR28',short:'מחירי צרכן', grp:'מכירות ומחירים', free:true,  label:'מחירי צרכן שפורסמו לפי חברה — עוגן מחיר'},
+  {code:'MR2', short:'מכירות+נתח', grp:'מכירות ומחירים', label:'מכירות יחידות + נתחי שוק לפי חברה/מוצר/דגם/אזור'},
+  {code:'MR76',short:'יצוא', grp:'מכירות ומחירים', label:'יצוא כולל ביחידות לפי מוצר/אזור + מחיר ממוצע'},
+  {code:'MR77',short:'יבוא', grp:'מכירות ומחירים', label:'יבוא כולל ביחידות לפי מוצר/אזור + מחיר ממוצע'},
+  // מודיעין מתחרים
+  {code:'MR74',short:'דוחות כספי', grp:'מודיעין מתחרים', label:'דוחות כספיים מאוחדים של כל החברות (SF) — דירוג'},
+  {code:'MR78',short:'יחסים-שלנו', grp:'מודיעין מתחרים', label:'יחסי ביצוע/פעילות שלך + ממוצעי תעשייה + נתח שוק'},
+  {code:'MR79',short:'יחסים-כולם', grp:'מודיעין מתחרים', label:'יחסי ביצוע/פעילות כל החברות + ממוצעים'},
+  {code:'MR11',short:'מוכרים דגם', grp:'מודיעין מתחרים', label:'מספר חברות שמוכרות Standard/Deluxe לפי מוצר/אזור'},
+  {code:'MR23',short:'מלאי גבוה', grp:'מודיעין מתחרים', label:'חברות עם מלאי גבוה — לחץ צפוי להורדת מחיר'},
+  {code:'MR25',short:'משרדים', grp:'מודיעין מתחרים', label:'מספר משרדי מכירות לפי חברה/אזור'},
+  {code:'MR40',short:'מפעלים', grp:'מודיעין מתחרים', label:'מספר מפעלים שנבנו/בבנייה לפי חברה/מוצר/אזור'},
+  {code:'MR80',short:'עסקאות B2B', grp:'מודיעין מתחרים', label:'עסקאות מכירה בין-חברתיות פרטניות (מוכר/קונה/דרגה)'},
+  {code:'MR81',short:'ארגון-מכר', grp:'מודיעין מתחרים', label:'תוכנית ארגון-מכירות אופטימלי (אם זמין)'},
+  // מו״פ ודרגות
+  {code:'MR29',short:'דרגות מלאי', grp:'מו״פ ודרגות', free:true, label:'דרגות מלאי סגירה רבעון קודם — חברה/מוצר/דגם/אזור'},
+  {code:'MR30',short:'דרגות הבא', grp:'מו״פ ודרגות', label:'דרגות שיוצרו לרבעון הבא לפי חברה'},
+  {code:'MR14',short:'מו״פ תעשייה', grp:'מו״פ ודרגות', label:'הוצאת מו״פ תעשייתית כוללת (ממוצע 3 רבעונים)'},
+  {code:'MR21',short:'סיכוי פטנט', grp:'מו״פ ודרגות', label:'הערכת הסתברות פטנט (טווח)'},
+  {code:'MR24',short:'קיבולת', grp:'מו״פ ודרגות', label:'הערכת קיבולת מפעל אופטימלית (טווח)'},
+  {code:'MR31',short:'סַלֵּבִּיליוּת', grp:'מו״פ ודרגות', label:'שיווק-בדיקה: סַלֵּבִּיליוּת דרגה מול בסיס (31–39, לפי דרגה)'},
+  {code:'MR51',short:'עלות דרגה', grp:'מו״פ ודרגות', label:'הערכת עלות ייצור לפי דרגה (51–69, לפי דרגה)'},
+  // פיננסי וסביבה
+  {code:'MR1', short:'Gazette', grp:'פיננסי וסביבה', label:'עיתון CIA — אקלים עסקי, תחזיות, רכילות תעשייה'},
+  {code:'MR9', short:'שיפור-שיטות', grp:'פיננסי וסביבה', label:'הוצאת שיפור-שיטות תעשייתית (ממוצע 3 רבעונים)'},
+  {code:'MR20',short:'סף דיבידנד', grp:'פיננסי וסביבה', label:'סף דיבידנד מינימלי מצופה מבעלי מניות'},
+  {code:'MR26',short:'ROI משרד', grp:'פיננסי וסביבה', label:'% עלייה מקסימלי במכירות ממשרד מכירות נוסף'},
+  {code:'MR27',short:'רו״ח כ-%', grp:'פיננסי וסביבה', label:'סעיפי דו״ח רו״ח שלך כאחוז מהמכירות'},
 ];
+const MR_GROUPS=['מכירות ומחירים','מודיעין מתחרים','מו״פ ודרגות','פיננסי וסביבה'];
 function mrListOf(act){ if(Array.isArray(act.mrList)) return act.mrList.slice(0,3);
   const codes=[], t=act.note||''; ['MR17','MR28','MR74'].forEach(c=>{ if(t.includes(c))codes.push(c); });
   if(t.includes('מחירי מתחרים')&&!codes.includes('MR28')) codes.push('MR28');
