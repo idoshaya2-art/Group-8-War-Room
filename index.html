@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.0';
+const APP_VERSION = 'v7.1';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -414,6 +414,17 @@ const DATALOG = {
   },
 };
 // Freight cost (LC of shipper) to move `units` of product from→to; unit cost is cut above the breakpoint.
+// Engine helper (used by the export optimizer to price shipping goods to a market with no local plant).
+function freightCostLC(from, to, product, units, mode){
+  mode=mode||'surface';
+  const destMap={us:'us',europe:'eu',brazil:'br'};
+  const col=(destMap[to]||to)+(product==='X'?'X':'Y');
+  const tbl=DATALOG.freight[mode]||{}; const rate=(tbl[from]&&tbl[from][col])||0;
+  if(!rate||!units) return 0;
+  const bp=((mode==='surface'?DATALOG.freight.breakSurface:DATALOG.freight.breakAir)[from]||{})[col]||Infinity;
+  const disc=DATALOG.freight.discountAboveBreak[mode]||1;
+  return units<=bp ? Math.round(rate*units) : Math.round(rate*bp + rate*disc*(units-bp));
+}
 /* ---------- Persistence ---------- */
 const LS_KEY = 'intopia_warroom_v1';
 let S = null;
@@ -2601,7 +2612,7 @@ window.editScenario=(id)=>{
       <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
         <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
-        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> כדי לזהות מפעלים לפי אזור במדויק':''}`:''}.</div></div>`:''}
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
         <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
@@ -2933,19 +2944,36 @@ window.magicOptimize=(id)=>{
   let cap=0; qs.forEach(q=>REGIONS.forEach(r=>{ cap=Math.max(cap,sc.levers[q].regions[r.id].production||0); }));
   if(!cap) cap=simCap(op)||prodRegions.reduce((a,r)=>a+regionCap(r),0)||8000; // Data Log capacity of ACTIVE regions
   const rd=op.rd||0, before=scoreProxy(sc.levers).value;
+  const markets=REGIONS.filter(r=>r.id!=='hq');
+  const invY=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0); // finished PCs available to ship+sell
+  const homePlant=prodRegions[0]; // ship exports from the first plant region (estimate)
+  let exported=false;
   const prodFracs=[1.0,0.9,0.8,0.65]; let best=null;
   prodFracs.forEach(pf=>MARGIN_OPTS.forEach(mg=>{
-    const production=Math.round(cap*pf), price=cost*mg, levers={};
+    const price=cost*mg, levers={};
+    // 1) PRODUCTION only at plants, up to capacity × intensity → pooled supply (+ existing finished PCs)
+    const plantProd={}; let supply=0;
+    prodRegions.forEach(r=>{ const pp=Math.round(regionCap(r)*pf); plantProd[r.id]=pp; supply+=pp; });
+    const sellable=supply+invY;
+    // 2) SALES allocated across ALL markets by demand, capped by each market's potential and by total supply
+    let totalDemand=0; const demandBy={}; markets.forEach(r=>{ demandBy[r.id]=marketCapUnits('Y',r.id); totalDemand+=demandBy[r.id]; });
+    let remain=sellable; const sellBy={};
+    markets.forEach(r=>{ const want=Math.round(sellable*(demandBy[r.id]/(totalDemand||1))); const s=Math.max(0,Math.min(want,demandBy[r.id],remain)); sellBy[r.id]=s; remain-=s; });
+    // 3) FREIGHT for units sold in a market with no local plant, folded into the shipping plant's blended unit cost
+    let totalFreight=0; markets.forEach(r=>{ const isPlant=prodRegions.some(x=>x.id===r.id);
+      if(!isPlant && sellBy[r.id]>0 && homePlant){ totalFreight+=freightCostLC(homePlant.id,r.id,'Y',sellBy[r.id],'surface'); exported=true; } });
     qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{};
-      const isActive=r.id!=='hq' && prodRegions.some(x=>x.id===r.id);
-      const prod=isActive?Math.min(Math.round(production/prodRegions.length), regionCap(r)):0; // 0 where no plants
-      const _prd=cur.product||'Y', _sold=Math.min(prod, marketCapUnits(_prd,r.id)); // cap sales by market potential
-      levers[q].regions[r.id]={production:prod,unitCost:cost,sales:_sold*price,advertising:Math.round(_sold*price*0.06),invest:0,transferIn:0,product:_prd,model:cur.model||'Standard',margin:mg,advPct:6}; }); });
+      const prod=plantProd[r.id]||0, sold=sellBy[r.id]||0;
+      const uc=(homePlant && r.id===homePlant.id && prod>0) ? Math.round(cost+totalFreight/prod) : cost; // book freight once, in the home plant
+      const isExport=sold>0 && !prodRegions.some(x=>x.id===r.id);
+      levers[q].regions[r.id]={production:prod,unitCost:prod>0?uc:0,sales:sold*price,qtySold:sold,price,
+        advertising:Math.round(sold*price*0.06),invest:0,transferIn:0,offices:isExport?2:(cur.offices||0),
+        product:'Y',model:cur.model||'Standard',margin:mg,advPct:6}; }); });
     const spv=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
     const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,mg};
     if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
   }));
-  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg,regions:prodRegions.map(r=>r.name),activeSrc}; save();
+  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg,regions:prodRegions.map(r=>r.name),activeSrc,exported,homePlant:homePlant?homePlant.name:''}; save();
   renderScenarios(); editScenario(id);
   toast('קסם: ציון '+before.toFixed(0)+' → '+best.score.toFixed(0)+(best.feasible?'':' (שובר רצפה)'), best.feasible?'g':'a');
 };
@@ -3103,17 +3131,21 @@ function scenarioValidation(sc,targetQ){
   if((lev.rd||0)<0) noNeg=false;
   return {noNeg,hasCost};
 }
-// Action-plan Wave 1 · guard #1 — phantom sale: a planned sale (sales>0) needs product to sell,
-// i.e. finished inventory of that product in the region + production planned this quarter. Zero backing = phantom revenue.
+// Phantom sale (guard #1) — supply-aware: goods can ship between regions, so a market can be sold
+// without a local plant. The honest constraint is TOTAL: units sold across all markets must not exceed
+// total finished inventory + planned production. Selling more than you can make/hold = phantom revenue.
 function phantomSales(sc,targetQ){
   const lev=sc&&sc.levers[targetQ]; if(!lev) return [];
-  const op=S.quarters[S.activeQuarter].operational; const out=[];
-  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{}; if((rl.sales||0)<=0) return;
-    const prod=rl.product||'Y';
-    const invUnits=(op.inventory||[]).filter(i=>i.product===prod && (i.region||'europe')===r.id).reduce((a,i)=>a+(i.qty||0),0);
-    if(invUnits+(rl.production||0)<=0) out.push({region:r.id,name:(REGIONS.find(x=>x.id===r.id)||{}).name,sales:rl.sales});
+  const op=S.quarters[S.activeQuarter].operational;
+  let prodUnits=0, sellUnits=0;
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{};
+    prodUnits+=(rl.production||0);
+    const pEff=rl.price>0?rl.price:(rl.margin&&rl.unitCost>0?rl.unitCost*rl.margin:0);
+    if((rl.sales||0)>0){ const su=rl.qtySold!=null?rl.qtySold:(pEff>0?Math.round((rl.sales||0)/pEff):0); sellUnits+=su; }
   });
-  return out;
+  const invY=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
+  const supply=prodUnits+invY;
+  return (sellUnits>supply && sellUnits>0) ? [{sold:sellUnits,supply,gap:sellUnits-supply}] : [];
 }
 // Wave 1 · guard #2 — phantom transfer: transfers into regions (A3-1) are funded by the Home Office.
 // Flag transferring more than HQ actually holds — money that appears with no real source debit.
@@ -3130,7 +3162,7 @@ function renderChecklist(box,targetQ,sc){
   const phantoms=phantomSales(sc,targetQ), ptrans=phantomTransfers(sc,targetQ);
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
-    {t:`מכירה מגובה במלאי/ייצור${phantoms.length?` · ${phantoms.map(p=>p.name).join(', ')} מוכרים בלי סחורה`:''}`,ok:phantoms.length===0},
+    {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
     {t:`העברות מגובות במקור (מטה)${ptrans?` · מעביר ${fmt(ptrans.totalIn)} אך במטה ${fmt(ptrans.hqCash)}`:''}`,ok:!ptrans},
     {t:`דרגות תואמות: X${cg.gx}→Y${cg.gy}${cg.pcPlanned?(cg.compatible?` דורש ${cg.ratio} שבבים/מחשב`:' — לא תואם!'):''}`,ok:cg.compatible},
     {t:`מחשבים ≤ שבבים זמינים${cg.pcPlanned?` · דרושים ${fmt(cg.chipsNeeded)} מול ${fmt(cg.chipInv)} במלאי`:''}`,ok:cg.compatible&&cg.chipsNeeded<=cg.chipInv},
@@ -3142,7 +3174,7 @@ function renderChecklist(box,targetQ,sc){
     {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
-    ${phantoms.length?`<div class="tag a" style="margin-top:10px">${IC('warn')} מכירת-פנטום: ${phantoms.map(p=>`${p.name} (הכנסה ${fmt(p.sales)})`).join(' · ')} — מתוכננת מכירה בלי מלאי מוגמר או ייצור מתוכנן באזור. "אין סחורה = אין מכירה" — ההכנסה הזו לא תתממש.</div>`:''}
+    ${phantoms.length?`<div class="tag a" style="margin-top:10px">${IC('warn')} מכירת-יתר: מתוכננת מכירה של <b>${fmt(phantoms[0].sold)}</b> יח׳ סה״כ אך ההיצע (מלאי מוגמר + ייצור) הוא <b>${fmt(phantoms[0].supply)}</b> — פער ${fmt(phantoms[0].gap)}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת.</div>`:''}
     ${ptrans?`<div class="tag a" style="margin-top:8px">${IC('warn')} העברת-פנטום: מעביר לאזורים ${fmt(ptrans.totalIn)} אך במטה יש רק ${fmt(ptrans.hqCash)} (חוסר ${fmt(ptrans.gap)}). העברה (A3-1) ממומנת מהמטה — אי-אפשר להעביר יותר ממה שיש בו.</div>`:''}
     ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
       (cg.gap>0?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם. <b>ההגשה חסומה.</b></div>`:'')}
