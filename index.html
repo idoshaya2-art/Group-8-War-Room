@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.7';
+const APP_VERSION = 'v6.8';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1295,29 +1295,53 @@ function renderAlerts(box,alerts){
 }
 function drawTrend(cv){
   if(!cv)return;
-  const data=QUARTERS.map(q=> S.quarters[q].entered?unifiedCashOf(q):null);
+  const ent=QUARTERS.filter(q=>S.quarters[q].entered);
+  const actual=QUARTERS.map(q=> S.quarters[q].entered?unifiedCashOf(q):null);
   const floors=QUARTERS.map(q=>S.config.goals.floors[q]||0);
-  lineChart(cv,{labels:QUARTERS,series:[
-    {name:'מזומן',data,color:'#4f8cff',fill:true},
-    {name:'רצפה',data:floors,color:'#ff5d6c',dash:true},
-  ]});
+  const series=[{name:'מזומן בפועל',data:actual,color:'#4f8cff',fill:true}];
+  // Projection for the remaining quarters, bridged from the last actual so the line spans Q1→Q9.
+  const last=ent[ent.length-1];
+  if(last){
+    const proj=projectCashflow(last,null); const pMap={}; proj.forEach(p=>pMap[p.q]=p.unified);
+    const projData=QUARTERS.map(q=> q===last?unifiedCashOf(last):(pMap[q]!=null?pMap[q]:null));
+    if(proj.length) series.push({name:'תחזית "כפי שהוא"',data:projData,color:'#8b7fd4',dash:true});
+  }
+  series.push({name:'רצפת מזומן',data:floors,color:'#ff5d6c',dash:true});
+  lineChart(cv,{labels:QUARTERS,series});
+}
+// Round axis bounds/step to human numbers (…, 2M, 4M, 6M…) instead of raw fractions of the range.
+function niceTicks(min,max,count){
+  if(min===max){ max=min+1; }
+  const range=max-min, raw=range/(count||4);
+  const mag=Math.pow(10,Math.floor(Math.log10(raw)||0));
+  const norm=raw/mag; const s=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag;
+  const nMin=Math.floor(min/s)*s, nMax=Math.ceil(max/s)*s, ticks=[];
+  for(let v=nMin;v<=nMax+s*0.5;v+=s) ticks.push(v);
+  return {min:nMin,max:nMax,ticks};
 }
 function lineChart(cv,{labels,series}){
   const dpr=window.devicePixelRatio||1;
   const W=cv.clientWidth||(cv.parentElement.clientWidth-36), H=cv.height;
   cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
-  const padL=48,padR=12,padT=14,padB=26;
+  const padL=52,padR=14,padT=30,padB=26; // padT leaves room for the legend
   const all=series.flatMap(s=>s.data).filter(v=>v!==null&&!isNaN(v));
-  if(!all.length){ ctx.fillStyle='#6b78a0';ctx.font='13px Assistant';ctx.fillText('אין נתונים',W/2-30,H/2);return; }
-  let min=Math.min(...all,0), max=Math.max(...all,0); if(min===max)max=min+1;
-  const pad=(max-min)*0.12; max+=pad; min-=pad;
+  if(!all.length){ ctx.fillStyle='#6b78a0';ctx.font='13px Assistant';ctx.textAlign='center';ctx.fillText('אין נתונים',W/2,H/2);return; }
+  const nt=niceTicks(Math.min(...all,0), Math.max(...all,0), 4);
+  const min=nt.min, max=nt.max||min+1;
   const x=i=> padL+(W-padL-padR)*(i/(labels.length-1||1));
   const y=v=> padT+(H-padT-padB)*(1-(v-min)/(max-min));
   ctx.strokeStyle='#26315a';ctx.lineWidth=1;ctx.fillStyle='#6b78a0';ctx.font='10px Assistant';ctx.textAlign='right';
-  for(let g=0;g<=4;g++){ const v=min+(max-min)*g/4, yy=y(v);
-    ctx.beginPath();ctx.moveTo(padL,yy);ctx.lineTo(W-padR,yy);ctx.stroke(); ctx.fillText(shortNum(v),padL-6,yy+3); }
-  ctx.textAlign='center'; labels.forEach((l,i)=>ctx.fillText(l,x(i),H-8));
+  nt.ticks.forEach(v=>{ const yy=y(v);
+    ctx.beginPath();ctx.moveTo(padL,yy);ctx.lineTo(W-padR,yy);ctx.stroke(); ctx.fillText(shortNum(v),padL-6,yy+3); });
+  ctx.textAlign='center'; ctx.fillStyle='#6b78a0'; labels.forEach((l,i)=>ctx.fillText(l,x(i),H-8));
+  // legend (top, RTL right→left)
+  ctx.font='11px Assistant'; ctx.textAlign='right'; let lx=W-padR;
+  series.forEach(s=>{ const lbl=s.name||''; const tw=ctx.measureText(lbl).width;
+    ctx.fillStyle='#9aa5bd'; ctx.fillText(lbl,lx,14);
+    ctx.strokeStyle=s.color;ctx.lineWidth=2.4;ctx.setLineDash(s.dash?[4,3]:[]);
+    ctx.beginPath();ctx.moveTo(lx-tw-6,11);ctx.lineTo(lx-tw-20,11);ctx.stroke();ctx.setLineDash([]);
+    lx-=tw+30; });
   series.forEach(s=>{
     ctx.strokeStyle=s.color;ctx.lineWidth=2.4; ctx.setLineDash(s.dash?[5,4]:[]);
     ctx.beginPath();let started=false;
