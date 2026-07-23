@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.1';
+const APP_VERSION = 'v7.2';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1332,8 +1332,11 @@ function niceTicks(min,max,count){
 }
 function lineChart(cv,{labels,series}){
   const dpr=window.devicePixelRatio||1;
-  const W=cv.clientWidth||(cv.parentElement.clientWidth-36), H=cv.height;
-  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px';
+  const H=cv.height||210; // attribute height, captured before we overwrite the backing store
+  cv.style.display='block'; cv.style.width='100%'; // fill the card; the canvas default is only 300px
+  const rectW=Math.round(cv.getBoundingClientRect().width);
+  const W=Math.max(280, rectW || (cv.parentElement?cv.parentElement.clientWidth-32:640));
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
   const padL=52,padR=14,padT=30,padB=26; // padT leaves room for the legend
   const all=series.flatMap(s=>s.data).filter(v=>v!==null&&!isNaN(v));
