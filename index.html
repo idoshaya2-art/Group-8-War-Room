@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.2';
+const APP_VERSION = 'v7.3';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2125,7 +2125,7 @@ ROLE_PANEL.intel=(base)=>{ const mi=S.quarters[base].marketIntel||{}; const comp
 PAGE_RENDER.ingest = (c)=>{
   const q=S.activeQuarter;
   c.innerHTML=`
-    <div class="grid" style="grid-template-columns:1fr;gap:18px">
+    <div class="grid" style="grid-template-columns:minmax(0,1fr);gap:18px">
       <div class="card pad">
         <div class="between" style="margin-bottom:12px">
           <div><h3>קליטת דוח תוצאות — ${q}</h3><div class="small muted">גרור קובץ XLSX/XLS, או הזן ידנית. המערכת מזהה גיליונות ידועים ומאפשרת אימות.</div></div>
@@ -2339,7 +2339,7 @@ function renderVerifyForm(box){
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
   const nInput=(path,val,step=1)=>`<input class="f" type="number" step="${step}" value="${val??''}" oninput="setField('${path}',this.value)">`;
   box.innerHTML=`
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))">
       <div>
         <h4 style="margin-bottom:10px;color:var(--accent2)">${IC('wallet')} מזומן לפי אזור</h4>
         ${REGIONS.map(r=>`<div class="field"><label class="fl">${r.name} <span class="num">(${r.cur})</span></label>${nInput('financial.cash.'+r.id,f.cash[r.id])}</div>`).join('')}
@@ -2395,7 +2395,7 @@ function renderVerifyForm(box){
 function renderInventoryTable(){
   const op=S.quarters[S.activeQuarter].operational, box=$('#invTable');
   if(!op.inventory.length){ box.innerHTML=`<div class="small muted" style="padding:10px 0">אין פריטי מלאי. הוסף פריט — מלאי ללא מחיר יפעיל נורה אדומה.</div>`; return; }
-  box.innerHTML=`<table class="tbl"><thead><tr><th>מוצר</th><th>דרגה</th><th>כמות</th><th>עלות יח׳</th><th>מחיר יח׳</th><th></th></tr></thead><tbody>${
+  box.innerHTML=`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>מוצר</th><th>דרגה</th><th>כמות</th><th>עלות יח׳</th><th>מחיר יח׳</th><th></th></tr></thead><tbody>${
     op.inventory.map((it,i)=>`<tr>
       <td><input class="f" value="${esc(it.product)}" oninput="setInv(${i},'product',this.value)"></td>
       <td><input class="f" style="width:70px" value="${esc(it.grade)}" oninput="setInv(${i},'grade',this.value)"></td>
@@ -2403,7 +2403,7 @@ function renderInventoryTable(){
       <td><input class="f" type="number" style="width:100px" value="${it.cost??''}" oninput="setInv(${i},'cost',this.value)"></td>
       <td><input class="f" type="number" style="width:100px;${!(it.price>0)&&(it.qty>0)?'border-color:var(--red)':''}" value="${it.price??''}" oninput="setInv(${i},'price',this.value)"></td>
       <td><button class="x" onclick="delInv(${i})">✕</button></td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`).join('')}</tbody></table></div>`;
 }
 window.setField=(path,val)=>{ const num=parseFloat(val); const v=isNaN(num)?0:num;
   const parts=path.split('.'); let o=S.quarters[S.activeQuarter]; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=v; save(); };
@@ -2417,10 +2417,12 @@ window.confirmQuarter=()=>{ S.quarters[S.activeQuarter].entered=true; updateLear
 /* ----- INTEL (F5 basic) ----- */
 const OUR_CO=8; // Company 8 = us
 PAGE_RENDER.intel = (c)=>{
+  // defensive: a restored/older backup may hold a partial marketIntel (competitors without sources/sales)
+  const _mi=x=>{ const m=(x&&x.marketIntel)||{}; return {competitors:m.competitors||{},sales:m.sales||[],sources:m.sources||[],generic:m.generic||[],compPrices:m.compPrices||[]}; };
   const src=S.cumulative?latestEntered():S.activeQuarter;
-  const q = (src && S.quarters[src] && Object.keys(S.quarters[src].marketIntel.competitors).length) ? src
-          : QUARTERS.slice().reverse().find(x=>S.quarters[x].entered && Object.keys(S.quarters[x].marketIntel.competitors).length) || S.activeQuarter;
-  const mi=S.quarters[q].marketIntel;
+  const q = (src && S.quarters[src] && Object.keys(_mi(S.quarters[src]).competitors).length) ? src
+          : QUARTERS.slice().reverse().find(x=>S.quarters[x].entered && Object.keys(_mi(S.quarters[x]).competitors).length) || S.activeQuarter;
+  const mi=_mi(S.quarters[q]);
   const comps=Object.values(mi.competitors).sort((a,b)=>a.num-b.num);
   const fmtK=(v)=> v==null?'—':fmt(v); // MR74 values are already in 000s
   c.innerHTML=`
