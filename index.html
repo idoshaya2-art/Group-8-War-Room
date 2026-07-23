@@ -2496,22 +2496,48 @@ window.editScenario=(id)=>{
     </div>`;
   window._simShowQ=(q)=>{
     _simEditQ=q; const lv=sc.levers[q];
+    const regionCard=(r)=>{ const rl=lv.regions[r.id]||{}; const prod=rl.product||'Y';
+      const pa=priceAnchors(r.id,prod); const cap=((DATALOG.capacity[prod]||{})[r.id])||0; const sellCap=marketCapUnits(prod,r.id);
+      const price=Math.round(rl.price|| (rl.qtySold&&rl.sales?rl.sales/rl.qtySold:pa.base) ||0);
+      const qty=rl.qtySold!=null?rl.qtySold:(rl.production||0); const salesDisp=rl.sales||Math.round(price*qty);
+      const capQuick=cap?[[Math.round(cap*0.5),'50% ('+fmt(Math.round(cap*0.5))+')'],[cap,'קיבולת מלאה ('+fmt(cap)+')'],[Math.round(cap*1.5),'מפעל וחצי ('+fmt(Math.round(cap*1.5))+')']]:[];
+      return `<div class="card pad" style="margin-bottom:14px">
+        <div class="between" style="margin-bottom:10px"><b>${r.name} · ${r.cur}</b><span class="small muted">${prod==='X'?'X · שבב':'Y · מחשב'} · ${rl.model||'Standard'}</span></div>
+        <div style="border-inline-start:3px solid var(--accent);padding-inline-start:10px;margin-bottom:12px">
+          <div class="small" style="font-weight:700;margin-bottom:6px">${prod==='X'?'A2-3':'A2-4'} · ייצור ${prod==='X'?'שבבים':'מחשבים'}</div>
+          <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start">
+            <div class="field" style="max-width:110px"><label class="fl">מוצר</label><select class="f" onchange="setLeverStr('${sc.id}','${q}','${r.id}','product',this.value);refreshSimEditor()"><option value="Y" ${prod==='Y'?'selected':''}>Y · מחשב</option><option value="X" ${prod==='X'?'selected':''}>X · שבב</option></select></div>
+            <div class="field" style="max-width:120px"><label class="fl">דגם</label><select class="f" onchange="setLeverStr('${sc.id}','${q}','${r.id}','model',this.value);refreshSimEditor()"><option value="Standard" ${(rl.model||'Standard')==='Standard'?'selected':''}>Standard</option><option value="Deluxe" ${rl.model==='Deluxe'?'selected':''}>Deluxe</option></select></div>
+            <div class="field" style="max-width:110px"><label class="fl">כמות ייצור</label><input class="f" id="f_${r.id}_production" type="number" value="${rl.production||0}" oninput="setLever('${sc.id}','${q}','production','${r.id}',this.value)"><div class="small muted">קיבולת/מפעל ${fmt(cap)}</div></div>
+            ${capQuick.length?`<div class="field" style="max-width:150px"><label class="fl">בחירה מהירה</label><select class="f" onchange="if(this.value){setLever('${sc.id}','${q}','production','${r.id}',this.value);document.getElementById('f_${r.id}_production').value=this.value;}"><option value="">לפי קיבולת…</option>${capQuick.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('')}</select></div>`:''}
+            <div class="field" style="max-width:120px"><label class="fl">עלות/יח׳ (${r.cur})</label><input class="f" id="f_${r.id}_unitCost" type="number" value="${rl.unitCost||0}" oninput="setLever('${sc.id}','${q}','unitCost','${r.id}',this.value)"><div class="small muted">≈${prod==='X'?'11–20%':'20–45%'} ממחיר</div></div>
+          </div>
+        </div>
+        <div style="border-inline-start:3px solid var(--green);padding-inline-start:10px;margin-bottom:12px">
+          <div class="small" style="font-weight:700;margin-bottom:6px">${prod==='X'?'A1-1':'A1-2'} · תמחור ופרסום</div>
+          <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start">
+            <div class="field" style="max-width:150px"><label class="fl">מחיר/יח׳ (${r.cur})</label><input class="f" id="f_${r.id}_price" type="number" value="${price}" oninput="setLeverPrice('${sc.id}','${q}','${r.id}',this.value)">${pa.opts.length?`<select class="f" style="margin-top:4px;font-size:11px" onchange="if(this.value)setLeverPrice('${sc.id}','${q}','${r.id}',this.value)"><option value="">עוגני שוק…</option>${pa.opts.map(o=>`<option value="${o.v}">${o.t} · ${fmt(o.v)}</option>`).join('')}</select>`:''}<div class="small muted" style="margin-top:2px">${pa.src}</div></div>
+            <div class="field" style="max-width:120px"><label class="fl">כמות למכירה</label><input class="f" id="f_${r.id}_qtySold" type="number" value="${qty}" oninput="setLeverQty('${sc.id}','${q}','${r.id}',this.value)"><div class="small muted">תקרת שוק ${fmt(sellCap)}</div></div>
+            <div class="field" style="max-width:150px"><label class="fl">= הכנסה מתוכננת</label><div class="f" style="background:var(--bg2);font-weight:700"><span id="sales_${r.id}">${fmt(salesDisp)}</span> ${r.cur}</div><div class="small muted" style="margin-top:2px">מחיר × כמות</div></div>
+            <div class="field" style="max-width:130px"><label class="fl">פרסום (${r.cur})</label><input class="f" id="f_${r.id}_advertising" type="number" value="${rl.advertising||0}" oninput="setLever('${sc.id}','${q}','advertising','${r.id}',this.value)"><select class="f" style="margin-top:4px;font-size:11px" onchange="setLeverAdv('${sc.id}','${q}','${r.id}',this.value)"><option value="">% מהכנסה…</option>${ADV_OPTS.map(pp=>`<option value="${pp}" ${rl.advPct===pp?'selected':''}>${pp}%</option>`).join('')}</select></div>
+          </div>
+        </div>
+        <div style="border-inline-start:3px solid var(--amber);padding-inline-start:10px">
+          <div class="small" style="font-weight:700;margin-bottom:6px">A3-1 / A3-2 · מזומן באזור</div>
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <div class="field" style="max-width:160px"><label class="fl">העברה מהמטה (A3-1)</label><input class="f" type="number" value="${rl.transferIn||0}" oninput="setLever('${sc.id}','${q}','transferIn','${r.id}',this.value)"></div>
+            <div class="field" style="max-width:160px"><label class="fl">השקעה/הלוואה (A3-2)</label><input class="f" type="number" value="${rl.invest||0}" oninput="setLever('${sc.id}','${q}','invest','${r.id}',this.value)"></div>
+          </div>
+        </div>
+      </div>`; };
     $('#leverGrid').innerHTML=`
-      <div class="field" style="max-width:240px"><label class="fl">מו״פ כולל — H1-1 (R&D, בליכטנשטיין)</label><input class="f" type="number" value="${lv.rd||0}" oninput="setLever('${id}','${q}','rd',null,this.value)"><div class="small muted" style="margin-top:4px">מנוע הפוטנציאל העתידי — קובע דרגות/דגמים למכירה ברבעונים הבאים.</div></div>
-      <div style="overflow-x:auto"><table class="tbl wide"><thead><tr><th>אזור</th><th>מוצר</th><th>דגם</th><th>ייצור (A2-3/A2-4)</th><th>עלות יח׳</th><th>מכירות + מרווח (A1-1/A1-2)</th><th>פרסום</th><th>השקעה (A3-2)</th><th>העברה נכנסת (A3-1)</th></tr></thead>
-      <tbody>${REGIONS.map((r,i)=>{ const rl=lv.regions[r.id]||{}; const isHQ=r.id==='hq'; return `<tr${isHQ?' style="opacity:.6"':''}>
-        <td><b>${r.name}</b><br><span class="small muted num">${r.cur}${isHQ?' · מטה (H-forms)':' · '+(rl.product==='X'?'A2-3/A1-1':'A2-4/A1-2')}</span></td>
-        <td><select class="f" style="width:82px" onchange="setLeverStr('${id}','${q}','${r.id}','product',this.value)"><option value="X" ${rl.product==='X'?'selected':''}>X·Chip</option><option value="Y" ${rl.product==='Y'||!rl.product?'selected':''}>Y·PC</option></select></td>
-        <td><select class="f" style="width:88px" onchange="setLeverStr('${id}','${q}','${r.id}','model',this.value)"><option value="Standard" ${(rl.model||'Standard')==='Standard'?'selected':''}>Standard</option><option value="Deluxe" ${rl.model==='Deluxe'?'selected':''}>Deluxe</option></select></td>
-        <td><input class="f" id="f_${r.id}_production" type="number" style="width:88px" value="${rl.production||0}" oninput="setLever('${id}','${q}','production','${r.id}',this.value)"></td>
-        <td><input class="f" id="f_${r.id}_unitCost" type="number" style="width:80px" value="${rl.unitCost||0}" oninput="setLever('${id}','${q}','unitCost','${r.id}',this.value)"></td>
-        <td><input class="f" id="f_${r.id}_sales" type="number" style="width:104px" value="${rl.sales||0}" oninput="setLever('${id}','${q}','sales','${r.id}',this.value)"><select class="f" style="width:104px;margin-top:4px;font-size:11px" onchange="setLeverMargin('${id}','${q}','${r.id}',this.value)"><option value="">מרווח מהיר…</option>${MARGIN_OPTS.map(mm=>`<option value="${mm}" ${rl.margin===mm?'selected':''}>×${mm}${rl.unitCost>0?' → '+fmt(Math.round(rl.production*rl.unitCost*mm)):''}</option>`).join('')}</select></td>
-        <td><input class="f" id="f_${r.id}_advertising" type="number" style="width:88px" value="${rl.advertising||0}" oninput="setLever('${id}','${q}','advertising','${r.id}',this.value)"><select class="f" style="width:88px;margin-top:4px;font-size:11px" onchange="setLeverAdv('${id}','${q}','${r.id}',this.value)"><option value="">% מהכנסה…</option>${ADV_OPTS.map(pp=>`<option value="${pp}" ${rl.advPct===pp?'selected':''}>${pp}%</option>`).join('')}</select></td>
-        <td><input class="f" id="f_${r.id}_invest" type="number" style="width:84px" value="${rl.invest||0}" oninput="setLever('${id}','${q}','invest','${r.id}',this.value)"></td>
-        <td><input class="f" id="f_${r.id}_transferIn" type="number" style="width:96px" value="${rl.transferIn||0}" oninput="setLever('${id}','${q}','transferIn','${r.id}',this.value)"></td>
-      </tr>`; }).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:10px">מכירות = הכנסה מתוכננת ברבעון (נגבית מדורג לפי לוח הגבייה האזורי). "מרווח מהיר" ממלא מכירות = ייצור×עלות×מרווח; "% מהכנסה" ממלא פרסום. המנוע מחשב השפעה בזמן אמת למטה.</div>
-      <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--muted)">${IC('landmark')} הרחבת תשתית — מפעלים (A2-1) ומשרדי מכירות (A1-3)</summary>
+      <div class="small muted" style="margin-bottom:12px">${IC('info')} כל כרטיס = טופס מהמשחק (הקוד מימין). בחר מהרשימות; המנוע מחשב הכנסה, ציון ותזרים בזמן אמת בשלב 3 למטה.</div>
+      <div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--purple)">
+        <div class="between" style="margin-bottom:8px"><b class="small">H1-1 · מחקר ופיתוח (מטה — ליכטנשטיין)</b><span class="tag b">רבעון ${q}</span></div>
+        <div class="field" style="max-width:240px"><label class="fl">השקעת מו״פ כוללת X+Y (SF)</label><input class="f" type="number" value="${lv.rd||0}" oninput="setLever('${sc.id}','${q}','rd',null,this.value)"><div class="small muted" style="margin-top:4px">מינימום חוקי: X 40,000 · Y 70,000. מבשיל רבעון קדימה → דרגה/דגם.</div></div>
+      </div>
+      ${REGIONS.filter(r=>r.id!=='hq').map(regionCard).join('')}
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--muted)">${IC('landmark')} הרחבת תשתית — מפעלים (A2-1) ומשרדי מכירות (A1-3)</summary>
         <div style="overflow-x:auto;margin-top:10px"><table class="tbl wide"><thead><tr><th>אזור</th><th>מפעלים חדשים (A2-1)</th><th>יעד משרדי מכירות (A1-3)</th><th>עלות משוערת ברבעון</th></tr></thead>
         <tbody>${REGIONS.filter(r=>r.id!=='hq').map(r=>{ const rl=lv.regions[r.id]||{}; const cost=(rl.newFac||0)*(S.config.params.factoryCost||0)+(rl.offices||0)*(S.config.params.officeCost||0);
           return `<tr><td><b>${r.name}</b></td>
@@ -2605,6 +2631,27 @@ function marketCapUnits(product, regionId){
   const cap=(DATALOG.capacity[product]&&DATALOG.capacity[product][regionId])||0;
   return product==='X' ? Math.round(cap*0.25*1.2) : Math.round(cap*1.2);
 }
+// Price options for the A1-1/A1-2 form dropdown: anchored on observed market (MR28) or Data Log opening price.
+function priceAnchors(rid, product){
+  const dl=((DATALOG.initialConsumerPrice[product]||{})[rid])||0;
+  const mr=mrMarketPrice(rid, product);
+  const base=mr?Math.round(mr.median):dl;
+  const src=mr?`שוק MR (${mr.n} מתחרים ${fmt(mr.min)}–${fmt(mr.max)})`:(dl?'עוגן פתיחה (Data Log)':'ללא עוגן — קלוט MR');
+  const opts=base?[{v:Math.round(base*0.85),t:'נפח'},{v:base,t:'עוגן'},{v:Math.round(base*1.15),t:'פרמיום'}]:[];
+  return {base,src,opts};
+}
+// Game-language pricing: user enters price/unit × units → engine's sales(revenue). Keeps scoreProxy contract intact.
+window.setLeverPrice=(id,q,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id); if(!sc)return; const rl=sc.levers[q].regions[region];
+  rl.price=parseFloat(val)||0; if(rl.qtySold==null) rl.qtySold=rl.production||0;
+  rl.sales=Math.round(rl.price*(rl.qtySold||0)); rl.margin=null;
+  if(rl.advPct!=null){ rl.advertising=Math.round(rl.sales*rl.advPct/100); const ae=document.getElementById('f_'+region+'_advertising'); if(ae&&document.activeElement!==ae)ae.value=rl.advertising; }
+  _patchInput(region,'price',rl.price); const sd=document.getElementById('sales_'+region); if(sd)sd.textContent=fmt(rl.sales);
+  save(true); renderImpactBoard(sc); };
+window.setLeverQty=(id,q,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id); if(!sc)return; const rl=sc.levers[q].regions[region];
+  rl.qtySold=parseFloat(val)||0; rl.sales=Math.round((rl.price||0)*rl.qtySold); rl.margin=null;
+  if(rl.advPct!=null){ rl.advertising=Math.round(rl.sales*rl.advPct/100); const ae=document.getElementById('f_'+region+'_advertising'); if(ae&&document.activeElement!==ae)ae.value=rl.advertising; }
+  _patchInput(region,'qtySold',rl.qtySold); const sd=document.getElementById('sales_'+region); if(sd)sd.textContent=fmt(rl.sales);
+  save(true); renderImpactBoard(sc); };
 window.magicOptimize=(id)=>{
   const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
   const base=S.activeQuarter, op=S.quarters[base].operational, qs=Object.keys(sc.levers);
