@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.5';
+const APP_VERSION = 'v6.6';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2904,9 +2904,9 @@ window.magicOptimize=(id)=>{
   const base=S.activeQuarter, op=S.quarters[base].operational, qs=Object.keys(sc.levers);
   if(!qs.length){ toast('אין רבעונים עתידיים לאופטימיזציה','a'); return; }
   let cost=simCost(op);
-  if(!cost){ const uc=[]; qs.forEach(q=>REGIONS.forEach(r=>{ const u=sc.levers[q].regions[r.id].unitCost; if(u>0)uc.push(u); })); cost=uc.length?Math.round(uc.reduce((a,b)=>a+b,0)/uc.length):10; }
+  if(!cost){ const uc=[]; qs.forEach(q=>REGIONS.forEach(r=>{ const u=sc.levers[q].regions[r.id].unitCost; if(u>0)uc.push(u); })); cost=uc.length?Math.round(uc.reduce((a,b)=>a+b,0)/uc.length):Math.round(((DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y.us)||150)*0.35); } // Data Log: ~35% of retail
   let cap=0; qs.forEach(q=>REGIONS.forEach(r=>{ cap=Math.max(cap,sc.levers[q].regions[r.id].production||0); }));
-  if(!cap) cap=simCap(op)||8000;
+  if(!cap) cap=simCap(op)||REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((DATALOG.capacity.Y||{})[r.id]||0),0)||8000; // Data Log total PC capacity
   const rd=op.rd||0, before=scoreProxy(sc.levers).value;
   const prodFracs=[1.0,0.9,0.8,0.65]; let best=null;
   prodFracs.forEach(pf=>MARGIN_OPTS.forEach(mg=>{
@@ -3198,7 +3198,6 @@ PAGE_RENDER.goals = (c)=>{
       <button class="active" data-t="floors">${IC('target')} יעדי Q9</button>
       <button data-t="contracts">חוזים והתחייבויות</button>
       <button data-t="params">פרמטרי מודל</button>
-      <button data-t="max">${IC('zap')} MAX — מיקסום Q9</button>
     </div>
     <div id="goalBody"></div>`;
   const tabs=$$('#goalTabs button');
@@ -3299,89 +3298,7 @@ function goalTab(t){
       </div>
     </div>`;
   }
-  if(t==='max'){
-    const base=S.activeQuarter, op=S.quarters[base].operational;
-    const ready=S.quarters[base].entered;
-    const invCost=op.inventory.length?(op.inventory.reduce((a,i)=>a+(i.cost||0),0)/op.inventory.length):0;
-    const defRd=op.rd||0;
-    body.innerHTML=`
-    <div class="card pad" style="margin-bottom:16px">
-      <div class="between"><h3>${IC('zap')} MAX — מיקסום תוצאת סיום Q9</h3><span class="tag a">אופטימיזציה</span></div>
-      <div class="small muted" style="margin:8px 0 0;line-height:1.7">
-        המנוע סורק שילובי מנופים (עצימות ייצור, שולי מחיר, מו״פ) לרבעונים הבאים ובוחר את התוכנית
-        שממקסמת את פרוקסי ציון הסיום ב-Q9 <b>מבלי לשבור אף רצפת מזומן</b>. התוצאה נשמרת כתרחיש בסימולטור.
-      </div>
-    </div>
-    ${!ready? emptyBlock('inbox','אין נתוני בסיס','קלוט את רבעון '+base+' כדי להריץ מיקסום.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`) : `
-    <div class="grid" style="grid-template-columns:1fr 1fr">
-      <div class="card">
-        <div class="ch"><h3>אילוצים ותשומות</h3></div>
-        <div class="cb">
-          <div class="row" style="gap:10px">
-            <div class="field" style="flex:1"><label class="fl">קיבולת ייצור (יח׳/רבעון)</label><input class="f" type="number" id="maxCap" value="" placeholder="למשל 10000"></div>
-            <div class="field" style="flex:1"><label class="fl">עלות יח׳ ממוצעת</label><input class="f" type="number" id="maxCost" value="${Math.round(invCost)||''}" placeholder="למשל 10"></div>
-          </div>
-          <div class="field"><label class="fl">מו״פ לרבעון (לפי יעדי הטכנולוגיה)</label><input class="f" type="number" id="maxRd" value="${defRd}" placeholder="0"></div>
-          <div class="small muted" style="line-height:1.7">
-            <b>קיבולת = יחידות לרבעון</b> (לא "Max Producible Grade" מהדוח — זו רמת דרגה, לא כמות). המנוע מניח מכירת מלוא הקיבולת (חסם עליון תכנוני, לא תחזית ביקוש).
-            <b>מו״פ אינו ממוקסם</b> כי המנוע אינו ממדל את תשואת המו״פ — קבע אותו לפי יעדי הדרגה שלך (ברירת המחדל = המו״פ הנוכחי שלך). רצפות ושערים מהקונפיגורציה.
-          </div>
-          <button class="btn primary" style="margin-top:8px" onclick="runMaxOptimizer()">${IC('zap')} הרץ מיקסום</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="ch"><h3>תוצאת המיקסום</h3></div>
-        <div class="cb" id="maxResult"><div class="small muted" style="padding:8px 0">הרץ מיקסום כדי לראות את התוכנית המומלצת ואת תוצאת Q9 הצפויה.</div></div>
-      </div>
-    </div>`}`;
-  }
 }
-window.runMaxOptimizer=()=>{
-  const base=S.activeQuarter, op=S.quarters[base].operational;
-  const cap=parseFloat(($('#maxCap')||{}).value)||0;
-  let cost=parseFloat(($('#maxCost')||{}).value)||0;
-  if(!cost){ cost=op.inventory.length?(op.inventory.reduce((a,i)=>a+(i.cost||0),0)/op.inventory.length):0; }
-  const rd=Math.max(0, parseFloat(($('#maxRd')||{}).value)||0); // fixed R&D per quarter (strategy, not optimized)
-  const box=$('#maxResult');
-  if(!cap||!cost){ box.innerHTML=`<div class="tag a">${IC('warn')} נדרשים קיבולת (יח׳/רבעון) ועלות יח׳ להרצת מיקסום.</div>`; return; }
-  const qs=nextQuarters(base).slice(0,6);
-  if(!qs.length){ box.innerHTML=`<div class="tag a">${IC('warn')} אין רבעונים עתידיים (${base} הוא הסוף).</div>`; return; }
-  const prodFracs=[1.0,0.9,0.8,0.65], margins=[1.3,1.6,2.0,2.5,3.0];
-  let best=null;
-  prodFracs.forEach(pf=> margins.forEach(mg=>{
-    const production=Math.round(cap*pf), price=cost*mg;
-    const levers={};
-    qs.forEach(q=>{ levers[q]={rd,regions:{}};
-      REGIONS.forEach(r=>{ const prod=r.id==='hq'?0:Math.round(production/3); // HQ doesn't sell; split across 3 markets
-        const _sold=Math.min(prod, marketCapUnits('Y',r.id)); // Fix #3: cap sales by market potential, not 100% sell-through
-        levers[q].regions[r.id]={production:prod,unitCost:cost,sales:_sold*price,advertising:Math.round(_sold*price*0.06),invest:0,transferIn:0}; }); });
-    const sp=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
-    const cand={levers,feasible,endCash:sp.endCash,score:sp.value,pf,mg,rd,minDist:Math.min(...proj.map(p=>p.distance))};
-    if(!best){ best=cand; return; }
-    const better=(cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash)));
-    if(better) best=cand;
-  }));
-  const name='MAX — מיקסום Q9';
-  let sc=S.scenarios.find(s=>s.name===name);
-  if(!sc){ sc={id:uid(),name,base,levers:{},createdAt:Date.now()}; S.scenarios.push(sc); }
-  sc.levers=best.levers; sc.base=base; save();
-  box.innerHTML=`
-    <div class="kpis" style="margin-bottom:14px">
-      ${kpi('מזומן Q9 מוקרן',fmt(best.endCash),'')}
-      ${kpi('פרוקסי ציון',best.score.toFixed(0),'')}
-      ${kpi('שמירת רצפות',best.feasible?'תקין':'שבירה','')}
-    </div>
-    <div class="small" style="line-height:1.9">
-      <b>תוכנית מומלצת (${qs[0]}–${qs[qs.length-1]}):</b><br>
-      • עצימות ייצור: <b>${(best.pf*100).toFixed(0)}%</b> מהקיבולת (${fmt(Math.round(cap*best.pf))} יח׳/רבעון)<br>
-      • מחיר יעד: <b>×${best.mg}</b> מהעלות (${fmt(Math.round(cost*best.mg))} ליח׳)<br>
-      • מו״פ לרבעון: <b>${fmt(best.rd)}</b><br>
-      • מרחק מינימלי מהרצפה: <span style="color:${best.minDist<0?'var(--red)':'var(--green)'}">${fmt(Math.round(best.minDist))}</span>
-    </div>
-    ${!best.feasible?`<div class="tag a" style="margin-top:10px">${IC('warn')} גם התוכנית הטובה ביותר שוברת רצפה — הגדל קיבולת/מחיר או הקטן רצפות.</div>`:`<div class="tag g" style="margin-top:10px">${IC('check')} תוכנית ישימה נשמרה כתרחיש</div>`}
-    <button class="btn primary" style="margin-top:12px" onclick="go('sim')">${IC('sliders')} פתח בסימולטור</button>`;
-  toast('מיקסום Q9 הושלם — תרחיש נשמר','g');
-};
 window.setFx=(cur,val)=>{ S.config.params.fx=S.config.params.fx||{...FX_DEFAULT}; S.config.params.fx[cur]=parseFloat(val)||0; save(true); };
 window.setGoal=(path,val)=>{ const parts=path.split('.'); let o=S.config.goals; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=parseFloat(val)||0; save(true); };
 window.setGoalStr=(path,val)=>{ const parts=path.split('.'); let o=S.config.goals; for(let i=0;i<parts.length-1;i++)o=o[parts[i]]; o[parts[parts.length-1]]=String(val||'').trim(); save(true); };
