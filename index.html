@@ -867,7 +867,10 @@ function detectTrends(entered){
 }
 function infoGaps(entered){
   const gaps=[]; const last=entered[entered.length-1]; const mi=last?S.quarters[last].marketIntel||{}:{};
-  if(!(mi.sales||[]).length) gaps.push({mr:'MR17 & MR28', why:'אין נתוני יחידות מתחרים — קריטי לכיול הביקוש ולנתח שוק'});
+  if(!(mi.sales||[]).length){
+    if((mi.compPrices||[]).length) gaps.push({mr:'MR17 (יחידות)', why:'יש מחירי מתחרים (עוגן מכויל) אך חסרות יחידות — לכיול גודל שוק ונתח דרוש MR17'});
+    else gaps.push({mr:'MR17 & MR28', why:'אין נתוני יחידות/מחירים מתחרים — קריטי לכיול הביקוש ולנתח שוק'});
+  }
   if(!Object.keys(mi.competitors||{}).length) gaps.push({mr:'MR74', why:'אין מאזן/רו״ה מתחרים — נדרש לדירוג ולזיהוי מגמות'});
   if((S.learning.elast.priceObs||0)===0) gaps.push({mr:'מחקר מחירי מתחרים', why:'אין תצפיות מחיר להערכת גמישות — הביקוש עדיין על פריורים, לא מכויל'});
   return gaps;
@@ -1596,8 +1599,9 @@ function pcPlanFor(q){
     const rid=i.region||'europe'; const reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
     let price=0, src='';
     const a=S.learning.anchors&&S.learning.anchors[rid+'|Y'];
-    const dlPrice=(DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y[rid])||0;
+    const dlPrice=(DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y[rid])||0; const mr=mrMarketPrice(rid,'Y');
     if(a&&a.price>0){ price=Math.round(a.price); src='עוגן ביקוש נלמד'; }
+    else if(mr){ price=Math.round(mr.median); src='מחיר שוק מ-MR'; }
     else if(dlPrice>0){ price=dlPrice; src='מחיר פתיחה מהמשחק (Data Log)'; }
     else if(i.cost>0){ price=Math.round(i.cost*2); src='עלות ×2'; }
     else { price=300; src='הנחת פתיחה — עדכן לפי עלות בפועל'; }
@@ -1614,9 +1618,10 @@ function pcSellOptions(q){
   return ((S.quarters[q].operational.inventory)||[]).filter(i=>i.product==='Y'&&(i.qty||0)>0).map(item=>{
     const rid=item.region||'europe'; const reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
     const cost=item.cost||0, stock=item.qty;
-    const a=(L.anchors||{})[rid+'|Y']; const dlPrice=(DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y[rid])||0;
+    const a=(L.anchors||{})[rid+'|Y']; const dlPrice=(DATALOG.initialConsumerPrice.Y&&DATALOG.initialConsumerPrice.Y[rid])||0; const mr=mrMarketPrice(rid,'Y');
     let base, priceSrc, calibrated=false;
     if(a&&a.price>0){ base=Math.round(a.price); priceSrc='עוגן ביקוש נלמד'; calibrated=!!(L.market&&L.market[rid+'|Y']!=null); }
+    else if(mr){ base=Math.round(mr.median); priceSrc=`מחיר שוק מ-MR (${mr.n} מתחרים: ${fmt(mr.min)}–${fmt(mr.max)})`; calibrated=true; }
     else if(dlPrice>0){ base=dlPrice; priceSrc='מחיר פתיחה מהמשחק (Data Log)'; }
     else if(cost>0){ base=Math.round(cost*2); priceSrc='עלות ×2 (לא מכויל)'; }
     else { base=300; priceSrc='הנחת פתיחה (לא מכויל)'; }
@@ -2184,7 +2189,9 @@ function extractMR74(rows,mi){
     mi.competitors[co]=Object.assign(mi.competitors[co]||{}, rec);
   });
 }
-/* MR17&28 = consumer units sold by company / region / product(CHIP,PC) / grade(STD,DEL). */
+/* MR17&28 cells come in two formats depending on the report:
+   - "X0:50" / "Y1:130"  = grade:price (competitor PRICE intelligence) → mi.compPrices
+   - a plain number       = consumer UNITS sold                        → mi.sales */
 function extractMR1728(rows,mi){
   // column layout: US CHIP-STD=1 DEL=2 PC-STD=3 DEL=4 ; EU 5-8 ; BRAZIL 9-12
   const layout=[
@@ -2196,9 +2203,23 @@ function extractMR1728(rows,mi){
     {region:'brazil',product:'Computer',grade:'Standard',col:11},{region:'brazil',product:'Computer',grade:'Deluxe',col:12},
   ];
   mi.sales=mi.sales.filter(s=>s.source!=='MR17&28');
+  mi.compPrices=(mi.compPrices||[]).filter(s=>s.source!=='MR17&28');
   rows.forEach(r=>{ const m=String(r[0]||'').match(/COMPANY\s*(\d+)/i); if(!m)return; const num=parseInt(m[1],10);
-    layout.forEach(L=>{ const u=parseNumber(r[L.col]); if(u&&u>0) mi.sales.push({company:num, region:L.region, product:L.product, grade:L.grade, units:u, source:'MR17&28'}); });
+    layout.forEach(L=>{ const raw=r[L.col]; if(raw==null||raw==='')return; const s=String(raw).trim();
+      const gp=s.match(/([XY])\s*(\d+)\s*:\s*(\d+(?:\.\d+)?)/i); // "X0:50" grade:price
+      if(gp){ mi.compPrices.push({company:num, region:L.region, product:L.product, model:L.grade, grade:parseInt(gp[2],10), price:parseFloat(gp[3]), source:'MR17&28'}); }
+      else { const u=parseNumber(s); if(u&&u>0) mi.sales.push({company:num, region:L.region, product:L.product, grade:L.grade, units:u, source:'MR17&28'}); }
+    });
   });
+}
+// Median observed competitor price for a region+product from the latest MR (null if none seen).
+function mrMarketPrice(regionId, product){
+  const prodName = product==='X' ? 'Chip' : 'Computer';
+  const last=latestEntered(); if(!last) return null;
+  const cp=((S.quarters[last].marketIntel||{}).compPrices||[]).filter(p=>p.region===regionId && p.product===prodName && p.company!==OUR_CO && p.price>0);
+  if(!cp.length) return null;
+  const ps=cp.map(p=>p.price).sort((a,b)=>a-b);
+  return { median:ps[Math.floor(ps.length/2)], min:ps[0], max:ps[ps.length-1], n:cp.length };
 }
 function renderVerifyForm(box){
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
@@ -3163,6 +3184,15 @@ function buildAIContext(){
     const byCo={}; mi.sales.forEach(s=>{ byCo[s.company]=(byCo[s.company]||0)+s.units; });
     L.push(`## נתחי שוק (יחידות שנמכרו, MR17&28) [מקור: ${q}/MR17&28]`);
     Object.entries(byCo).sort((a,b)=>b[1]-a[1]).forEach(([co,u])=> L.push(`- חברה ${co}${+co===OUR_CO?' (אנחנו)':''}: ${fmt(u)} יח׳`));
+  }
+  // Observed competitor prices (MR28) — the real market price level per product/region
+  const cprices=(mi.compPrices||[]).filter(x=>x.company!==OUR_CO);
+  if(cprices.length){ L.push(`## מחירי מתחרים שנצפו (MR28) [מקור: ${q}/MR17&28] — עוגן המחיר האמיתי`);
+    const byPR={}; cprices.forEach(x=>{ const k=x.region+'|'+x.product; (byPR[k]=byPR[k]||[]).push(x); });
+    Object.entries(byPR).forEach(([k,arr])=>{ const [reg,prod]=k.split('|'); const rn=(REGIONS.find(r=>r.id===reg)||{}).name||reg;
+      const ex=arr.slice(0,6).map(x=>`חב'${x.company} ${prod==='Chip'?'X':'Y'}${x.grade}@${fmt(x.price)}`).join(' · ');
+      L.push(`- ${rn} ${prod==='Chip'?'שבב':'מחשב'}: ${ex}`); });
+    L.push(`- תמחר סביב הרמות האלה — לא פי-כמה מעליהן.`);
   }
   // WS-3: demand model + learning — so recommendations are demand-derived, not assumed
   const ls=learningSummary();
