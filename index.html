@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.3';
+const APP_VERSION = 'v7.4';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2617,7 +2617,7 @@ window.editScenario=(id)=>{
       <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
         <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
-        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.</div></div>`:''}
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: מחיר לפי <b>עוגן שוק</b> ×${m.pm} (לא עלות×מרווח) · עצימות ייצור ${(m.pf*100).toFixed(0)}%${m.invSold>0?` · <b>${fmt(m.invSold)} מחשבים במלאי נמכרים ראשונים</b>`:''}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
         <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
@@ -2950,35 +2950,43 @@ window.magicOptimize=(id)=>{
   if(!cap) cap=simCap(op)||prodRegions.reduce((a,r)=>a+regionCap(r),0)||8000; // Data Log capacity of ACTIVE regions
   const rd=op.rd||0, before=scoreProxy(sc.levers).value;
   const markets=REGIONS.filter(r=>r.id!=='hq');
-  const invY=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0); // finished PCs available to ship+sell
+  const invY=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0); // finished PCs already made — sell these first
   const homePlant=prodRegions[0]; // ship exports from the first plant region (estimate)
+  // market anchors = realistic consumer price per region (MR median or Data Log opening), NOT cost×margin (that gave nonsense like 18)
+  const anchorOf=r=>{ const a=priceAnchors(r,'Y'); return a.base || ((DATALOG.initialConsumerPrice.Y||{})[r]) || 150; };
+  const demandBy={}; let totalDemand=0; markets.forEach(r=>{ demandBy[r.id]=marketCapUnits('Y',r.id); totalDemand+=demandBy[r.id]; });
+  const totalPlantCap=prodRegions.reduce((a,r)=>a+regionCap(r),0)||1;
+  const needProduce=Math.max(0,totalDemand-invY); // only make what inventory doesn't already cover
   let exported=false;
-  const prodFracs=[1.0,0.9,0.8,0.65]; let best=null;
-  prodFracs.forEach(pf=>MARGIN_OPTS.forEach(mg=>{
-    const price=cost*mg, levers={};
-    // 1) PRODUCTION only at plants, up to capacity × intensity → pooled supply (+ existing finished PCs)
+  const prodFracs=[1.0,0.85,0.65], PRICE_MULTS=[0.9,1.0,1.1]; let best=null;
+  prodFracs.forEach(pf=>PRICE_MULTS.forEach(pm=>{
+    const levers={};
+    // 1) PRODUCE at plants, capped so total supply ≤ market demand (no overproduction), scaled by intensity
     const plantProd={}; let supply=0;
-    prodRegions.forEach(r=>{ const pp=Math.round(regionCap(r)*pf); plantProd[r.id]=pp; supply+=pp; });
+    prodRegions.forEach(r=>{ const pp=Math.round(Math.min(regionCap(r), needProduce*(regionCap(r)/totalPlantCap))*pf); plantProd[r.id]=pp; supply+=pp; });
     const sellable=supply+invY;
-    // 2) SALES allocated across ALL markets by demand, capped by each market's potential and by total supply
-    let totalDemand=0; const demandBy={}; markets.forEach(r=>{ demandBy[r.id]=marketCapUnits('Y',r.id); totalDemand+=demandBy[r.id]; });
+    // 2) SELL home/plant markets FIRST (no freight, no new office — best for tight cash), then export the surplus
     let remain=sellable; const sellBy={};
-    markets.forEach(r=>{ const want=Math.round(sellable*(demandBy[r.id]/(totalDemand||1))); const s=Math.max(0,Math.min(want,demandBy[r.id],remain)); sellBy[r.id]=s; remain-=s; });
-    // 3) FREIGHT for units sold in a market with no local plant, folded into the shipping plant's blended unit cost
-    let totalFreight=0; markets.forEach(r=>{ const isPlant=prodRegions.some(x=>x.id===r.id);
-      if(!isPlant && sellBy[r.id]>0 && homePlant){ totalFreight+=freightCostLC(homePlant.id,r.id,'Y',sellBy[r.id],'surface'); exported=true; } });
+    prodRegions.forEach(r=>{ const s=Math.max(0,Math.min(demandBy[r.id],remain)); sellBy[r.id]=s; remain-=s; });
+    const exportMk=markets.filter(r=>!prodRegions.some(x=>x.id===r.id));
+    const expDem=exportMk.reduce((a,r)=>a+demandBy[r.id],0)||1;
+    exportMk.forEach(r=>{ const want=Math.round(remain*(demandBy[r.id]/expDem)); const s=Math.max(0,Math.min(want,demandBy[r.id],remain)); sellBy[r.id]=s; remain-=s; });
+    // 3) FREIGHT for exported units, folded once into the shipping plant's blended cost
+    let totalFreight=0, exp=false; exportMk.forEach(r=>{ if(sellBy[r.id]>0 && homePlant){ totalFreight+=freightCostLC(homePlant.id,r.id,'Y',sellBy[r.id],'surface'); exp=true; } });
+    if(exp) exported=true;
     qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{};
-      const prod=plantProd[r.id]||0, sold=sellBy[r.id]||0;
-      const uc=(homePlant && r.id===homePlant.id && prod>0) ? Math.round(cost+totalFreight/prod) : cost; // book freight once, in the home plant
-      const isExport=sold>0 && !prodRegions.some(x=>x.id===r.id);
-      levers[q].regions[r.id]={production:prod,unitCost:prod>0?uc:0,sales:sold*price,qtySold:sold,price,
-        advertising:Math.round(sold*price*0.06),invest:0,transferIn:0,offices:isExport?2:(cur.offices||0),
-        product:'Y',model:cur.model||'Standard',margin:mg,advPct:6}; }); });
+      const prod=plantProd[r.id]||0, sold=sellBy[r.id]||0, isPlant=prodRegions.some(x=>x.id===r.id);
+      const priceR=Math.round(anchorOf(r.id)*pm); // realistic price from the market anchor
+      const uc=(homePlant && r.id===homePlant.id && prod>0) ? Math.round(cost+totalFreight/prod) : cost;
+      const offices=isPlant?(cur.offices||0):(sold>0?1:0); // export: one sales office only where we actually sell; home keeps existing
+      levers[q].regions[r.id]={production:prod,unitCost:prod>0?uc:0,sales:sold*priceR,qtySold:sold,price:priceR,
+        advertising:Math.round(sold*priceR*0.06),invest:0,transferIn:0,offices,
+        product:'Y',model:cur.model||'Standard',advPct:6}; }); });
     const spv=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
-    const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,mg};
+    const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,pm};
     if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
   }));
-  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg,regions:prodRegions.map(r=>r.name),activeSrc,exported,homePlant:homePlant?homePlant.name:''}; save();
+  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cost,pf:best.pf,pm:best.pm,invSold:invY,regions:prodRegions.map(r=>r.name),activeSrc,exported,homePlant:homePlant?homePlant.name:''}; save();
   renderScenarios(); editScenario(id);
   toast('קסם: ציון '+before.toFixed(0)+' → '+best.score.toFixed(0)+(best.feasible?'':' (שובר רצפה)'), best.feasible?'g':'a');
 };
