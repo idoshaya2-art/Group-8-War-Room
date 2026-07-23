@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.3';
+const APP_VERSION = 'v6.4';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -785,6 +785,24 @@ function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's fu
     net -= loans*((p.interest&&p.interest.bank||0)/100)/4; add+=net; });
   return add;
 }
+/* Wave 2 · R&D maturation — project the tech grade at Q9 from a scenario's forward R&D.
+   INTOPIA rule: a grade rises ≤1 level/quarter and R&D matures ~1 quarter forward. This is a
+   bounded ESTIMATE (labelled as such in the UI): a quarter funds one grade-up for the product
+   furthest below its target, only if that quarter's R&D clears the grade-up budget (~2× the legal
+   minimum — the minimum keeps you legal, real advancement costs more). With no levers → base tech. */
+const RD_GRADE_BUDGET={ X:(DATALOG.rdMinPerQuarter.X||40000)*2, Y:(DATALOG.rdMinPerQuarter.Y||70000)*2 };
+function projectedTechAt(base, levers){
+  const op=S.quarters[base].operational; let tx=op.techX||0, ty=op.techY||0;
+  if(!levers) return {techX:tx, techY:ty, gainX:0, gainY:0};
+  const g=S.config.goals, tgX=g.techXTarget||9, tgY=g.techYTarget||9;
+  nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; if(rd<=0) return;
+    const needX=tgX-tx, needY=tgY-ty;
+    const canX=rd>=RD_GRADE_BUDGET.X && needX>0, canY=rd>=RD_GRADE_BUDGET.Y && needY>0;
+    if(canY && (needY>=needX || !canX)) ty=Math.min(9,ty+1);   // one grade-up/quarter, bigger gap first
+    else if(canX) tx=Math.min(9,tx+1);
+  });
+  return {techX:tx, techY:ty, gainX:tx-(op.techX||0), gainY:ty-(op.techY||0)};
+}
 function scoreProxy(leversByQuarter){
   const base=S.activeQuarter, g=S.config.goals, op=S.quarters[base].operational, f=S.quarters[base].financial;
   const proj=projectCashflow(base,leversByQuarter);
@@ -799,7 +817,10 @@ function scoreProxy(leversByQuarter){
   const effScore=_c01(((f.roe||0)/(t.roe||25)+(f.roi||0)/(t.roi||15)+(f.ros||0)/(t.ros||10))/3);
   const pastHalf=_c01(0.6*profScore+0.4*effScore)*100;
   // ===== POTENTIAL HALF (50%) =====
-  const techX=g.techXTarget>0?op.techX/g.techXTarget:(op.techX/9), techY=g.techYTarget>0?op.techY/g.techYTarget:(op.techY/9);
+  // Wave 2: tech grade is PROJECTED forward from the scenario's R&D, so aggressive vs conservative R&D
+  // move the potential half differently (base tech when no levers).
+  const pt=projectedTechAt(base, leversByQuarter);
+  const techX=g.techXTarget>0?pt.techX/g.techXTarget:(pt.techX/9), techY=g.techYTarget>0?pt.techY/g.techYTarget:(pt.techY/9);
   const techScore=_c01((techX+techY)/2);
   const shareObj=marketShareScore(base);
   const eqRatio=f.totalAssets>0?_c01(f.totalEquity/f.totalAssets):null;
@@ -2639,6 +2660,8 @@ function renderImpactBoard(sc){
   let rev=0,prodOut=0,adv=0,inv=0,tr=0; const rd=lv.rd||0;
   REGIONS.forEach(r=>{ const rl=lv.regions[r.id]||{}; rev+=rl.sales||0; prodOut+=(rl.production||0)*(rl.unitCost||0)*(p.productionPay[0]/100); adv+=rl.advertising||0; inv+=rl.invest||0; tr+=rl.transferIn||0; });
   const netNow=tr-prodOut-adv-inv-rd;
+  const bop=S.quarters[S.activeQuarter].operational, pt=projectedTechAt(S.activeQuarter, sc.levers);
+  const techGain=(pt.gainX||0)+(pt.gainY||0);
   const bar=(v,c)=>`<div style="flex:1;height:8px;background:var(--bg);border-radius:5px;overflow:hidden;min-width:80px"><div style="width:${Math.max(0,Math.min(100,v)).toFixed(0)}%;height:100%;background:${c}"></div></div>`;
   box.innerHTML=`
     <div class="between" style="margin:6px 0 12px"><b class="small">${IC('scale')} שלב 3 · תוצאה (מתעדכן בזמן אמת)</b><button class="btn sm primary" onclick="submitScenario('${sc.id}')" title="סמן תרחיש זה להגשה ועבור לגיליון הזנה">בחר להגשה → גיליון הזנה</button></div>
@@ -2651,6 +2674,7 @@ function renderImpactBoard(sc){
       <div class="small muted" style="margin-bottom:8px">${IC('scale')} ציון Q9 = 50% ביצועי עבר (רווח מצטבר, ROE/ROI/ROS מול מתחרים) + 50% פוטנציאל עתידי (טק, נתח שוק, בריאות פיננסית)</div>
       <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:150px">מחצית ביצועי עבר (50%)</span>${bar(sp.pastHalf,'linear-gradient(90deg,var(--accent),var(--accent2))')}<b class="num" style="width:40px">${sp.pastHalf.toFixed(0)}</b></div>
       <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:150px">מחצית פוטנציאל (50%)</span>${bar(sp.potentialHalf,'linear-gradient(90deg,var(--purple),#c084fc)')}<b class="num" style="width:40px">${sp.potentialHalf.toFixed(0)}</b></div>
+      <div class="small muted" style="margin:2px 0 8px 0;padding-inline-start:2px">${IC('cpu')} דרגת טק מוקרנת מהמו״פ: <b>X${bop.techX}→${pt.techX} · Y${bop.techY}→${pt.techY}</b>${techGain>0?` <span class="tag g">+${techGain} דרגות</span>`:' <span class="tag a">אין קידום — הגדל מו״פ</span>'} <span class="small">(אומדן: דרגה עולה כשמו״פ ברבעון ≥ ${fmt(RD_GRADE_BUDGET.X)}/${fmt(RD_GRADE_BUDGET.Y)} SF ל-X/Y)</span></div>
       <div class="row" style="gap:10px;align-items:center"><span class="small" style="width:130px"><b>ציון כולל</b></span>${bar(sp.value,'linear-gradient(90deg,var(--green),var(--accent))')}<b class="num" style="width:40px">${sp.value.toFixed(0)}</b></div>
     </div>
     <div class="card pad" style="margin-top:10px">
