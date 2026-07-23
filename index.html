@@ -1581,6 +1581,11 @@ window.applyRecConfirm=(idx)=>{
   const lev=sc.levers[tq];
   if(rec.rd!=null) lev.rd=rec.rd;
   Object.entries(rec.regions||{}).forEach(([rid,patch])=>{ lev.regions[rid]=Object.assign(lev.regions[rid]||{},patch); });
+  // note-type actions (e.g. H1-2 market research) carry no engine fields — add them to the action list directly
+  lev.actions=lev.actions||[];
+  (rec.actions||[]).forEach(a=>{ if(!lev.actions.some(x=>x.form===a.form&&x.region===a.region)) lev.actions.push({aid:uid(),form:a.form,region:a.region,note:a.note,amount:a.amount}); });
+  // reconcile the action list so every patched field shows up as an editable action card
+  syncActionsToLevers(lev);
   closeModal(); save(); toast('הוחל על "'+sc.name+'" — נפתח בסימולטור ✓','g');
   go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
 };
@@ -1906,7 +1911,8 @@ function buildActionPlan(q,targetQ){
   const gaps=(S.learning&&S.learning.gaps)||[];
   if(gaps.length) out.push({cat:'strat',level:'info',conf:'data',title:`קנה מחקרי שוק ב-${targetQ}: ${gaps.map(x=>x.mr).join(' + ')}`,form:'H1-2 (Market Research — עד 3 בתשלום לרבעון)',
     detail:gaps.map(x=>`<b>${x.mr}</b> — ${x.why}`).join('<br>'),
-    dep:`תוצאות המחקר הן קלט חובה להמלצות הרבעון הבא — בלעדיהן מנוע הביקוש נשאר לא מכויל.`});
+    dep:`תוצאות המחקר הן קלט חובה להמלצות הרבעון הבא — בלעדיהן מנוע הביקוש נשאר לא מכויל.`,
+    sim:{q:targetQ,actions:[{form:'H1-2',note:gaps.map(x=>x.mr).join(', ')}]}});
   // Sales offices (A1-3) — needed where we plan to sell
   const pcsNow=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
   if(pcsNow>0 && (op.offices||0)===0){
@@ -2496,7 +2502,7 @@ window.editScenario=(id)=>{
     </div>`;
   window._simShowQ=(q)=>{
     _simEditQ=q; const lv=sc.levers[q];
-    if(!lv.actions) lv.actions=deriveSimActions(lv);
+    if(!lv.actions) lv.actions=deriveSimActions(lv); else syncActionsToLevers(lv);
     const actCard=(act)=>{ const sf=simForm(act.form); if(!sf)return '';
       const rid=act.region, r=rid?REGIONS.find(x=>x.id===rid):null, cur=r?r.cur:'SF';
       const rl=rid?(lv.regions[rid]||{}):{};
@@ -2681,6 +2687,21 @@ function deriveSimActions(lv){ const acts=[]; const g=()=>Math.random().toString
     if((rl.invest||0)>0) acts.push({aid:g(),form:'A3-2',region:r.id});
   });
   return acts;
+}
+// Additive/idempotent: make sure every non-zero engine field has a matching action card, without
+// removing note actions or ones the user added. Used after applying a Decisions-tab recommendation.
+function syncActionsToLevers(lv){ lv.actions=lv.actions||[]; const g=()=>Math.random().toString(36).slice(2,8);
+  const has=(form,region)=>lv.actions.some(a=>a.form===form&&a.region===region);
+  const add=(form,region)=>{ if(!has(form,region)) lv.actions.push({aid:g(),form,region}); };
+  if((lv.rd||0)>0) add('H1-1',undefined);
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lv.regions[r.id]||{};
+    if((rl.production||0)>0) add(rl.product==='X'?'A2-3':'A2-4',r.id);
+    if((rl.sales||0)>0||(rl.price||0)>0||(rl.advertising||0)>0) add(rl.product==='X'?'A1-1':'A1-2',r.id);
+    if((rl.newFac||0)>0) add('A2-1',r.id);
+    if((rl.offices||0)>0) add('A1-3',r.id);
+    if((rl.transferIn||0)>0) add('A3-1',r.id);
+    if((rl.invest||0)>0) add('A3-2',r.id);
+  });
 }
 // Zero out the engine fields an action controls, so the projection always matches the visible action list.
 function clearActionFields(lv,act){ const sf=simForm(act.form); if(!sf)return;
