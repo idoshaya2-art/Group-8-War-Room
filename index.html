@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.6';
+const APP_VERSION = 'v6.7';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -414,16 +414,6 @@ const DATALOG = {
   },
 };
 // Freight cost (LC of shipper) to move `units` of product from→to; unit cost is cut above the breakpoint.
-function freightCostLC(from, to, product, units, mode){
-  mode=mode||'surface'; const destMap={us:'us',europe:'eu',brazil:'br'};
-  const col=(destMap[to]||to)+(product==='X'?'X':'Y'); // destination column keys are us/eu/br + X/Y
-  const rate=(DATALOG.freight[mode]?.[from]?.[col])||0; if(!rate||!units) return 0;
-  const bp=((mode==='surface'?DATALOG.freight.breakSurface:DATALOG.freight.breakAir)[from]?.[col])||Infinity;
-  const disc=DATALOG.freight.discountAboveBreak[mode]||0;
-  const below=Math.min(units,bp), above=Math.max(0,units-bp);
-  return Math.round(below*rate + above*rate*(1-disc));
-}
-
 /* ---------- Persistence ---------- */
 const LS_KEY = 'intopia_warroom_v1';
 let S = null;
@@ -1519,9 +1509,6 @@ PAGE_RENDER.plan = (c)=>{
           ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
         </div>
       </div></div>`; }).join('');
-  const V=formVerdicts(q,items);
-  const allForms=PLAN_CATS.flatMap(cat=>cat.forms.map(code=>({code,v:V[code]||{st:'skip',why:''}})));
-  const notNeeded=allForms.filter(f=>f.v.st==='skip').length;
   const mustCount=items.filter(i=>i.level==='red'&&!i.blocked).length;
   const _q=S.activeQuarter, _f=S.quarters[_q].financial, _op=S.quarters[_q].operational;
   const _sp=scoreProxy(null); const _share=(_sp.parts&&_sp.parts.share!=null)?(_sp.parts.share*100).toFixed(1)+'%':'—';
@@ -1548,10 +1535,7 @@ PAGE_RENDER.plan = (c)=>{
     ${actionList}
     <div class="small muted" style="margin:16px 2px 6px">${IC('cpu')} <b>חוות דעת שנייה (לא משנה את הרשימה למעלה):</b> היועץ בודק את הפעולות מול חוקים · שוק · נזילות · כדאיות 50/50.</div>
     ${renderAdvisorCard(q,targetQ)}
-    <details class="sec" style="margin-top:14px"><summary>${IC('check')} מה נבחן ולא נדרש הרבעון (${notNeeded} טפסים)</summary>
-      <div class="secbody"><div class="fchips">${allForms.map(f=>`<span class="fchip ${f.v.st}" title="${esc(f.v.why)}">${f.code} ${f.v.st==='rec'?'✔':(f.v.st==='watch'?'👁':'—')}</span>`).join('')}</div>
-      <div class="small muted" style="margin-top:8px">✔ מומלץ (מופיע בפעולות) · 👁 לבדיקה · — לא נדרש. ריחוף מציג את הסיבה.</div></div></details>
-    <details class="sec"><summary>${IC('trendUp')} מפה אסטרטגית — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
+    <details class="sec" style="margin-top:14px"><summary>${IC('trendUp')} מפה אסטרטגית — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
       <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}</div></details>
     <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button></div>`;
 };
@@ -2989,8 +2973,6 @@ PAGE_RENDER.export = (c)=>{
         <div class="cb" id="checklist"></div>
       </div>
     </div>
-    <details class="sec" style="margin-top:16px"><summary>${IC('exchange')} עלויות שילוח בין-אזורי (Data Log) — מחשבון</summary>
-      <div class="secbody">${freightSectionHTML()}</div></details>
     <details class="card" style="margin-top:18px">
       <summary style="cursor:pointer;padding:15px 18px;font-weight:800;display:flex;align-items:center;gap:8px">${IC('book')} מקרא טפסי ההחלטה של INTOPIA <span class="small muted" style="font-weight:400">— 19 הקודים והשדות (לחץ לפתיחה)</span></summary>
       <div class="cb" id="formsRef"></div>
@@ -3019,27 +3001,6 @@ function renderExportActions(box,targetQ,sc){ if(!box)return;
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">${addMenu}<button class="btn sm" onclick="go('sim')">${IC('sliders')} עריכה מלאה בסימולטור →</button></div>
     </div>`;
 }
-function freightSectionHTML(){
-  const regs=[['us','ארה״ב'],['europe','אירופה'],['brazil','ברזיל']];
-  const demo=freightCostLC('europe','brazil','Y',10000,'surface'); // matches the team's plan (ship 10,000 Y EU→BR)
-  return `<div class="small muted" style="margin-bottom:10px">עלות הובלה ליחידה במטבע המשלח; מעל כמות השבירה עלות היחידה יורדת (יבשתי ×0.5, אווירי ×0.33). אין עלות הובלה על מכירת רכיבים תוך-חברתית.</div>
-    <div class="row" style="gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px">
-      <div class="field" style="margin:0"><label class="fl">מאזור</label><select class="f" id="frFrom">${regs.map(r=>`<option value="${r[0]}" ${r[0]==='europe'?'selected':''}>${r[1]}</option>`).join('')}</select></div>
-      <div class="field" style="margin:0"><label class="fl">לאזור</label><select class="f" id="frTo">${regs.map(r=>`<option value="${r[0]}" ${r[0]==='brazil'?'selected':''}>${r[1]}</option>`).join('')}</select></div>
-      <div class="field" style="margin:0"><label class="fl">מוצר</label><select class="f" id="frProd"><option value="Y">מחשב (Y)</option><option value="X">שבב (X)</option></select></div>
-      <div class="field" style="margin:0"><label class="fl">כמות</label><input class="f" id="frQty" type="number" value="10000" style="width:110px"></div>
-      <div class="field" style="margin:0"><label class="fl">אופן</label><select class="f" id="frMode"><option value="surface">יבשתי</option><option value="air">אווירי</option></select></div>
-      <button class="btn primary" onclick="calcFreight()">חשב</button>
-    </div>
-    <div id="frOut" class="tag b" style="display:block">אירופה→ברזיל · 10,000 מחשבים (יבשתי) ≈ <b>${fmt(demo)} EUR</b> (≈${fmt(Math.round(demo*fxRate('EUR')))} SF)</div>`;
-}
-window.calcFreight=()=>{
-  const from=$('#frFrom').value, to=$('#frTo').value, prod=$('#frProd').value, qty=parseFloat($('#frQty').value)||0, mode=$('#frMode').value;
-  const reg=REGIONS.find(r=>r.id===from)||{}; const cur=reg.cur||'';
-  if(from===to){ $('#frOut').innerHTML='אותו אזור — אין הובלה בין-אזורית.'; return; }
-  const c=freightCostLC(from,to,prod,qty,mode);
-  $('#frOut').innerHTML=`${reg.name||from}→${(REGIONS.find(r=>r.id===to)||{}).name||to} · ${fmt(qty)} ${prod==='Y'?'מחשבים':'שבבים'} (${mode==='surface'?'יבשתי':'אווירי'}) ≈ <b>${fmt(c)} ${cur}</b> (≈${fmt(Math.round(c*fxRate(cur)))} SF)`;
-};
 function buildInputRows(targetQ,sc){
   const rows=[]; const lev=sc&&sc.levers[targetQ]; if(!lev) return rows;
   REGIONS.forEach(r=>{
