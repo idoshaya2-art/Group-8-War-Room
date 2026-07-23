@@ -2429,12 +2429,16 @@ PAGE_RENDER.sim = (c)=>{
   const q=S.activeQuarter;
   if(!S.quarters[q].entered){ c.innerHTML=emptyBlock(IC('sliders'),'אין נתוני בסיס','קלוט רבעון בסיס כדי לבנות תרחישים.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   c.innerHTML=`
-    <div class="between" style="margin-bottom:16px">
-      <div class="small muted">בסיס: <b>${q}</b>. ערוך מנופים לרבעונים הבאים, שמור תרחישים והשווה.</div>
-      <div class="row">
-        <button class="btn" onclick="sensitivity()">± ניתוח רגישות</button>
-        <button class="btn primary" onclick="newScenario()">+ תרחיש חדש</button>
-      </div>
+    <div class="card pad" style="margin-bottom:16px;border-color:var(--line2)"><div class="small" style="line-height:2">
+      <b>${IC('sliders')} איך עובד הסימולטור (בסיס: ${q}):</b><br>
+      <b>1.</b> <b>תרחיש</b> = תוכנית פעולה מלאה לרבעונים הבאים. כל פעולה ש<b>"שלחת לסימולטור"</b> מלשונית ההחלטות נאספת לתרחיש כאן.<br>
+      <b>2.</b> <b>כוונן</b> את המנופים (המספרים) — המנוע מחשב <b>בזמן אמת</b> את ההשפעה על הציון (50/50) ועל המזומן, בתחתית העורך.<br>
+      <b>3.</b> מרוצה? <b>"בחר להגשה"</b>, ואז עבור ל<b>"5 · הזנה והגשה"</b> כדי לייצא לגיליון INTOPIA.<br>
+      <span class="small muted">"קסם" סורק אוטומטית שילובי מנופים ובוחר את המיטבי · "רגישות" בודק מה קורה אם ההנחות זזות ±10%.</span>
+    </div></div>
+    <div class="between" style="margin-bottom:12px">
+      <b>${IC('scale')} שלב 1 · התרחישים שלך (${S.scenarios.length})</b>
+      <div class="row"><button class="btn" onclick="sensitivity()">± רגישות</button><button class="btn primary" onclick="newScenario()">+ תרחיש חדש</button></div>
     </div>
     <div id="scenarioArea"></div>`;
   renderScenarios();
@@ -2446,16 +2450,16 @@ function renderScenarios(){
   const cmp=S.scenarios.map(sc=>{ const sp=scoreProxy(sc.levers); return {sc,endCash:sp.endCash,breaches:sp.breaches,score:sp.value}; });
   area.innerHTML=`
     <div class="card" style="margin-bottom:18px">
-      <div class="ch"><h3>${IC('scale')} השוואת תרחישים</h3></div>
+      <div class="ch"><h3>${IC('scale')} השוואת תרחישים</h3><span class="small muted">ציון גבוה יותר + 0 שבירות = טוב יותר</span></div>
       <div class="cb" style="overflow-x:auto">
-        <table class="tbl"><thead><tr><th>תרחיש</th><th>מזומן סופי (Q9)</th><th>שבירות רצפה</th><th>פרוקסי ציון</th><th></th></tr></thead>
-          <tbody>${cmp.map(x=>`<tr>
-            <td><b>${esc(x.sc.name)}</b></td>
+        <table class="tbl"><thead><tr><th>תרחיש</th><th>מזומן סופי (Q9)</th><th>שבירות רצפה</th><th>ציון Q9 (0–100)</th><th>פעולות</th></tr></thead>
+          <tbody>${cmp.map(x=>{ const best=x.score===Math.max(...cmp.map(y=>y.score)); return `<tr>
+            <td><b>${esc(x.sc.name)}</b>${best&&cmp.length>1?' <span class="tag g">הכי גבוה</span>':''}</td>
             <td class="num">${fmt(x.endCash)}</td>
-            <td>${x.breaches?`<span class="tag r">${x.breaches}</span>`:'<span class="tag g">0</span>'}</td>
+            <td>${x.breaches?`<span class="tag r">${x.breaches} ⚠</span>`:'<span class="tag g">0 ✓</span>'}</td>
             <td><div class="row" style="gap:8px"><div style="flex:1;height:7px;background:var(--bg);border-radius:4px;overflow:hidden;min-width:70px"><div style="width:${x.score.toFixed(0)}%;height:100%;background:linear-gradient(90deg,var(--accent),var(--purple))"></div></div><b class="num">${x.score.toFixed(0)}</b></div></td>
-            <td class="row" style="gap:6px"><button class="btn sm" onclick="editScenario('${x.sc.id}')">ערוך</button><button class="btn sm" onclick="pickForDecision('${x.sc.id}')">בחר</button><button class="btn sm danger" onclick="delScenario('${x.sc.id}')">✕</button></td>
-          </tr>`).join('')}</tbody></table>
+            <td class="row" style="gap:6px"><button class="btn sm primary" onclick="editScenario('${x.sc.id}')">✎ ערוך/כוונן</button><button class="btn sm" onclick="submitScenario('${x.sc.id}')" title="סמן להגשה וייצוא">בחר להגשה</button><button class="btn sm danger" onclick="delScenario('${x.sc.id}')" title="מחק">✕</button></td>
+          </tr>`; }).join('')}</tbody></table>
       </div>
     </div>
     <div id="editorArea"></div>`;
@@ -2484,6 +2488,8 @@ window.editScenario=(id)=>{
       <div class="cb">
         ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg} · מכירה מפוצלת על 3 שווקים (לא מטה).</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
+        <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
+        <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
         <div class="pill-tabs" id="qTabs">${qs.map((q,i)=>`<button class="${i===0?'active':''}" data-q="${q}">${q}</button>`).join('')}</div>
         <div id="leverGrid" style="margin-top:16px"></div>
       </div>
@@ -2549,6 +2555,7 @@ function renderImpactBoard(sc){
   const netNow=tr-prodOut-adv-inv-rd;
   const bar=(v,c)=>`<div style="flex:1;height:8px;background:var(--bg);border-radius:5px;overflow:hidden;min-width:80px"><div style="width:${Math.max(0,Math.min(100,v)).toFixed(0)}%;height:100%;background:${c}"></div></div>`;
   box.innerHTML=`
+    <div class="between" style="margin:6px 0 12px"><b class="small">${IC('scale')} שלב 3 · תוצאה (מתעדכן בזמן אמת)</b><button class="btn sm primary" onclick="submitScenario('${sc.id}')" title="סמן תרחיש זה להגשה ועבור לגיליון הזנה">בחר להגשה → גיליון הזנה</button></div>
     <div class="kpis" style="margin-bottom:12px">
       ${kpi('מזומן סופי מוקרן (Q9)',fmt(sp.endCash),(dCash>=0?'+':'')+fmt(Math.round(dCash))+' מול בסיס')}
       ${kpi('שבירות רצפה',sp.breaches,sp.breaches?'סיכון בלתי-הפיך':'תקין')}
@@ -2664,6 +2671,7 @@ window.renderCompMove=()=>{
     <div class="small muted" style="margin-top:8px">${match?'תרחיש: המתחרים חתכו ואנחנו מיישרים קו — מגן על נתח אך שוחק מחיר.':'תרחיש: המתחרים חתכו ואנחנו לא הגבנו — נתח השוק שלנו נשחק.'} השווה את שני המצבים כדי להחליט אם להגיב.</div>`;
 };
 window.pickForDecision=(id)=>{ const sc=S.scenarios.find(s=>s.id===id); if(sc)openDecisionModal(sc); };
+window.submitScenario=(id)=>{ const i=S.scenarios.findIndex(s=>s.id===id); if(i<0)return; const sc=S.scenarios[i]; S.scenarios.splice(i,1); S.scenarios.unshift(sc); save(); toast('התרחיש "'+sc.name+'" נבחר להגשה ✓','g'); go('export'); };
 
 /* ----- EXPORT (F8) ----- */
 PAGE_RENDER.export = (c)=>{
