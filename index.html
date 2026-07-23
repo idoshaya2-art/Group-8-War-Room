@@ -357,7 +357,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v6.9';
+const APP_VERSION = 'v7.0';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2601,7 +2601,7 @@ window.editScenario=(id)=>{
       <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
         <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
-        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg}${m.regions&&m.regions.length?` · ייצור רק באזורים עם מפעלים/פעילות: <b>${m.regions.join(', ')}</b>`:''}.</div></div>`:''}
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: קיבולת ≈${fmt(m.cap)} יח׳/רבעון · עלות יח׳ ≈${fmt(m.cost)} · עצימות ${(m.pf*100).toFixed(0)}% · מחיר ×${m.mg}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> כדי לזהות מפעלים לפי אזור במדויק':''}`:''}.</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
         <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
@@ -2917,12 +2917,19 @@ window.magicOptimize=(id)=>{
   // Only optimize production where the company ACTUALLY operates now — regions with plants (per-region
   // from the report) or, failing that, existing inventory. Plants take a quarter to build, so the plan
   // for the next quarters is bound to current capacity. This makes "מקסם ציון" relative to the real state.
+  // Production capability = PLANTS, not inventory. A region can hold finished goods (for selling) with no
+  // plant, so inventory must never imply you can produce there. Authoritative signal: per-region plants.
   const plantsBy=op.plantsByRegion||null;
-  const activeRegions=REGIONS.filter(r=>r.id!=='hq').filter(r=>
-    (plantsBy && plantsBy[r.id]>0) || (op.inventory||[]).some(i=>(i.region||'')===r.id && (i.qty||0)>0) );
-  const prodRegions=activeRegions.length?activeRegions:REGIONS.filter(r=>r.id!=='hq'); // no signal → all
+  const hasPlants=plantsBy && Object.keys(plantsBy).some(k=>plantsBy[k]>0);
+  let activeRegions, activeSrc;
+  if(hasPlants){ activeRegions=REGIONS.filter(r=>r.id!=='hq' && plantsBy[r.id]>0); activeSrc='מפעלים'; }
+  else { // no per-region plant data yet — proxy by where FINISHED PCs sit (produced at a plant); re-ingest for accuracy
+    activeRegions=REGIONS.filter(r=>r.id!=='hq' && (op.inventory||[]).some(i=>i.product==='Y'&&(i.region||'')===r.id&&(i.qty||0)>0));
+    activeSrc='מלאי מחשבים (משוער)'; }
+  const prodRegions=activeRegions.length?activeRegions:REGIONS.filter(r=>r.id!=='hq'); // no signal at all → all
+  if(!activeRegions.length) activeSrc='ללא נתוני מפעל — כל האזורים';
   const regionCap=r=>{ const perPlant=(DATALOG.capacity.Y||{})[r.id]||0;
-    return (plantsBy && plantsBy[r.id]>0) ? plantsBy[r.id]*perPlant : perPlant; }; // real ceiling per region
+    return (hasPlants && plantsBy[r.id]>0) ? plantsBy[r.id]*perPlant : perPlant; }; // real ceiling per region
   let cap=0; qs.forEach(q=>REGIONS.forEach(r=>{ cap=Math.max(cap,sc.levers[q].regions[r.id].production||0); }));
   if(!cap) cap=simCap(op)||prodRegions.reduce((a,r)=>a+regionCap(r),0)||8000; // Data Log capacity of ACTIVE regions
   const rd=op.rd||0, before=scoreProxy(sc.levers).value;
@@ -2938,7 +2945,7 @@ window.magicOptimize=(id)=>{
     const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,mg};
     if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
   }));
-  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg,regions:prodRegions.map(r=>r.name)}; save();
+  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cap,cost,pf:best.pf,mg:best.mg,regions:prodRegions.map(r=>r.name),activeSrc}; save();
   renderScenarios(); editScenario(id);
   toast('קסם: ציון '+before.toFixed(0)+' → '+best.score.toFixed(0)+(best.feasible?'':' (שובר רצפה)'), best.feasible?'g':'a');
 };
