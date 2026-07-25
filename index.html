@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.6';
+const APP_VERSION = 'v7.7';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3447,9 +3447,18 @@ function renderContracts(){
    the model interprets and cites — it never invents figures.
    ========================================================================= */
 const AI_PROVIDERS={
-  anthropic:{ label:'Anthropic (Claude)', short:'Claude', keyLS:'intopia_ai_key_anthropic', defModel:'claude-sonnet-5', keyHint:'sk-ant-...' },
-  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-4o', keyHint:'sk-...' },
+  anthropic:{ label:'Anthropic (Claude)', short:'Claude', keyLS:'intopia_ai_key_anthropic', defModel:'claude-opus-4-8', keyHint:'sk-ant-...',
+    picks:[['claude-opus-4-8','Opus 4.8 — החזק ביותר להחלטות אסטרטגיות'],['claude-opus-5','Opus 5'],['claude-sonnet-5','Sonnet 5 — מאוזן, זול יותר'],['claude-haiku-4-5','Haiku 4.5 — מהיר וזול']] },
+  openai:{ label:'OpenAI (GPT)', short:'GPT', keyLS:'intopia_ai_key_openai', defModel:'gpt-4o', keyHint:'sk-...',
+    picks:[['gpt-4o','GPT-4o'],['gpt-4o-mini','GPT-4o mini — מהיר וזול']] },
 };
+// Quick-pick list for the model field; the free-text input stays authoritative so any
+// model id the account has access to can still be typed in.
+function modelPickHtml(prov,cur){
+  const picks=AI_PROVIDERS[prov].picks||[], known=picks.some(p=>p[0]===cur);
+  return picks.map(([id,lbl])=>`<option value="${id}" ${id===cur?'selected':''}>${esc(lbl)}</option>`).join('')
+    + `<option value="" ${known?'':'selected'}>אחר — הקלדה חופשית</option>`;
+}
 function aiProvider(){ const p=S.ai&&S.ai.provider; return AI_PROVIDERS[p]?p:'anthropic'; }
 // Strip anything that isn't printable ASCII — API keys/model IDs are ASCII, and a stray
 // non-Latin-1 char (hidden space/newline/Hebrew from paste) makes fetch() headers throw.
@@ -3840,7 +3849,8 @@ window.openAISettings=()=>{
     <div class="field"><label class="fl">מפתח API</label>
       <input class="f" id="aiKey" type="password" value="${esc(getApiKey(prov))}" placeholder="${AI_PROVIDERS[prov].keyHint}"></div>
     <div class="small muted" style="margin:-4px 0 12px" id="keyNote"></div>
-    <div class="field"><label class="fl">מזהה מודל</label>
+    <div class="field"><label class="fl">מודל</label>
+      <select class="f" id="aiModelPick" onchange="aiModelPickSwitch()" style="margin-bottom:6px">${modelPickHtml(prov,aiModel(prov))}</select>
       <input class="f" id="aiModelInput" value="${esc(aiModel(prov))}" placeholder="${AI_PROVIDERS[prov].defModel}">
       <div class="small muted" style="margin-top:5px" id="modelHint"></div></div>
     <div class="small" style="color:var(--amber)">${IC('warn')} אבטחה: הרצה ישירות מהדפדפן חושפת את המפתח למי שיש לו גישה למכשיר. השתמש במפתח ייעודי עם תקציב מוגבל.</div>`,
@@ -3853,8 +3863,12 @@ function updateProviderHints(){
   note.textContent = prov==='openai'
     ? 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-platform.openai.com. הקריאה ישירה מהדפדפן.'
     : 'נשמר מקומית בלבד, ואינו נכלל בגיבוי. השג מפתח ב-console.anthropic.com.';
-  mh.textContent = prov==='openai' ? 'מומלץ: gpt-4o · (או gpt-4o-mini לזול/מהיר). ודא שהמזהה קיים בחשבון OpenAI שלך.' : 'למשל claude-sonnet-5 / claude-opus-4-8';
+  mh.textContent = prov==='openai' ? 'בחר מהרשימה, או הקלד מזהה אחר הקיים בחשבון OpenAI שלך.' : 'בחר מהרשימה, או הקלד מזהה אחר הקיים בחשבון Anthropic שלך.';
 }
+window.aiModelPickSwitch=()=>{
+  const v=$('#aiModelPick').value, inp=$('#aiModelInput');
+  if(v){ inp.value=v; } else { inp.value=''; inp.focus(); } // "אחר" clears the field for typing
+};
 window.aiProviderSwitch=()=>{
   const nv=$('#aiProvider').value;
   if(_aiPrevProvider && _aiPrevProvider!==nv){ setApiKey(_aiPrevProvider,$('#aiKey').value.trim());
@@ -3864,6 +3878,7 @@ window.aiProviderSwitch=()=>{
   $('#aiKey').placeholder=AI_PROVIDERS[nv].keyHint;
   $('#aiModelInput').value=aiModel(nv);
   $('#aiModelInput').placeholder=AI_PROVIDERS[nv].defModel;
+  $('#aiModelPick').innerHTML=modelPickHtml(nv,aiModel(nv));
   updateProviderHints();
 };
 window.saveAISettings=()=>{
