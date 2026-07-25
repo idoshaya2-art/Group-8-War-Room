@@ -201,8 +201,10 @@ table.tbl.wide input.f:focus,table.tbl.wide select.f:focus{background:var(--pane
 .finrow b{font-variant-numeric:tabular-nums}
 .finrow.tot{border-top:2px solid var(--line2);font-weight:800;margin-top:4px}
 .act{display:flex;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid var(--line);border-inline-start:4px solid;margin-bottom:12px;background:var(--panel)}
-.act.red{border-inline-start-color:var(--red);background:linear-gradient(90deg,var(--redbg),var(--panel))}
-.act.amber{border-inline-start-color:var(--amber);background:linear-gradient(90deg,var(--amberbg),var(--panel))}
+/* severity lives in the 4px rail only — the tinted card backgrounds fought the rail, the tags and the
+   dependency line for attention. One signal, one place. */
+.act.red{border-inline-start-color:var(--red)}
+.act.amber{border-inline-start-color:var(--amber)}
 .act.info{border-inline-start-color:var(--accent)}
 .act.good{border-inline-start-color:var(--green)}
 .act .an{width:26px;height:26px;border-radius:7px;background:var(--panel2);display:grid;place-items:center;font-weight:800;font-size:13px;flex-shrink:0;font-family:'Rubik'}
@@ -210,7 +212,8 @@ table.tbl.wide input.f:focus,table.tbl.wide select.f:focus{background:var(--pane
 .act .at b{font-size:14.5px}
 .act .at p{margin:5px 0 0;color:var(--muted);font-size:13.5px;line-height:1.55}
 .act .form{display:inline-flex;align-items:center;gap:5px;margin-top:7px;background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:3px 9px;font-size:12px;font-weight:700;color:var(--accent2)}
-.act .dep{margin-top:8px;font-size:12.5px;color:var(--amber);background:rgba(217,164,65,.08);border-radius:7px;padding:6px 9px;line-height:1.5}
+/* dependencies are context, not a severity — neutral so amber keeps meaning "recommended" */
+.act .dep{margin-top:8px;font-size:12.5px;color:var(--muted);background:var(--bg2);border:1px solid var(--line);border-radius:7px;padding:6px 9px;line-height:1.5}
 .depchain{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .depnode{background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:700}
 .depnode.here{border-color:var(--accent);color:var(--accent2);box-shadow:0 0 0 1px var(--accent) inset}
@@ -363,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.5';
+const APP_VERSION = 'v7.6';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -473,6 +476,7 @@ function defaultState(){
     quarters:q,
     scenarios:[],
     decisions:[],
+    ui:{ seen:{} }, // how many times each how-to legend was shown — auto-collapses once learned
     ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[] },
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
@@ -484,6 +488,17 @@ function load(){
   try{ const raw=localStorage.getItem(LS_KEY); if(raw){ S=deepMerge(defaultState(),JSON.parse(raw)); migrateIntel(); try{updateLearning(); backfillMasterPlan();}catch(e){} return; } }
   catch(e){ console.warn('load failed',e); }
   S=defaultState();
+}
+/* "How it works" legend that teaches once and then gets out of the way: open for the first few
+   visits, collapsed (but reopenable) afterwards. Stops the same 5 lines re-reading every quarter. */
+const LEGEND_OPEN_TIMES=3;
+function howTo(key,title,bodyHtml){
+  S.ui=S.ui||{seen:{}}; S.ui.seen=S.ui.seen||{};
+  const n=S.ui.seen[key]||0; const open=n<LEGEND_OPEN_TIMES;
+  S.ui.seen[key]=n+1; save(true);
+  return `<details class="card pad" style="margin-bottom:14px;border-color:var(--line2)" ${open?'open':''}>
+    <summary style="cursor:pointer;font-weight:700;font-size:13.5px;list-style:none">${title}${open?'':' <span class="small muted" style="font-weight:400">— לחץ לפתיחה</span>'}</summary>
+    <div class="small" style="line-height:2;margin-top:8px">${bodyHtml}</div></details>`;
 }
 function migrateIntel(){ // coerce legacy array marketIntel into the structured object shape
   QUARTERS.forEach(q=>{ const Q=S.quarters[q]; if(!Q)return;
@@ -1135,13 +1150,17 @@ function computeAlerts(q){
     desc:`${noPrice.length} פריטי מלאי ללא מחיר — "אין מחיר = אין מכירה". פריטים: ${noPrice.map(i=>(i.product==='X'?'Chip':(i.product==='Y'?'PC':(i.product||'?')))+(i.grade?'/'+i.grade:'')+(i.region?' ('+i.region+')':'')).join(', ')}.`});
   if((Q.operational.rd||0)===0) out.push({level:'amber',key:'rd',title:'מו״פ = 0',
     desc:'אין השקעת מו״פ ברבעון זה — שים לב לקנס עקביות ולפיגור טכנולוגי מול מתחרים.'});
-  S.config.contracts.forEach(c=>{
-    if(c.deliveryQuarter && qIndex(c.deliveryQuarter)>=qIndex(q)){
-      const invQty=Q.operational.inventory.filter(i=>i.product===c.product).reduce((a,i)=>a+(i.qty||0),0);
-      if(invQty<(c.qty||0)) out.push({level:'amber',key:'ct_'+c.id,title:'התחייבות חוזית בסיכון',
-        desc:`חוזה ${c.counterparty||'—'}: ${c.qty} × ${c.product||'—'} עד ${c.deliveryQuarter}. במלאי כעת ${invQty} בלבד.`});
-    }
+  // Contracts at risk are grouped into ONE alert — near-identical rows per quarter were flooding the list.
+  const atRisk=S.config.contracts.filter(c=>{
+    if(!c.deliveryQuarter || qIndex(c.deliveryQuarter)<qIndex(q)) return false;
+    const invQty=Q.operational.inventory.filter(i=>i.product===c.product).reduce((a,i)=>a+(i.qty||0),0);
+    return invQty<(c.qty||0);
   });
+  if(atRisk.length){
+    const invOf=c=>Q.operational.inventory.filter(i=>i.product===c.product).reduce((a,i)=>a+(i.qty||0),0);
+    out.push({level:'amber',key:'ct_group',title:atRisk.length===1?'התחייבות חוזית בסיכון':`${atRisk.length} התחייבויות חוזיות בסיכון`,
+      desc:`${atRisk.map(c=>`<b>${esc(c.deliveryQuarter)}</b>: ${fmt(c.qty)} × ${esc(c.product||'—')}${c.counterparty?' ('+esc(c.counterparty)+')':''} — במלאי ${fmt(invOf(c))}`).join(' · ')}. חסר ייצור/רכש לפני מועד האספקה.`});
+  }
   if(g.debtCeiling>0 && (Q.financial.loans||0)>g.debtCeiling) out.push({level:'amber',key:'debt',title:'חריגה מתקרת חוב',
     desc:`חוב ${fmt(Q.financial.loans)} מעל התקרה שהוגדרה (${fmt(g.debtCeiling)}).`});
   return out;
@@ -1539,6 +1558,28 @@ PAGE_RENDER.plan = (c)=>{
   const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר');
   const badge=lvl => lvl==='red'?{t:'חובה',c:'r'} : lvl==='amber'?{t:'מומלץ',c:'a'} : lvl==='good'?{t:'תקין',c:'g'} : {t:'אופציונלי',c:'b'};
   const catName={fin:'פיננסי',strat:'אסטרטגי',ops:'תפעול',mkt:'שיווק'};
+  // Pull the concrete input numbers out of the sim payload into a scannable strip, so the values you
+  // actually type are not buried inside the prose paragraph.
+  const fieldStrip=(sim)=>{ if(!sim) return '';
+    const chip=(k,v)=>`<span class="fchip" style="font-weight:700">${k}: <span class="num">${v}</span></span>`;
+    const out=[];
+    if(sim.rd!=null) out.push(chip('מו״פ',fmt(sim.rd)));
+    Object.entries(sim.regions||{}).forEach(([rid,p])=>{ const rn=(REGIONS.find(r=>r.id===rid)||{}).name||rid; const cur=(REGIONS.find(r=>r.id===rid)||{}).cur||'';
+      const bits=[];
+      if(p.production) bits.push(chip('ייצור',fmt(p.production)+(p.model?' '+p.model:'')));
+      if(p.price) bits.push(chip('מחיר',fmt(p.price)+' '+cur));
+      if(p.qtySold) bits.push(chip('כמות',fmt(p.qtySold)));
+      if(p.sales&&!p.price) bits.push(chip('הכנסה',fmt(p.sales)+' '+cur));
+      if(p.advertising) bits.push(chip('פרסום',fmt(p.advertising)+' '+cur));
+      if(p.offices) bits.push(chip('משרדים',p.offices));
+      if(p.newFac) bits.push(chip('מפעלים',p.newFac));
+      if(p.transferIn) bits.push(chip('העברה',fmt(p.transferIn)+' '+cur));
+      if(p.invest) bits.push(chip('השקעה',fmt(p.invest)+' '+cur));
+      if(bits.length) out.push(`<span class="small muted" style="font-weight:700">${rn}</span>`+bits.join(''));
+    });
+    if(!out.length) return '';
+    return `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px;padding:7px 9px;background:var(--bg2);border:1px solid var(--line);border-radius:8px">
+      <span class="small muted" style="font-weight:700">להזנה →</span>${out.join('')}</div>`; };
   // ONE numbered priority list (buildActionPlan already sorts by severity)
   const actionList = items.map((it,i)=>{ const bd=badge(it.level); const blk=it.blocked;
     const optDrill = it.options ? `<details class="fverd" style="margin-top:9px"><summary>${IC('sliders')} ${it.options.length} אופציות ומספרים — לחץ לפירוט ⌄</summary>
@@ -1551,6 +1592,7 @@ PAGE_RENDER.plan = (c)=>{
           <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}<span class="fchip">${catName[it.cat]||'—'}</span></span></div>
         <p>${it.detail}</p>
         ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
+        ${!it.options?fieldStrip(it.sim):''}
         ${it.dep?`<div class="dep">${IC('sliders')} תלוי ב: ${it.dep}</div>`:''}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
         ${optDrill}
@@ -1578,10 +1620,9 @@ PAGE_RENDER.plan = (c)=>{
       </div>
       ${_topPivot?`<div class="tag a" style="display:block;margin-top:10px;line-height:1.6">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
     </div>
-    <div class="card pad" style="margin-bottom:14px;border-color:var(--line2)"><div class="small" style="line-height:2">
-      <b>${IC('clipboard')} איך עובדים כאן (הזנות ל-${targetQ}):</b><br>
-      <b>1.</b> רשימה <b>ממוספרת לפי עדיפות</b> — עבור מלמעלה למטה. <b>2.</b> תגית לכל פעולה: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (חסום = אסור עד שהתלות מתקיימת).<br>
-      <b>3.</b> "<b>שלח לסימולטור</b>" מעביר את המספרים של <b>אותה פעולה בלבד</b> לתרחיש. יש אופציות? בחר אחת בפירוט. <b>4.</b> "תלוי ב:" = מה חייב קודם. <b>5.</b> היועץ (למטה) נותן חוות-דעת — <b>לא משנה</b> את הרשימה.</div></div>
+    ${howTo('plan',`${IC('clipboard')} איך עובדים כאן (הזנות ל-${targetQ})`,
+      `<b>1.</b> רשימה <b>ממוספרת לפי עדיפות</b> — עבור מלמעלה למטה. <b>2.</b> תגית לכל פעולה: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (חסום = אסור עד שהתלות מתקיימת).<br>
+      <b>3.</b> "<b>שלח לסימולטור</b>" מעביר את המספרים של <b>אותה פעולה בלבד</b> לתרחיש. יש אופציות? בחר אחת בפירוט. <b>4.</b> "תלוי ב:" = מה חייב קודם. <b>5.</b> היועץ (למטה) נותן חוות-דעת — <b>לא משנה</b> את הרשימה.`)}
     <div class="between" style="margin:2px 2px 10px"><b>${items.length} פעולות ל-${targetQ}${mustCount?` · ${mustCount} חובה`:''}</b><span class="small muted">כל מספר מחושב במנוע</span></div>
     ${actionList}
     <div class="small muted" style="margin:16px 2px 6px">${IC('cpu')} <b>חוות דעת שנייה (לא משנה את הרשימה למעלה):</b> היועץ בודק את הפעולות מול חוקים · שוק · נזילות · כדאיות 50/50.</div>
@@ -2046,7 +2087,22 @@ function buildActionPlan(q,targetQ){
       sim:{q:targetQ,regions:{[sellRegion]:{offices:2}}}});
   }
   // 8. Contracts at risk
-  S.config.contracts.forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
+  // Group contracts by product+grade so two near-identical cards (e.g. X3 for Q5 and Q6) become ONE
+  // action with the combined shortfall, driven by the earliest delivery date.
+  const _ctGroups={};
+  S.config.contracts.forEach(c=>{ if(!c.deliveryQuarter || qIndex(c.deliveryQuarter)<qIndex(q)) return;
+    const k=(c.product||'')+'|'+(c.grade!=null?c.grade:'');
+    (_ctGroups[k]=_ctGroups[k]||[]).push(c); });
+  Object.values(_ctGroups).map(list=>{
+    const sorted=list.slice().sort((a,b)=>qIndex(a.deliveryQuarter)-qIndex(b.deliveryQuarter));
+    const first=sorted[0];
+    return Object.assign({},first,{
+      qty:list.reduce((a,c)=>a+(c.qty||0),0),
+      deliveryQuarter:first.deliveryQuarter,
+      counterparty:list.length>1?`${first.counterparty||'התחייבות'} +${list.length-1}`:first.counterparty,
+      note:list.length>1?`מקובץ מ-${list.length} חוזים: ${sorted.map(c=>`${c.deliveryQuarter} (${fmt(c.qty)})`).join(', ')}`:first.note,
+    });
+  }).forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
     const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
     const lead=qIndex(ct.deliveryQuarter)-qIndex(q); // quarters until delivery (production must precede by ~1)
     const short=(ct.qty||0)-inv; const prodGrade=(ct.product||'')+(ct.grade!=null?ct.grade:'');
@@ -2560,13 +2616,11 @@ PAGE_RENDER.sim = (c)=>{
   const q=S.activeQuarter;
   if(!S.quarters[q].entered){ c.innerHTML=emptyBlock(IC('sliders'),'אין נתוני בסיס','קלוט רבעון בסיס כדי לבנות תרחישים.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   c.innerHTML=`
-    <div class="card pad" style="margin-bottom:16px;border-color:var(--line2)"><div class="small" style="line-height:2">
-      <b>${IC('sliders')} איך עובד הסימולטור (בסיס: ${q}):</b><br>
-      <b>1.</b> <b>תרחיש</b> = תוכנית פעולה מלאה לרבעונים הבאים. כל פעולה ש<b>"שלחת לסימולטור"</b> מלשונית ההחלטות נאספת לתרחיש כאן.<br>
+    ${howTo('sim',`${IC('sliders')} איך עובד הסימולטור (בסיס: ${q})`,
+      `<b>1.</b> <b>תרחיש</b> = תוכנית פעולה מלאה לרבעונים הבאים. כל פעולה ש<b>"שלחת לסימולטור"</b> מלשונית ההחלטות נאספת לתרחיש כאן.<br>
       <b>2.</b> <b>כוונן</b> את המנופים (המספרים) — המנוע מחשב <b>בזמן אמת</b> את ההשפעה על הציון (50/50) ועל המזומן, בתחתית העורך.<br>
       <b>3.</b> מרוצה? <b>"בחר להגשה"</b>, ואז עבור ל<b>"5 · הזנה והגשה"</b> כדי לייצא לגיליון INTOPIA.<br>
-      <span class="small muted">"קסם" סורק אוטומטית שילובי מנופים ובוחר את המיטבי · "רגישות" בודק מה קורה אם ההנחות זזות ±10%.</span>
-    </div></div>
+      <span class="small muted">"קסם" סורק אוטומטית שילובי מנופים ובוחר את המיטבי · "רגישות" בודק מה קורה אם ההנחות זזות ±10%.</span>`)}
     <div class="between" style="margin-bottom:12px">
       <b>${IC('scale')} שלב 1 · התרחישים שלך (<span id="scenCount">${S.scenarios.length}</span>)</b>
       <div class="row">${S.scenarios.length?`<button class="btn" onclick="cloneLastScenario()" title="שכפל את התרחיש האחרון והמשך ממנו">⧉ שכפל אחרון</button>`:''}<button class="btn" onclick="sensitivity()">± רגישות</button><button class="btn primary" onclick="newScenario()">+ תרחיש חדש</button></div>
