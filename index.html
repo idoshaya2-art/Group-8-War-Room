@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.2';
+const APP_VERSION = 'v8.3';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -643,7 +643,7 @@ function defaultState(){
     scenarios:[],
     decisions:[],
     ui:{ seen:{} }, // how many times each how-to legend was shown — auto-collapses once learned
-    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[] },
+    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[], strategy:null },
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
     masterPlan:{ snapshots:[] },
@@ -735,6 +735,9 @@ function fmt(n,dec=0){ if(n===null||n===undefined||isNaN(n))return '—';
 function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function qIndex(q){ return QUARTERS.indexOf(q); }
 function nextQuarters(from){ return QUARTERS.slice(qIndex(from)+1); }
+// A master plan has to reach the quarter that is actually scored. Plans used to stop three
+// quarters out, which left the last quarters of the game unplanned and invisible.
+function planHorizon(from){ return nextQuarters(from); }
 function toast(msg,cls=''){
   const el=document.createElement('div'); el.className='toast '+cls; el.textContent=msg;
   $('#toast').appendChild(el); setTimeout(()=>{el.style.opacity=0;el.style.transition='.4s';setTimeout(()=>el.remove(),400);},2600);
@@ -2904,14 +2907,14 @@ function simCap(op){ return op.inventory.reduce((a,i)=>a+(i.qty||0),0); }
 let _simEditId=null,_simEditQ=null;
 window.newScenario=()=>{
   const sc={id:uid(),name:'תרחיש '+(S.scenarios.length+1),base:S.activeQuarter,levers:{},createdAt:Date.now()};
-  nextQuarters(S.activeQuarter).slice(0,3).forEach(q=>{ sc.levers[q]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[q].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}); });
+  planHorizon(S.activeQuarter).forEach(q=>{ sc.levers[q]={rd:0,regions:{}}; REGIONS.forEach(r=>sc.levers[q].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}); });
   S.scenarios.push(sc); save(); renderScenarios(); editScenario(sc.id);
 };
 // Wave 3 · clone a scenario by POSITION — copies the source plan into the current quarter's targets,
 // re-keying quarter→quarter in order, so last quarter's plan carries forward instead of a blank sheet.
 window.cloneScenario=(srcId)=>{
   const src=S.scenarios.find(s=>s.id===srcId); if(!src){ newScenario(); return; }
-  const targets=nextQuarters(S.activeQuarter).slice(0,3); const srcQs=Object.keys(src.levers);
+  const targets=planHorizon(S.activeQuarter); const srcQs=Object.keys(src.levers);
   const sc={id:uid(),name:src.name+' (עותק)',base:S.activeQuarter,levers:{},createdAt:Date.now()};
   targets.forEach((tq,i)=>{ const srcLev=src.levers[srcQs[i]];
     if(srcLev){ sc.levers[tq]=JSON.parse(JSON.stringify(srcLev)); (sc.levers[tq].actions||[]).forEach(a=>a.aid=Math.random().toString(36).slice(2,8)); }
@@ -3349,7 +3352,7 @@ window.sensitivity=()=>{
     {name:'כמות +10%',mult:{production:1.1}},{name:'עלות +10%',mult:{unitCost:1.1}}];
   const src=S.scenarios[0];
   const rows=variants.map(v=>{
-    const lev={}; nextQuarters(base).slice(0,3).forEach(q=>{ lev[q]={rd:src?src.levers[q]?.rd||0:0,regions:{}};
+    const lev={}; planHorizon(base).forEach(q=>{ lev[q]={rd:src?src.levers[q]?.rd||0:0,regions:{}};
       REGIONS.forEach(r=>{ const s=(src&&src.levers[q]&&src.levers[q].regions[r.id])||{}; lev[q].regions[r.id]={...{production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0},...s};
         for(const k in v.mult) lev[q].regions[r.id][k]=(lev[q].regions[r.id][k]||0)*v.mult[k]; }); });
     const sp=scoreProxy(lev); return {name:v.name,endCash:sp.endCash,d:sp.endCash-bs.endCash,score:sp.value};
@@ -4016,6 +4019,152 @@ const AI_SYSTEM = `אתה ראש חדר-המלחמה האנליטי של צוו�
 /* ===== AI advisor layer — judgment ON TOP of the deterministic engine =====
    The engine computes every number; the advisor prioritises under constraint,
    red-teams, and briefs the team — citing engine numbers, never inventing. */
+/* ==========================================================================
+   MASTER-PLAN STRATEGIST — the one place the AI is allowed to drive.
+   Division of labour: the MODEL chooses the SHAPE of a strategy across the whole
+   remaining horizon (where to produce, how to phase R&D, when to build, what to
+   price for); the ENGINE supplies and re-derives EVERY number, scores it with
+   scoreProxy, projects the cash with projectCashflow, and runs all legality guards.
+   A variant the model likes but the engine rejects is shown as rejected — the model
+   never reports a score, and no proposed figure reaches the plan unverified.
+   ========================================================================== */
+const STRATEGY_SYSTEM = `אתה אסטרטג INTOPIA בכיר לחברה 8. אתה מתכנן את **כל** הרבעונים שנותרו עד Q9 כדי למקסם את הציון הסופי (50% ביצועים פיננסיים + 50% פוטנציאל עתידי).
+
+חלוקת העבודה — קריטית:
+- **אתה** בוחר את צורת האסטרטגיה: באיזה אזור לייצר, מתי לבנות מפעל, איך לפזר מו״פ על פני הרבעונים, לאיזה מיצוב מחיר לכוון, מתי לפרסם, מה לוותר עליו.
+- **המנוע** יחשב את הציון, התזרים והחוקיות. אתה **לא** מדווח ציון, לא מדווח תזרים, ולא ממציא מספר שאין לו עוגן בהקשר.
+
+חוקים שאתה חייב לכבד (הם ייבדקו אוטומטית ווריאנט לא-חוקי יידחה):
+- ייצור רק באזורים שיש בהם מפעל **כרגע**. מפעל חדש נבנה רבעון אחד ומייצר רק מהרבעון שאחריו.
+- סחורה שיוצרה ברבעון נכנסת למלאי בסופו — נמכרת רק מהרבעון הבא.
+- עד 2 דרגות למוצר באזור. משרדי מכירות: 0, או 2 עד 10 (מרכזי + אזוריים).
+- מו״פ מינימלי לרבעון: שבב 40,000 SF, מחשב 70,000 SF. דרגה עולה לכל היותר ב-1 לרבעון.
+- מחיר חייב להיות בטווח עוגן השוק שבהקשר. פרסום מתחת לסף האפקטיביות = בזבוז.
+- מינימום 20,000 SF במטה בכל עת.
+
+החזר **JSON תקין בלבד**, בלי טקסט לפניו או אחריו, במבנה:
+{"variants":[{"name":"שם קצר","thesis":"משפט-שניים: על מה האסטרטגיה מהמרת ומה היא מקריבה","risk":"הסיכון המרכזי","quarters":{"Q4":{"rd":120000,"regions":{"europe":{"production":15000,"price":135,"qtySold":12000,"advertising":60000,"newFac":0,"offices":2}}}}}]}
+
+הנחיות לווריאנטים: החזר בדיוק 3, שונים באמת זה מזה (לא אותה אסטרטגיה בעוצמות שונות) — למשל אחד שמקסם מזומן עכשיו, אחד שמשקיע במו״פ לפוטנציאל, ואחד שמרחיב קיבולת/שווקים. כסה **את כל הרבעונים** שמופיעים ב"רבעונים לתכנון" בהקשר. אזור בלי פעילות — פשוט אל תכלול אותו.`;
+
+/* Strict, defensive parse: the model's output is untrusted text. We accept only the
+   fields the engine understands, coerce every value to a finite number, and drop the
+   rest. Nothing here is allowed to reach the plan without passing through scoreProxy. */
+function parseStrategyJSON(txt, horizon){
+  let raw=String(txt||'').trim();
+  const fence=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) raw=fence[1].trim();
+  const s=raw.indexOf('{'), e=raw.lastIndexOf('}'); if(s<0||e<=s) throw new Error('התשובה לא הכילה JSON');
+  let obj; try{ obj=JSON.parse(raw.slice(s,e+1)); }catch(err){ throw new Error('JSON לא תקין: '+err.message); }
+  const n=v=>{ const x=Number(v); return isFinite(x)&&x>=0 ? x : 0; };
+  const out=(obj.variants||[]).slice(0,3).map(v=>{
+    const levers={};
+    horizon.forEach(q=>{
+      const src=(v.quarters||{})[q]||{};
+      levers[q]={rd:n(src.rd), regions:{}};
+      REGIONS.forEach(r=>{
+        const g=(src.regions||{})[r.id]||{};
+        const price=n(g.price), qty=n(g.qtySold), prod=n(g.production);
+        levers[q].regions[r.id]={ production:prod, unitCost:n(g.unitCost),
+          price, qtySold:qty, sales:Math.round(price*qty),
+          advertising:n(g.advertising), invest:n(g.invest), transferIn:n(g.transferIn),
+          newFac:Math.min(3,Math.round(n(g.newFac))), offices:Math.round(n(g.offices)),
+          product:'Y', model:g.model==='Deluxe'?'Deluxe':'Standard', margin:null, advPct:null };
+      });
+    });
+    return { name:String(v.name||'ללא שם').slice(0,40), thesis:String(v.thesis||'').slice(0,400),
+      risk:String(v.risk||'').slice(0,300), levers };
+  });
+  if(!out.length) throw new Error('לא הוחזרו וריאנטים');
+  return out;
+}
+/* Every variant is re-scored from scratch by the engine and run past the legality
+   guards. This is what makes the strategist safe to use: its judgement is advisory,
+   its arithmetic is never trusted. */
+function scoreStrategyVariant(v, base){
+  const sp=scoreProxy(v.levers);
+  const proj=projectCashflow(base, v.levers);
+  const breaches=proj.filter(x=>x.breach);
+  const fake={levers:v.levers};
+  const violations=[];
+  const op=S.quarters[base].operational, plantsBy=op.plantsByRegion||null;
+  planHorizon(base).forEach(q=>{
+    const ph=phantomSales(fake,q); if(ph.length) violations.push(`${q}: מכירה ${fmt(ph[0].sold)} מול היצע ${fmt(ph[0].supply)}`);
+    const ol=officeLegality(fake,q); if(ol.length) violations.push(`${q}: ${ol[0].region} ${ol[0].n} משרדים — ${ol[0].why}`);
+    const caps=capacityCheck(fake,q); if(caps.length) violations.push(`${q}: ${caps[0].name} ${fmt(caps[0].prod)} > קיבולת ${fmt(caps[0].cap)}`);
+    if(plantsBy) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+      const pr=(v.levers[q].regions[r.id]||{}).production||0;
+      if(pr>0 && !(plantsBy[r.id]>0)) violations.push(`${q}: ייצור ב${r.name} ללא מפעל`); });
+    const rd=v.levers[q].rd||0;
+    if(rd>0 && rd<DATALOG.rdMinPerQuarter.X) violations.push(`${q}: מו״פ ${fmt(rd)} מתחת למינימום החוקי`);
+  });
+  return { ...v, score:sp.value, past:sp.pastHalf, pot:sp.potentialHalf, endCash:sp.endCash,
+    breaches:breaches.length, worstBreach:breaches.length?breaches[0].q:null,
+    violations:violations.slice(0,4), legal:violations.length===0, feasible:breaches.length===0 };
+}
+function strategyContext(base, horizon){
+  const L=[buildAIContext()];
+  L.push(`## רבעונים לתכנון [חובה לכסות את כולם]: ${horizon.join(', ')}`);
+  const bl=S.scenarios[0];
+  const sp0=scoreProxy(bl?bl.levers:null), mp=masterPlanStatus();
+  L.push(`## נקודת הפתיחה שהמנוע חישב [עובדה]`);
+  L.push(`- ציון נוכחי ${sp0.value.toFixed(0)}/100 — מחצית עבר ${sp0.pastHalf.toFixed(0)} · מחצית עתיד ${sp0.potentialHalf.toFixed(0)}. יעד ${mp.tScore}. נותרו ${mp.remaining} רבעונים.`);
+  L.push(`- **המחצית החלשה היא מה שכדאי להזיז**: ${sp0.pastHalf<sp0.potentialHalf?'העבר (רווח/יעילות) — צריך למכור ברווחיות':'העתיד (טק/נתח/בריאות פיננסית) — צריך מו״פ ונתח שוק'}.`);
+  const plantsBy=S.quarters[base].operational.plantsByRegion;
+  L.push(`- מפעלים לפי אזור כרגע: ${plantsBy?REGIONS.filter(r=>r.id!=='hq').map(r=>`${r.name} ${plantsBy[r.id]||0}`).join(' · '):'לא נקלט — הנח שאין מפעלים חדשים'}. **ייצור רק שם.**`);
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const a=priceAnchors(r.id,'Y');
+    const cap=marketCapUnits('Y',r.id);
+    L.push(`- ${r.name}: עוגן מחיר מחשב ${fmt(a.base)} ${r.cur} (${a.src}) · תקרת שוק ~${fmt(cap)} יח׳/רבעון · סף פרסום ${fmt(advThreshold(r.id,'Y'))} ${r.cur} · גמישות מחיר ${priceElast(r.id,'Y')}`); });
+  L.push(`- מו״פ: מינימום חוקי שבב ${fmt(DATALOG.rdMinPerQuarter.X)} SF · מחשב ${fmt(DATALOG.rdMinPerQuarter.Y)} SF לרבעון. דרגה עולה ≤1/רבעון, ולכן פיזור על פני רבעונים עדיף על מכה אחת.`);
+  return L.join('\n');
+}
+window.runStrategy=async()=>{
+  if(!getApiKey()){ openAISettings(); return; }
+  const base=S.activeQuarter, horizon=planHorizon(base);
+  if(!horizon.length){ toast('אין רבעונים לתכנון — Q9 הוא האחרון','a'); return; }
+  const btn=$('#stratBtn'), out=$('#stratOut');
+  if(btn){ btn.disabled=true; btn.textContent='מתכנן…'; }
+  if(out) out.innerHTML=`<div class="chip">${IC('clock')} האסטרטג בונה 3 אסטרטגיות ל-${horizon[0]}→Q9, והמנוע יתמחר כל אחת… (עד ~60 שניות)</div>`;
+  try{
+    const txt=await callLLM([{role:'user',content:strategyContext(base,horizon)+
+      `\n\n---\nבנה 3 אסטרטגיות שונות באמת ל-${horizon.join(', ')} שממקסמות את הציון הסופי. החזר JSON בלבד לפי המבנה שנקבע.`}],
+      STRATEGY_SYSTEM, {max_tokens:3000});
+    const variants=parseStrategyJSON(txt,horizon).map(v=>scoreStrategyVariant(v,base));
+    // rank: legal and feasible first, then by engine score, then by ending cash
+    variants.sort((a,b)=> (b.legal-a.legal)||(b.feasible-a.feasible)||(b.score-a.score)||(b.endCash-a.endCash));
+    S.ai.strategy={base, at:Date.now(), variants:variants.map(v=>({...v}))};
+    save(); renderStrategy();
+  }catch(e){
+    if(out) out.innerHTML=`<div class="tag r" style="display:block;line-height:1.7;white-space:normal">${IC('warn')} ${esc(aiErr(e))}</div>`;
+  }
+  const b2=$('#stratBtn'); if(b2){ b2.disabled=false; b2.textContent='בנה תוכנית-על עד Q9'; }
+};
+function renderStrategy(){
+  const out=$('#stratOut'); if(!out) return;
+  const st=S.ai&&S.ai.strategy;
+  if(!st||!st.variants||!st.variants.length){ out.innerHTML=`<div class="small muted">לחץ "בנה תוכנית-על עד Q9" — האסטרטג יציע 3 אסטרטגיות לכל הרבעונים שנותרו, והמנוע יתמחר ויבדוק חוקיות של כל אחת.</div>`; return; }
+  const stale=st.base!==S.activeQuarter;
+  out.innerHTML=`${stale?`<div class="tag a" style="display:block;margin-bottom:10px">${IC('warn')} נבנה על בסיס ${st.base} ואתה כבר ב-${S.activeQuarter} — בנה מחדש כדי לתכנן מהמצב העדכני.</div>`:''}
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אסטרטגיה</th><th>ציון מנוע</th><th>עבר</th><th>עתיד</th><th>מזומן סופי</th><th>חוקיות</th><th></th></tr></thead><tbody>
+    ${st.variants.map((v,i)=>`<tr>
+      <td style="text-align:start;max-width:280px;white-space:normal"><b>${esc(v.name)}</b>
+        <div class="small muted">${esc(v.thesis)}</div>
+        ${v.risk?`<div class="small" style="color:var(--amber)">סיכון: ${esc(v.risk)}</div>`:''}</td>
+      <td class="num"><b style="font-size:16px">${v.score.toFixed(0)}</b></td>
+      <td class="num">${v.past.toFixed(0)}</td><td class="num">${v.pot.toFixed(0)}</td>
+      <td class="num">${fmt(Math.round(v.endCash))}</td>
+      <td style="text-align:start;max-width:240px;white-space:normal">${v.legal&&v.feasible?'<span class="tag g">עובר</span>':
+        `<span class="tag r">נדחה</span><div class="small muted">${v.violations.length?esc(v.violations.join(' · ')):''}${v.breaches?` · שבירת רצפה ב-${v.worstBreach}`:''}</div>`}</td>
+      <td><button class="btn sm ${v.legal&&v.feasible?'primary':''}" onclick="applyStrategy(${i})">החל</button></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="small muted" style="margin-top:10px;line-height:1.7">${IC('info')} כל הציונים בטבלה חושבו על-ידי <b>המנוע</b> מהמנופים שהאסטרטג הציע — לא דווחו על-ידי ה-AI. וריאנט "נדחה" הפר חוק או שבר רצפת מזומן; אפשר להחיל אותו בכל זאת ולכוונן ידנית בסימולטור.</div>`;
+}
+window.applyStrategy=(i)=>{
+  const st=S.ai&&S.ai.strategy; const v=st&&st.variants[i]; if(!v)return;
+  const sc={id:uid(),name:v.name.slice(0,28),base:st.base,levers:JSON.parse(JSON.stringify(v.levers)),createdAt:Date.now()};
+  Object.keys(sc.levers).forEach(q=>syncActionsToLevers(sc.levers[q]));
+  S.scenarios.unshift(sc); save(); toast('נוצר תרחיש "'+sc.name+'" — נפתח בסימולטור','g');
+  go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
+};
 const ADVISOR_SYSTEM = `אתה יועץ בכיר ומנוסה לצוות INTOPIA (חברה 8). "המנוע" הדטרמיניסטי כבר חישב את המספרים וההמלצות הקונקרטיות לרבעון {targetQ}. תפקידך: לוודא שכל פעולה מדויקת, חוקית וכדאית — ולהוציא רשימת פעולות מוכנה-להזנה. שיפוט, לא חשבון.
 
 ## איך אתה עובד — ביקורת 4 עמודים לכל פעולה
@@ -4179,6 +4328,14 @@ PAGE_RENDER.ai = (c)=>{
           </div>
         </div>
       </div>
+      <div class="card" style="border-color:var(--purple)">
+        <div class="ch"><h3>${IC('trendUp')} אסטרטג תוכנית-על — ${planHorizon(S.activeQuarter)[0]||'Q9'}→Q9</h3>
+          <button class="btn primary" id="stratBtn" onclick="runStrategy()" style="margin-inline-start:auto">בנה תוכנית-על עד Q9</button></div>
+        <div class="cb">
+          <div class="small muted" style="margin-bottom:10px;line-height:1.7">ה-AI בוחר את <b>צורת האסטרטגיה</b> לכל הרבעונים שנותרו; <b>המנוע</b> מחשב את הציון, מקרין תזרים ובודק חוקיות של כל אחת. וריאנט שמפר חוק מסומן "נדחה" — ה-AI לא מדווח ציון, והמספרים שלו לא נכנסים לתוכנית בלי אימות.</div>
+          <div id="stratOut"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="ch"><h3>${IC('users')} מצב מועצה — 5 פרספקטיבות</h3></div>
         <div class="cb">
@@ -4192,7 +4349,7 @@ PAGE_RENDER.ai = (c)=>{
       </div>
     </div>`;
   if(dropStalePending()) save();
-  renderChatLog();
+  renderChatLog(); renderStrategy();
 };
 function renderChatLog(){
   const box=$('#chatLog'); if(!box)return;
