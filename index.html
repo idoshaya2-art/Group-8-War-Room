@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.8';
+const APP_VERSION = 'v7.9';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1112,7 +1112,7 @@ window.openGoalOptimizer=()=>{ const panel=$('#goalOptPanel'); if(!panel)return;
   const line=(label,cur,next,pct)=>{ const dir=next>cur?'↑':(next<cur?'↓':'='); const col=next>cur?'var(--green)':(next<cur?'var(--amber)':'var(--muted)');
     return `<tr><td>${label}</td><td class="num">${fmt(cur)}${pct?'%':''}</td><td class="num" style="color:var(--purple)"><b>${fmt(next)}${pct?'%':''}</b></td><td style="color:${col}">${dir}</td></tr>`; };
   panel.innerHTML=`<div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--purple)">
-    <div class="between" style="flex-wrap:wrap;gap:8px"><b>${IC('zap')} יעדים מומלצים — לפי ${enteredQuarters().length} רבעונים שנקלטו · ${rec.remaining} עד Q9</b>
+    <div class="between" style="flex-wrap:wrap;gap:8px"><b>${IC('zap')} יעדים מומלצים — לפי ${enteredQuarters().length} רבעונים שנקלטו · נותרו ${rec.remaining} רבעונים לשחק${rec.remaining>0?` (${QUARTERS[qIndex(S.activeQuarter)+1]}→Q9)`:''}</b>
       <div class="row" style="gap:8px"><button class="btn sm primary" onclick="applyRecommendedGoals()">החל יעדים אלה</button><button class="btn sm" onclick="$('#goalOptPanel').innerHTML=''">בטל</button></div></div>
     <div style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>יעד Q9</th><th>נוכחי</th><th>מומלץ</th><th></th></tr></thead><tbody>
       ${line('רווח מצטבר',g.cumProfitTarget,rec.cumProfitTarget)}
