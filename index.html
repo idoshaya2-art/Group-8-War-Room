@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.4';
+const APP_VERSION = 'v8.5';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2459,12 +2459,28 @@ function buildActionPlan(q,targetQ){
       deliveryQuarter:first.deliveryQuarter,
       counterparty:list.length>1?`${first.counterparty||'התחייבות'} +${list.length-1}`:first.counterparty,
       note:list.length>1?`מקובץ מ-${list.length} חוזים: ${sorted.map(c=>`${c.deliveryQuarter} (${fmt(c.qty)})`).join(', ')}`:first.note,
+      _schedule:sorted.map(c=>({q:c.deliveryQuarter, qty:c.qty||0})),
     });
   }).forEach(ct=>{ if(ct.deliveryQuarter && qIndex(ct.deliveryQuarter)>=qIndex(q)){
-    const inv=op.inventory.filter(i=>i.product===ct.product).reduce((a,i)=>a+(i.qty||0),0);
-    const lead=qIndex(ct.deliveryQuarter)-qIndex(q); // quarters until delivery (production must precede by ~1)
+    // Grade matters: X0 chips cannot satisfy an X3 commitment. Only stock at or above the
+    // contracted grade counts (the alert was fixed for this; this card had been left behind).
+    const _cg=ct.grade!=null?ct.grade:0;
+    const inv=op.inventory.filter(i=>i.product===ct.product && (i.grade!=null?i.grade:0)>=_cg).reduce((a,i)=>a+(i.qty||0),0);
     const short=(ct.qty||0)-inv; const prodGrade=(ct.product||'')+(ct.grade!=null?ct.grade:'');
-    if(short>0){ const urgent=lead<=1; // must be produced now to arrive on time
+    // Existing stock covers the tranches in delivery order. Drive the card from the FIRST
+    // tranche still short — a grouped commitment shown against its earliest date would demand
+    // the whole quantity a quarter (or more) too early and tie up cash for nothing.
+    const sched=(ct._schedule&&ct._schedule.length)?ct._schedule:[{q:ct.deliveryQuarter,qty:ct.qty||0}];
+    let _left=inv, due=null;
+    for(const t of sched){ const unmet=Math.max(0,t.qty-_left); _left=Math.max(0,_left-t.qty);
+      if(unmet>0){ due={q:t.q, qty:unmet}; break; } }
+    if(!due) return;                      // every tranche already covered by stock of a suitable grade
+    const dueNow=due.qty, dueQ=due.q;
+    // Goods produced in a quarter enter inventory only at its end, so production must finish
+    // one quarter before delivery (Data Log 08).
+    const prodQ=QUARTERS[qIndex(dueQ)-1]||dueQ;
+    const lead=qIndex(dueQ)-qIndex(q);
+    if(short>0){ const urgent=qIndex(prodQ)<=qIndex(q)+1; // the deadline is the decision being made now
       const grd=ct.grade!=null?ct.grade:null, prd=ct.product||'X';
       const curGrade=prd==='X'?op.techX:op.techY;
       const gradeReady=grd==null||curGrade>=grd; // is the required tech grade already achieved?
@@ -2473,8 +2489,8 @@ function buildActionPlan(q,targetQ){
       const capNote=cap?`קיבולת מפעל אירופה ${fmt(cap)} ${prd}/רבעון → ${fmt(short)} ${plants>1?`דורש ${plants} מפעלים`:'נכנס במפעל אחד'}`:'';
       out.push({cat:'ops',level:(urgent||!gradeReady)?'red':'amber',conf:'data',
       blocked: !gradeReady ? `נדרש קודם מו״פ להעלאת דרגה ל-${prodGrade} (אתה ב-${prd}${curGrade}). בצע את פעולת המו״פ (H1-1) לפני שאפשר לייצר.` : null,
-      title:`${(urgent||!gradeReady)?'⚠ ':''}התחייבות ${prodGrade} — ייצר ${fmt(short)} (Deluxe) עד ${ct.deliveryQuarter}${urgent?' — עכשיו!':''}`,form:`A2-3 (${prd==='X'?'Chip':'Computer'} Production) · דגם Deluxe`,
-      detail:`<b>${esc(ct.counterparty||'התחייבות')}</b>: ${fmt(ct.qty)} × <b>${prodGrade} Deluxe</b> עד ${ct.deliveryQuarter}, במלאי ${fmt(inv)} — חסרים <b>${fmt(short)}</b>. ${ct.note?ct.note+'. ':''}${!gradeReady?`<b style="color:var(--red)">⚠ הדרגה טרם הושגה: אתה ב-${prd}${curGrade}, נדרש ${prodGrade} — חובה מו״פ (H1-1) עכשיו כדי לפתוח את הייצור.</b> `:''}${capNote?capNote+'. ':''}ייצור נכנס למלאי בסוף הרבעון וזמין למסירה רבעון אחריו — לכן ${lead<=1?`<b>הייצור חייב להתבצע ב-${q}</b>`:`ייצר עד ${QUARTERS[qIndex(ct.deliveryQuarter)-1]||q}`}.`,
+      title:`${(urgent||!gradeReady)?'⚠ ':''}התחייבות ${prodGrade} — ${fmt(dueNow)} עד ${dueQ}${sched.length>1?` (מתוך ${fmt(short)} בסך הכל)`:''}${urgent?' — ייצר עכשיו!':''}`,form:`A2-3 (${prd==='X'?'Chip':'Computer'} Production) · דגם Deluxe`,
+      detail:`<b>${esc(ct.counterparty||'התחייבות')}</b>: ${fmt(ct.qty)} × <b>${prodGrade} Deluxe</b> עד ${ct.deliveryQuarter}, במלאי ${fmt(inv)} — חסרים <b>${fmt(short)}</b>. ${ct.note?ct.note+'. ':''}${!gradeReady?`<b style="color:var(--red)">⚠ הדרגה טרם הושגה: אתה ב-${prd}${curGrade}, נדרש ${prodGrade} — חובה מו״פ (H1-1) עכשיו כדי לפתוח את הייצור.</b> `:''}${capNote?capNote+'. ':''}ייצור נכנס למלאי בסוף הרבעון וזמין למסירה רבעון אחריו — לכן <b>הייצור חייב להתבצע ב-${prodQ}</b>${urgent?' — כלומר בהחלטה שאתה מקבל עכשיו':''}.${ct._schedule&&ct._schedule.length>1?`<br><b>לוח האספקה בפועל:</b> ${ct._schedule.map(x=>`${fmt(x.qty)} ל-${x.q} (ייצור ב-${QUARTERS[qIndex(x.q)-1]||x.q})`).join(' · ')} — <b>אל תייצר את הכל מראש</b>, זה כובל מזומן רבעון מוקדם מדי.`:''}`,
       dep:`מו״פ→דרגה ${prodGrade} ⟵ ייצור A2-3 דגם Deluxe ⟵ מלאי סוף רבעון ⟵ מסירה. התחייבות ללא קנס — עמידה בזמן קריטית.`,
       optionCols:['יח׳','דגם','מפעלים'],options:[
         {name:'מלוא ההתחייבות',favors:'עומד ביעד המסירה במלואו',cells:[fmt(short),'Deluxe',plants||'—'],sim:{q:targetQ,regions:{europe:{production:short,product:prd,model:'Deluxe',unitCost:0}}}},
