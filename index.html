@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.9';
+const APP_VERSION = 'v8.0';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3927,18 +3927,27 @@ let _chatBusy=false;
 // A placeholder left behind by a tab that was closed mid-request would otherwise sit
 // in localStorage forever, and would also be resent as conversation history.
 function dropStalePending(){
+  if(_chatBusy)return false; // never touch a placeholder that a live request still owns
   if(!S.ai||!Array.isArray(S.ai.chat))return false;
   const n=S.ai.chat.length; S.ai.chat=S.ai.chat.filter(m=>m&&m.content!==CHAT_PENDING);
   return S.ai.chat.length!==n;
+}
+// Resolve the placeholder by object identity, not by index: a team-sync snapshot can
+// replace S (and therefore S.ai.chat) while the request is in flight, which would make
+// any saved index point at the wrong message — or at nothing.
+function settlePending(ph,msg){
+  if(!S.ai) S.ai={}; if(!Array.isArray(S.ai.chat)) S.ai.chat=[];
+  const i=S.ai.chat.indexOf(ph);
+  if(i>=0) S.ai.chat[i]=msg; else S.ai.chat.push(msg); // placeholder was wiped — never drop the answer
 }
 window.sendChat=async()=>{
   const input=$('#chatInput'); const q=(input.value||'').trim(); if(!q)return;
   if(_chatBusy){ toast('יש שאלה בעיבוד — המתן לתשובה','a'); return; } // Enter could re-enter past the disabled button
   if(!getApiKey()){ openAISettings(); return; }
-  _chatBusy=true;
   S.ai.chat=S.ai.chat||[]; dropStalePending();
+  _chatBusy=true;
   S.ai.chat.push({role:'user',content:q}); input.value='';
-  const slot=S.ai.chat.push({role:'assistant',content:CHAT_PENDING})-1; // write back to THIS slot, not to whatever is last
+  const ph={role:'assistant',content:CHAT_PENDING}; S.ai.chat.push(ph);
   save(); renderChatLog();
   const btn=$('#chatSend'); if(btn){ btn.disabled=true; btn.textContent='...'; }
   try{
@@ -3946,9 +3955,9 @@ window.sendChat=async()=>{
     const history=S.ai.chat.filter(m=>m.content!==CHAT_PENDING).map(m=>({role:m.role,content:m.content})).slice(-CHAT_HISTORY_TURNS);
     // prepend context to the latest user turn
     history[history.length-1]={role:'user',content:ctx+'\n\n---\nשאלה: '+q};
-    S.ai.chat[slot]={role:'assistant',content:await callLLM(history, AI_SYSTEM)};
+    settlePending(ph,{role:'assistant',content:await callLLM(history, AI_SYSTEM)});
   }catch(e){
-    S.ai.chat[slot]={role:'assistant',content:aiErr(e),err:true};
+    settlePending(ph,{role:'assistant',content:aiErr(e),err:true});
   }
   _chatBusy=false;
   save(); renderChatLog();
@@ -4087,7 +4096,11 @@ function applyRemote(remote){
   // ignore our own echo
   if(remote.meta && remote.meta.syncOrigin===sync.clientId && remote.meta.lastEdited===sync.lastPushedAt) return;
   sync.applying=true;
+  // The AI chat, provider and model are per-member local state: they are never pushed,
+  // so a remote snapshot must not overwrite them (and must not clobber an in-flight answer).
+  const localAI=S.ai;
   S=deepMerge(defaultState(), remote); migrateIntel();
+  if(localAI) S.ai=localAI;
   try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
   sync.applying=false;
   renderNav(); renderQuarterSelect(); renderQBox();
@@ -4098,7 +4111,10 @@ function schedulePush(){ clearTimeout(sync.pushTimer); sync.pushTimer=setTimeout
 function pushSync(){
   const cfg=sync.cfg; if(!sync.connected||!cfg) return;
   S.meta.syncOrigin=sync.clientId; sync.lastPushedAt=S.meta.lastEdited;
-  fetch(syncUrl(cfg),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(S)})
+  // Strip the personal AI chat: it is scratch space, it is large (a single answer is KBs
+  // pushed on every save), and sharing it let one member's snapshot wipe another's answer.
+  const payload=Object.assign({},S); delete payload.ai;
+  fetch(syncUrl(cfg),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})
     .then(r=>{ if(!r.ok) setSyncDot('var(--red)','שגיאת כתיבה ('+r.status+')'); else setSyncDot('var(--green)','מסונכרן'); })
     .catch(()=>setSyncDot('var(--amber)','אין חיבור'));
 }
