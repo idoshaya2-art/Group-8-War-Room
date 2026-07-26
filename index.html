@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.0';
+const APP_VERSION = 'v8.1';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -434,6 +434,119 @@ function freightCostLC(from, to, product, units, mode){
   const disc=DATALOG.freight.discountAboveBreak[mode]||1;
   return units<=bp ? Math.round(rate*units) : Math.round(rate*bp + rate*disc*(units-bp));
 }
+/* ==========================================================================
+   RULES — the game's BEHAVIOURAL rules, from the Intopia Guide (§4.10, §5.1-5.4).
+   DATALOG above holds the price/cost TABLES; this block holds how demand actually
+   REACTS. Without it the engine can only do arithmetic on costs, which is why an
+   advertising figure used to be "6% of revenue" — a number with no source.
+
+   Honesty contract for every entry below:
+     src  = the guide states this ORDERING or BOUND directly (authoritative).
+     est  = the magnitude is OUR calibrated estimate inside the guide's bounds and
+            respecting its ordering. Treat as a prior to be refined from results,
+            never as a quoted fact. Anything shown to the user from an `est` value
+            must be labelled "אומדן".
+   ========================================================================== */
+const RULES = {
+  src:'Intopia Guide §4.10.1, §5.1–5.4',
+  // §4.10.1: "The crucial determinants of the sales volume of a given company are
+  // price, advertising, grade and whether [assortment]". Only price+grade were modelled.
+  determinants:['price','advertising','grade','assortment'],
+
+  adv:{
+    // §5.4 bound (src): "all advertising elasticities at firm level are between 0.1 and 0.5".
+    bound:[0.1,0.5], industryFloor:0.05,
+    // §5.4 ordering (src): chips — US highest, Brazil lowest. PCs — Brazil highest at
+    // both levels; at firm level US somewhat higher than EU. Magnitudes est.
+    elast:{ X:{us:0.45, europe:0.30, brazil:0.15}, Y:{us:0.35, europe:0.25, brazil:0.45} },
+    elastNote:'סדר הגודל מהמדריך (0.1–0.5, §5.4); הדירוג בין אזורים מהמדריך; המספר המדויק אומדן.',
+    // §5.4 (src): threshold "pleasingly low in the EU and U.S., but fairly high in Brazil"
+    // for chips; for PCs "several times higher than for chips" in all cultures. LC/quarter, est.
+    threshold:{ X:{us:15000, europe:12000, brazil:60000}, Y:{us:60000, europe:50000, brazil:200000} },
+    thresholdNote:'מתחת לסף — הפרסום כמעט לא מזיז ביקוש. הסף עצמו אומדן לכיול מול תוצאות.',
+    // §5.4 (src): "Advertising effectiveness is larger everywhere in the quarter in which
+    // the advertising is paid for than in any later quarter"; the time-lagged part is
+    // greatest in the US, smallest in Brazil, and greater for PCs than for chips.
+    sameQuarterShare:{ X:{us:0.72, europe:0.80, brazil:0.90}, Y:{us:0.62, europe:0.70, brazil:0.82} },
+    lagNote:'הפרסום עובד באותו רבעון שבו שולם — זה החלק הגדול. השארית מתגלגלת לרבעון הבא.',
+    // §5.4 (src): "diminishing returns will gradually set in" — so the elasticity must FALL
+    // as spend rises, not stay constant. A saturating curve does that; a power curve does not.
+    // maxLift caps how much demand advertising alone can create, anchored to §5.1 (long-run
+    // potential is only ~1.2 plants per company/area/model — ads cannot conjure a new market).
+    maxLift:0.35,
+    maxLiftNote:'תקרת ההרמה מפרסום לבד — אומדן, מעוגן ב-§5.1 (הפוטנציאל לטווח ארוך ~1.2 מפעלים לחברה/אזור/דגם).',
+  },
+
+  // §5.3 (src): price elasticity greatest in Brazil, smaller in EU, least in US; PCs
+  // "somewhat less in all areas than for chips"; industry level always < firm level.
+  price:{ elast:{ X:{us:-1.6, europe:-2.0, brazil:-2.6}, Y:{us:-1.3, europe:-1.7, brazil:-2.2} },
+    note:'הדירוג (ברזיל>אירופה>ארה״ב, ושבבים גמישים יותר ממחשבים) מהמדריך §5.3; המספר אומדן עד שיכויל ממחירים בפועל.' },
+
+  // §5.3 (src): goodwill loss from stockouts — for chips in EU/US lower than for PCs
+  // (PCs "quite noticeable"); in Brazil PCs and chips are the same and lower than elsewhere.
+  goodwill:{ loss:{ X:{us:0.35, europe:0.35, brazil:0.55}, Y:{us:0.75, europe:0.75, brazil:0.55} },
+    note:'מדד יחסי 0–1 לנזק מחוסר מלאי. מחשב שנגמר בארה״ב/אירופה = הנזק הכי גדול במשחק.' },
+
+  // §5.2 (src): demand for chips is more sensitive to a change in PC price than vice
+  // versa; strongest in the US, medium EU, smallest Brazil.
+  cross:{ chipVsPcPrice:{us:0.9, europe:0.6, brazil:0.35},
+    note:'העלאת מחיר מחשב מסיטה ביקוש לשבבים (לא להיפך). חזק בארה״ב, חלש בברזיל.' },
+
+  // §5.1 (src): long-term PC potential is "somewhat greater than one plant at optimal
+  // capacity per company, area and model"; the consumer chip market hovers around a
+  // quarter of the PC market in units (less in Brazil).
+  potential:{ pcPlantsPerArea:1.2, chipShareOfPcMarket:{us:0.25, europe:0.25, brazil:0.18},
+    growth:'ארה״ב: שוק השבבים צומח מהר מהמחשבים · אירופה: במקביל, יתרון קל למחשבים · ברזיל: המחשבים צומחים מהר בהרבה מהשבבים (§5.2)' },
+};
+const _rr=(t,prod,reg)=>((RULES[t]&&(RULES[t].elast||RULES[t].loss||RULES[t].threshold||RULES[t].sameQuarterShare)||{})[prod]||{})[reg];
+function advElast(reg,prod){ return (RULES.adv.elast[prod]||{})[reg] ?? 0.25; }
+function advThreshold(reg,prod){ return (RULES.adv.threshold[prod]||{})[reg] ?? 20000; }
+function priceElast(reg,prod){ return (RULES.price.elast[prod]||{})[reg] ?? -1.8; }
+function goodwillLoss(reg,prod){ return (RULES.goodwill.loss[prod]||{})[reg] ?? 0.5; }
+
+/* Demand multiplier from an advertising spend, per Guide §5.4.
+   Below the threshold the spend is largely wasted; above it the response follows the
+   elasticity with diminishing returns. Returns the split between the quarter the money
+   is spent (the larger part, always) and the tail that lands in the next quarter. */
+function advResponse(reg,prod,spend){
+  const th=advThreshold(reg,prod), e=advElast(reg,prod);
+  const sameShare=(RULES.adv.sameQuarterShare[prod]||{})[reg] ?? 0.75;
+  if(!(spend>0)) return {total:1, now:1, next:0, ratio:0, belowThreshold:true, threshold:th, elast:e, sameShare};
+  const ratio=spend/th, sub=0.15*e; // sub-threshold spend buys only a token response
+  // Continuous at ratio=1, monotonic, and genuinely saturating: the marginal effect of the
+  // next unit of spend decays, so an optimum exists instead of "always spend more".
+  const total = ratio<1 ? 1+sub*ratio*ratio
+                        : 1+sub+RULES.adv.maxLift*(1-Math.exp(-e*(ratio-1)));
+  return { total, now:1+(total-1)*sameShare, next:(total-1)*(1-sameShare),
+    ratio, belowThreshold:ratio<1, threshold:th, elast:e, sameShare };
+}
+/* Marginal-return advertising budget: spend while the next 1,000 LC of advertising still
+   buys more than 1,000 LC of gross margin. Replaces the old "6% of revenue" guess. */
+function recommendAdSpend(reg,prod,baseUnits,price,unitCost){
+  const th=advThreshold(reg,prod); const margin=Math.max(0,(price||0)-(unitCost||0));
+  if(!(baseUnits>0)||!(margin>0)) return {spend:0, why:'אין שוליים חיוביים או אין יחידות למכור — פרסום לא מחזיר את עצמו', threshold:th, belowThreshold:true};
+  // Two-pass search over a range wide enough that the optimum is interior, so the answer
+  // is set by marginal return and not by the loop's ceiling. Only the same-quarter part of
+  // the response pays for itself this quarter (§5.4); the tail is reported separately.
+  const pool=baseUnits*margin;                       // gross margin available to pay for ads
+  const netAt=s=>(advResponse(reg,prod,s).now-1)*pool-s;
+  const hi=Math.max(th*40, pool*0.5);
+  let best={spend:0,net:0};
+  const scan=(from,to,step)=>{ for(let s=Math.max(0,from);s<=to;s+=step){ const n=netAt(s);
+    if(n>best.net) best={spend:Math.round(s),net:n}; } };
+  scan(0,hi,Math.max(500,hi/400));                   // coarse
+  scan(best.spend-hi/400,best.spend+hi/400,Math.max(100,hi/8000)); // fine
+  const interior=best.spend>0 && best.spend<hi*0.98;
+  const r=advResponse(reg,prod,best.spend);
+  best.gain=(r.now-1)*pool;
+  return { spend:best.spend, gain:Math.round(best.gain), net:Math.round(best.net), interior,
+    threshold:th, belowThreshold:best.spend<th, elast:advElast(reg,prod), sameShare:r.sameShare,
+    nextQuarterTail:Math.round((r.next||0)*baseUnits*margin),
+    why: best.spend===0
+      ? `הסף האפקטיבי כאן ~${fmt(th)} — בנפח של ${fmt(baseUnits)} יח׳ ושוליים ${fmt(Math.round(margin))}/יח׳ הוא לא מוחזר. עדיף 0 מלהתיז מתחת לסף.`
+      : `${fmt(best.spend)} = הנקודה שבה השקל הבא בפרסום מפסיק להחזיר את עצמו (גמישות ${advElast(reg,prod)}, סף ${fmt(th)}). תוספת צפויה ~${fmt(Math.round((r.now-1)*baseUnits))} יח׳ הרבעון${r.next>0?` ועוד ~${fmt(Math.round(r.next*baseUnits))} יח׳ בזליגה לרבעון הבא`:''}.` };
+}
+
 /* ---------- Persistence ---------- */
 const LS_KEY = 'intopia_warroom_v1';
 let S = null;
@@ -921,14 +1034,24 @@ function infoGaps(entered){
 function predictDemand(region,product,opt){
   const L=S.learning, k=_lkey(region,product), a=L.anchors[k], size=L.market[k];
   if(!a||size==null) return null; opt=opt||{};
+  // Price elasticity is region×product per Guide §5.3; once we have enough real price
+  // observations the calibrated figure takes over from the rule-book prior.
+  const ePrice=(L.elast.priceObs>=2 && L.elast.price) ? L.elast.price : priceElast(region,product);
   let share=a.share;
-  if(opt.price>0 && a.price>0) share *= Math.pow(opt.price/a.price, L.elast.price);
+  if(opt.price>0 && a.price>0) share *= Math.pow(opt.price/a.price, ePrice);
   if(opt.tech!=null && a.tech>0 && opt.tech>0) share *= Math.pow(opt.tech/a.tech, L.elast.tech);
+  // Advertising — the determinant the model used to ignore entirely (Guide §4.10.1, §5.4).
+  let ad=null;
+  if(opt.adv!=null){ ad=advResponse(region,product,opt.adv); share *= ad.now; }
+  // Cross-elasticity: a PC price rise pushes buyers toward chips, not the other way (§5.2).
+  if(product==='X' && opt.pcPriceChangePct) share *= Math.pow(1+opt.pcPriceChangePct/100, RULES.cross.chipVsPcPrice[region]||0);
   share=Math.max(0,Math.min(1,share));
   const units=Math.round(share*size);
   const conf=Math.min(1,L.obs/4)*((L.elast.priceObs>0)?1:0.6);
   const band=Math.round(units*(1-conf)*0.5);
-  return {units, low:Math.max(0,units-band), high:units+band, share, confidence:conf, size, anchor:a};
+  return {units, low:Math.max(0,units-band), high:units+band, share, confidence:conf, size, anchor:a,
+    ePrice, ePriceSrc:(L.elast.priceObs>=2?'מכויל מ-'+L.elast.priceObs+' תצפיות':'פריור מהמדריך §5.3'),
+    adv:ad, advTailNextQuarter: ad? Math.round((ad.next||0)*size*a.share):0 };
 }
 // Competitor price move via an attraction model: rivals cutting price raises their
 // pull by (1-cut)^elast; we renormalise shares. Optionally we counter with the same cut.
@@ -1764,7 +1887,8 @@ function pcPlanFor(q){
     else if(dlPrice>0){ price=dlPrice; src='מחיר פתיחה מהמשחק (Data Log)'; }
     else if(i.cost>0){ price=Math.round(i.cost*2); src='עלות ×2'; }
     else { price=300; src='הנחת פתיחה — עדכן לפי עלות בפועל'; }
-    out.push({rid, reg, units:i.qty, price, src, revenue:i.qty*price, adv:Math.round(i.qty*price*0.06), cost:i.cost||0});
+    const ar=recommendAdSpend(rid,'Y',i.qty,price,i.cost||0);
+    out.push({rid, reg, units:i.qty, price, src, revenue:i.qty*price, adv:ar.spend, advWhy:ar.why, cost:i.cost||0});
   });
   return out;
 }
@@ -1794,8 +1918,11 @@ function pcSellOptions(q){
       const price=Math.round(base*o.mult); let units=null, band=null, conf=null, volSrc;
       if(calibrated){ const pd=predictDemand(rid,'Y',{price}); if(pd){ units=Math.min(stock,pd.units); band=[Math.min(stock,pd.low),Math.min(stock,pd.high)]; conf=pd.confidence; volSrc='מנוע ביקוש מכויל'; } }
       if(units==null){ units=Math.min(stock, Math.round(mktCap*o.potFrac)); volSrc='פוטנציאל שוק (Data Log)'; } // capped by real market potential, not % of stock
-      const revenue=units*price, adv=Math.round(revenue*o.advPct/100), grossMargin=(price-cost)*units;
-      return {...o, price, units, band, conf, volSrc, revenue, adv, grossMargin, cleared:stock?units/stock:0, cost};
+      // Advertising by marginal return (Guide §5.4), not by a flat % of revenue.
+      const ar=recommendAdSpend(rid,'Y',units,price,cost);
+      const revenue=units*price, adv=ar.spend, grossMargin=(price-cost)*units;
+      return {...o, price, units, band, conf, volSrc, revenue, adv, advWhy:ar.why, advBelow:ar.belowThreshold,
+        advThreshold:ar.threshold, advGain:ar.gain, advTail:ar.nextQuarterTail, grossMargin, cleared:stock?units/stock:0, cost};
     });
     return {rid, reg, stock, cost, base, priceSrc, calibrated, mktCap, opts};
   });
@@ -1978,15 +2105,15 @@ function buildActionPlan(q,targetQ){
   const fg=finishedGoods(q);
   if(fg.hasFinished){
     const plan=fg.plan;
-    const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה פוטנציאלית ${fmt(p.revenue)} · פרסום 6% = ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src})</span>`).join('<br>');
-    const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:6}; });
+    const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה פוטנציאלית ${fmt(p.revenue)} · פרסום ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src} · ${esc(p.advWhy||'')})</span>`).join('<br>');
+    const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:null}; });
     const selling=(f.revenue||0)>0;
     // attach the 3 pricing options (volume/balanced/premium) so the sell action carries its own drill-down
     const so=pcSellOptions(q); const g0=so[0]; let sellOpts=null, sellCols=null;
     if(g0){ sellCols=['מחיר/יח׳','יח׳','הכנסה','רווח גולמי'];
       sellOpts=g0.opts.map(o=>({ name:o.name, favors:o.favors,
         cells:[fmt(o.price)+' '+g0.reg.cur, fmt(o.units), fmt(o.revenue), fmt(o.grossMargin)],
-        sim:{q:targetQ,regions:{[g0.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g0.cost,margin:null,advPct:o.advPct}}} })); }
+        sim:{q:targetQ,regions:{[g0.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g0.cost,margin:null,advPct:null}}} })); }
     out.push({cat:'mkt',level:(fg.anyUnpriced||!selling)?'red':'amber',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
       title:`מכור ${fmt(fg.pcUnits)} מחשבים מוגמרים במלאי${fg.anyUnpriced?' — ללא מחיר, לא נמכרים!':''}`,
       form:'A1-2 (PC Prices & Advertising)',
@@ -2505,11 +2632,49 @@ PAGE_RENDER.intel = (c)=>{
         : `<div class="small muted" style="margin:8px 0">קלוט דוח עם MR 74 כדי לקבל תובנות מבוססות-נתונים על המתחרים.</div>`}
     </div>
     ${renderDemandEngine()}
+    ${renderRulesCard()}
     <!-- Layer 3: the raw tables, collapsed -->
     ${comps.length? `<details class="sec" style="margin-top:16px"><summary>${IC('landmark')} טבלת מתחרים מלאה — MR74 (10 חברות)</summary><div class="secbody" style="padding:0">${renderCompetitors(comps,fmtK)}</div></details>
     <details class="sec"><summary>${IC('lineChart')} נתחי שוק לפי יחידות — MR17&28</summary><div class="secbody" style="padding:0">${renderMarketShare(mi)}</div></details>`
     : `<div class="card" style="margin-top:16px"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}`;
 };
+/* The rule book made visible: what the engine encodes from the guide, what is a quoted
+   rule and what is our estimate. The team can audit every coefficient against the source. */
+function renderRulesCard(){
+  const rn={us:'ארה״ב',europe:'אירופה',brazil:'ברזיל'};
+  const row=(label,vals,fmtV,note)=>`<tr><td style="text-align:start">${label}</td>
+    ${['us','europe','brazil'].map(r=>`<td class="num">${fmtV(vals[r])}</td>`).join('')}
+    <td class="small muted" style="text-align:start;white-space:normal;max-width:260px">${note}</td></tr>`;
+  const T=(title,body)=>`<div style="overflow-x:auto;margin-bottom:14px"><b class="small">${title}</b>
+    <table class="tbl" style="margin-top:6px"><thead><tr><th>כלל</th>${['us','europe','brazil'].map(r=>`<th>${rn[r]}</th>`).join('')}<th>מקור</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  const src='<span class="tag g">חוק מקור</span>', est='<span class="tag a">אומדן</span>';
+  return `<div class="card" style="margin-top:16px">
+    <div class="ch"><h3>${IC('clipboard')} חוקי המשחק — כיצד הביקוש מגיב</h3><span class="small muted">${RULES.src}</span></div>
+    <div class="cb">
+      <div class="small" style="line-height:1.8;margin-bottom:12px">${IC('info')} ארבעת קובעי נפח המכירות (§4.10.1): <b>מחיר · פרסום · דרגה · רוחב סדרה</b>.
+        ${src} = המדריך קובע את הדירוג/הגבול במפורש. ${est} = הגודל המדויק הוא הערכה שלנו בתוך גבולות המדריך, לכיול מול תוצאות אמיתיות.</div>
+      ${T('גמישות פרסום ברמת החברה — המדריך: 0.1–0.5 '+src+', הדירוג בין אזורים '+src+', המספר '+est,
+        row('מחשב (Y)',RULES.adv.elast.Y,v=>v,'ברזיל הגבוה — שוק צעיר שהפרסום מחנך אותו')+
+        row('שבב (X)',RULES.adv.elast.X,v=>v,'ארה״ב הגבוה — מדיה מקצועית מפותחת; ברזיל הנמוך'))}
+      ${T('סף אפקטיביות פרסום (מטבע מקומי/רבעון) — הדירוג '+src+', הסכום '+est,
+        row('מחשב (Y)',RULES.adv.threshold.Y,v=>fmt(v),'המדריך: גבוה פי-כמה מהשבבים בכל אזור')+
+        row('שבב (X)',RULES.adv.threshold.X,v=>fmt(v),'נמוך בארה״ב/אירופה, גבוה יחסית בברזיל'))}
+      ${T('חלק ההשפעה שנופל באותו רבעון שבו שולם הפרסום — '+src,
+        row('מחשב (Y)',RULES.adv.sameQuarterShare.Y,v=>(v*100).toFixed(0)+'%','השארית זולגת לרבעון הבא. הזנב הגדול בארה״ב')+
+        row('שבב (X)',RULES.adv.sameQuarterShare.X,v=>(v*100).toFixed(0)+'%','לשבבים הזנב קטן יותר מלמחשבים'))}
+      ${T('גמישות מחיר — הדירוג '+src+', המספר '+est,
+        row('מחשב (Y)',RULES.price.elast.Y,v=>v,'הרגישות הגבוהה בברזיל, הנמוכה בארה״ב')+
+        row('שבב (X)',RULES.price.elast.X,v=>v,'שבבים גמישים יותר ממחשבים בכל אזור'))}
+      ${T('נזק אובדן מוניטין מחוסר מלאי (מדד 0–1) — הדירוג '+src,
+        row('מחשב (Y)',RULES.goodwill.loss.Y,v=>v,'מחשב שנגמר בארה״ב/אירופה = הנזק הגדול במשחק')+
+        row('שבב (X)',RULES.goodwill.loss.X,v=>v,'"חנונים מוכנים לחכות" — בברזיל שווה למחשב'))}
+      <div class="small muted" style="line-height:1.8">${IC('info')} <b>תזמון:</b> ${RULES.adv.lagNote}<br>
+        <b>סף:</b> ${RULES.adv.thresholdNote}<br>
+        <b>גמישות צולבת (§5.2):</b> ${RULES.cross.note} אומדנים: ${['us','europe','brazil'].map(r=>rn[r]+' '+RULES.cross.chipVsPcPrice[r]).join(' · ')}<br>
+        <b>צמיחה (§5.2):</b> ${RULES.potential.growth}<br>
+        <b>תקרת הרמה מפרסום:</b> ${(RULES.adv.maxLift*100).toFixed(0)}% — ${RULES.adv.maxLiftNote}</div>
+    </div></div>`;
+}
 /* WS-3 · Demand-engine panel — what the model has learned, its confidence, competitor trends, and which MR to buy. */
 function renderDemandEngine(){
   const ls=learningSummary();
@@ -2685,7 +2850,7 @@ window.editScenario=(id)=>{
       <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
         <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
-        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: מחיר לפי <b>עוגן שוק</b> ×${m.pm} (לא עלות×מרווח) · עצימות ייצור ${(m.pf*100).toFixed(0)}%${m.invSold>0?` · <b>${fmt(m.invSold)} מחשבים במלאי נמכרים ראשונים</b>`:''}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.</div></div>`:''}
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: מחיר לפי <b>עוגן שוק</b> ×${m.pm} (לא עלות×מרווח) · עצימות ייצור ${(m.pf*100).toFixed(0)}%${m.invSold>0?` · <b>${fmt(m.invSold)} מחשבים במלאי נמכרים ראשונים</b>`:''}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.${m.advWhy?`<br><b>${IC('info')} פרסום:</b> ${esc(m.advWhy)} <span class="small muted">(חוקי המשחק §5.4 — גמישות פרסום וסף אפקטיביות)</span>`:''}</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
         <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
@@ -3042,19 +3207,35 @@ window.magicOptimize=(id)=>{
     // 3) FREIGHT for exported units, folded once into the shipping plant's blended cost
     let totalFreight=0, exp=false; exportMk.forEach(r=>{ if(sellBy[r.id]>0 && homePlant){ totalFreight+=freightCostLC(homePlant.id,r.id,'Y',sellBy[r.id],'surface'); exp=true; } });
     if(exp) exported=true;
+    // 3b) ADVERTISING (Guide §5.4) — buys demand, so it only pays when goods, not demand,
+    // are the surplus. If we cannot even supply the market cap, extra demand is worthless
+    // this quarter and the right spend is zero.
+    const supplyConstrained = sellable <= totalDemand;
+    const advBy={}; let advWhy='';
+    markets.forEach(r=>{
+      const sold=sellBy[r.id]||0;
+      if(!sold){ advBy[r.id]=0; return; }
+      if(supplyConstrained){ advBy[r.id]=0; return; }
+      const priceR=Math.round(anchorOf(r.id)*pm);
+      const ucR=(homePlant && r.id===homePlant.id) ? cost : cost;
+      const ar=recommendAdSpend(r.id,'Y',sold,priceR,ucR);
+      advBy[r.id]=ar.spend; if(ar.spend>0&&!advWhy) advWhy=ar.why;
+    });
+    if(supplyConstrained) advWhy=`פרסום 0 בכל האזורים: ההיצע (${fmt(sellable)} יח׳) קטן מפוטנציאל השוק (${fmt(totalDemand)} יח׳) — אנחנו מוגבלי-ייצור, לא מוגבלי-ביקוש. פרסום היה קונה ביקוש שאין לנו סחורה לספק.`;
     qs.forEach(q=>{ levers[q]={rd,regions:{}}; REGIONS.forEach(r=>{ const cur=sc.levers[q].regions[r.id]||{};
       const prod=plantProd[r.id]||0, sold=sellBy[r.id]||0, isPlant=prodRegions.some(x=>x.id===r.id);
       const priceR=Math.round(anchorOf(r.id)*pm); // realistic price from the market anchor
       const uc=(homePlant && r.id===homePlant.id && prod>0) ? Math.round(cost+totalFreight/prod) : cost;
       const offices=isPlant?(cur.offices||0):(sold>0?1:0); // export: one sales office only where we actually sell; home keeps existing
       levers[q].regions[r.id]={production:prod,unitCost:prod>0?uc:0,sales:sold*priceR,qtySold:sold,price:priceR,
-        advertising:Math.round(sold*priceR*0.06),invest:0,transferIn:0,offices,
-        product:'Y',model:cur.model||'Standard',advPct:6}; }); });
+        advertising:advBy[r.id]||0,invest:0,transferIn:0,offices,
+        product:'Y',model:cur.model||'Standard',advPct:null}; }); });
+    var _advWhy=advWhy, _supplyC=supplyConstrained;
     const spv=scoreProxy(levers), proj=projectCashflow(base,levers), feasible=!proj.some(p=>p.breach);
-    const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,pm};
+    const cand={levers,feasible,score:spv.value,endCash:spv.endCash,pf,pm,advWhy:_advWhy,supplyConstrained:_supplyC};
     if(!best||((cand.feasible&&!best.feasible)||(cand.feasible===best.feasible&&(cand.score>best.score||(cand.score===best.score&&cand.endCash>best.endCash))))) best=cand;
   }));
-  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cost,pf:best.pf,pm:best.pm,invSold:invY,regions:prodRegions.map(r=>r.name),activeSrc,exported,homePlant:homePlant?homePlant.name:''}; save();
+  sc.levers=best.levers; sc._lastMagic={before,after:best.score,feasible:best.feasible,cost,pf:best.pf,pm:best.pm,invSold:invY,regions:prodRegions.map(r=>r.name),activeSrc,exported,homePlant:homePlant?homePlant.name:'',advWhy:best.advWhy,supplyConstrained:best.supplyConstrained}; save();
   renderScenarios(); editScenario(id);
   toast('קסם: ציון '+before.toFixed(0)+' → '+best.score.toFixed(0)+(best.feasible?'':' (שובר רצפה)'), best.feasible?'g':'a');
 };
@@ -3536,6 +3717,23 @@ function datalogContextText(){
   L.push(`- פוטנציאל שוק למחשבים (לחברה/דגם/רבעון): ~קיבולת מפעל ×1.2 → אירופה ~21,600 · ארה״ב ~30,000 · ברזיל ~16,800. שבבים לצרכן ~¼ מזה.`);
   L.push(`- לוח גבייה (מזומן/רבעון+1/רבעון+2): ארה״ב 40/60/0 · אירופה 50/20/30 · ברזיל 30/30/40. פחת: שבב 8%/רבעון · מחשב 5%/רבעון. עלות אחזקת מלאי מחשב לא-מכור: 8 EUR/יח׳ באירופה.`);
   L.push(`- השהיות: מפעל→ייצור→מכירה, כל שלב רבעון; מו״פ מבשיל רבעון קדימה; העברת כסף/סחורה 1 רבעון.`);
+  L.push(rulesContextText());
+  return L.join('\n');
+}
+/* The behavioural half of the rule book (Guide §4.10, §5.1-5.4). Without this the model
+   can only restate our numbers; with it it can say WHY a lever moves demand, and it can
+   answer rule questions ("is advertising effective in the same quarter?") from source. */
+function rulesContextText(){
+  const L=['## חוקי המשחק — כיצד הביקוש מגיב (Intopia Guide §4.10, §5.1–5.4) [מחייב: השתמש בחוקים האלה בכל נימוק על מחיר/פרסום/מלאי]'];
+  L.push(`- ארבעת קובעי נפח המכירות (§4.10.1): מחיר · פרסום · דרגה (grade) · רוחב הסדרה. אם נימוק מתעלם מאחד מהם — הוא חסר.`);
+  L.push(`- **תזמון הפרסום (§5.4, חוק מקור):** הפרסום אפקטיבי **באותו רבעון שבו הוא שולם** יותר מבכל רבעון מאוחר יותר. יש זנב מושהה לרבעון הבא: הזנב הגדול ביותר בארה״ב, הקטן ביותר בברזיל, וגדול יותר למחשבים מלשבבים. לכן פרסום הוא בעיקר הוצאה שוטפת ובמידה מסוימת גם השקעה.`);
+  L.push(`- **סף אפקטיביות (§5.4):** מתחת לסף מינימלי הפרסום כמעט לא מזיז ביקוש. הסף לשבבים נמוך בארה״ב ובאירופה וגבוה יחסית בברזיל; הסף למחשבים גבוה פי-כמה מזה של שבבים בכל האזורים. אומדני המנוע (מטבע מקומי/רבעון): מחשב — ארה״ב ${fmt(RULES.adv.threshold.Y.us)} · אירופה ${fmt(RULES.adv.threshold.Y.europe)} · ברזיל ${fmt(RULES.adv.threshold.Y.brazil)}; שבב — ${fmt(RULES.adv.threshold.X.us)}/${fmt(RULES.adv.threshold.X.europe)}/${fmt(RULES.adv.threshold.X.brazil)}. **אלה אומדנים לכיול, לא מספרים מצוטטים — אמור זאת אם אתה מסתמך עליהם.**`);
+  L.push(`- **גמישות פרסום (§5.4, חוק מקור):** ברמת החברה בין 0.1 ל-0.5 — עלייה של 5% בתקציב מניבה 1–2.5% בביקוש, עם תשואה פוחתת. ברמת התעשייה עד 0.05. דירוג: שבבים — ארה״ב הגבוה, ברזיל הנמוך; מחשבים — ברזיל הגבוה, ואחריו ארה״ב ואז אירופה.`);
+  L.push(`- **גמישות מחיר (§5.3, חוק מקור):** הרגישות למחיר גבוהה ביותר בברזיל, פחות באירופה, הנמוכה ביותר בארה״ב. שבבים גמישים יותר ממחשבים בכל אזור. רמת התעשייה תמיד פחות גמישה מרמת החברה. אומדני המנוע: מחשב ${RULES.price.elast.Y.us}/${RULES.price.elast.Y.europe}/${RULES.price.elast.Y.brazil} (US/EU/BR) · שבב ${RULES.price.elast.X.us}/${RULES.price.elast.X.europe}/${RULES.price.elast.X.brazil}.`);
+  L.push(`- **נזק חוסר מלאי (§5.3, חוק מקור):** אובדן מוניטין ממחסור גדול ובולט למחשבים בארה״ב ובאירופה; לשבבים שם הוא נמוך יותר ("חנונים מוכנים לחכות"); בברזיל הוא הנמוך מכולם ושווה למחשבים ולשבבים (השפעת הקלונים). מסקנה: הימנע ממחסור במחשבים בארה״ב/אירופה יותר מבכל מקום אחר.`);
+  L.push(`- **גמישות צולבת (§5.2, חוק מקור):** הביקוש לשבבים רגיש לשינוי במחיר המחשבים יותר מההיפך. חזק בארה״ב, בינוני באירופה, חלש בברזיל. העלאת מחיר מחשב מסיטה קונים לשבבים.`);
+  L.push(`- **צמיחת שווקים (§5.2):** ${RULES.potential.growth}`);
+  L.push(`- **פוטנציאל (§5.1):** לטווח ארוך מעט יותר ממפעל אחד בקיבולת אופטימלית לחברה/אזור/דגם. שוק השבבים לצרכן ~¼ משוק המחשבים (פחות בברזיל).`);
   return L.join('\n');
 }
 function buildAIContext(){
@@ -3576,7 +3774,7 @@ function buildAIContext(){
   if(op.inventory.length) L.push(`- מלאי: ${op.inventory.map(i=>`${i.product||'?'}${i.grade?'/'+i.grade:''} כמות ${fmt(i.qty)} עלות ${fmt(i.cost)} מחיר ${i.price>0?fmt(i.price):'(אין מחיר)'}`).join(' ; ')}`);
   const _sell=pcPlanFor(q);
   if(_sell.length){ L.push(`## מחיר מכירה מחושב-מנוע למחשבים מוגמרים [עובדה — צטט מספר זה, אל תמציא מחיר]`);
-    _sell.forEach(s=> L.push(`- ${s.reg.name}: מכור ${fmt(s.units)} יח׳ במחיר ${fmt(s.price)} ${s.reg.cur}/יח׳ (מקור: ${s.src}) → הכנסה ≈${fmt(s.revenue)} ${s.reg.cur}, פרסום נלווה ≈${fmt(s.adv)}. זהו טווח המחיר הריאלי; מחיר גבוה ממנו פי-כמה = לא ימכר.`));
+    _sell.forEach(s=> L.push(`- ${s.reg.name}: מכור ${fmt(s.units)} יח׳ במחיר ${fmt(s.price)} ${s.reg.cur}/יח׳ (מקור: ${s.src}) → הכנסה ≈${fmt(s.revenue)} ${s.reg.cur}. **פרסום מחושב-מנוע: ${fmt(s.adv)} ${s.reg.cur}** — הנימוק: ${s.advWhy||'—'} זהו טווח המחיר הריאלי; מחיר גבוה ממנו פי-כמה = לא ימכר.`));
     L.push(`- הזנה: A1-2 (מחיר+פרסום מחשב) לכל אזור לעיל. זו עדיפות עליונה — מלאי מוגמר ללא מחיר = הון כלוא.`);
   }
   L.push(`## יעדים (קונפיגורציית הצוות)`);
