@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.1';
+const APP_VERSION = 'v8.2';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -394,8 +394,14 @@ const DATALOG = {
     hoLoan:{ brl:6.5, other:5.5 }, hoSecurities:{ sf:2, eur:2, usd:2.25, brl:3 },
     supplierCredit:{ below:{us:7,europe:6,brazil:8,hq:5.5}, switchover:{us:1200000,europe:700000,brazil:600000,hq:3000000}, above:{us:8,europe:7,brazil:9,hq:6.5} },
     negBalance:{ below:{us:3.5,europe:3.5,brazil:4.5,hq:2.5}, above:{us:8,europe:7,brazil:9,hq:6.5} },
+    // Interest EARNED on positive local balances. Holding foreign currency locally pays
+    // more than local currency — idle cash is not costless, but it is not free either.
+    posBalance:{ lc:{ us:0.7, europe:0.7, brazil:1.5, hq:0.5 }, fc:{ us:1, europe:1, brazil:2, hq:0.6 } },
   },
   exchangeCommission:{ us:0.6, europe:0.6, brazil:0.8, hq:0.4 },        // 07_Finance, % of converted amount
+  // 07_Finance — automatic one-quarter loss carry-forward, as a fraction of the loss.
+  // Brazil has none. Liechtenstein carries the full loss.
+  lossCarryForward:{ us:0.6, europe:0.3, brazil:0, hq:1 },
   capacity:{ X:{ us:50000, europe:35000, brazil:12000 }, Y:{ us:25000, europe:18000, brazil:14000 } }, // 03 units/plant/Q
   plantAcqCost:{ X:{ us:2000000, europe:1000000, brazil:1600000 }, Y:{ us:1800000, europe:800000, brazil:1600000 } }, // 03 LC Q1
   plantFixedCost:{ X:{ us:[80000,110000,120000], europe:[40000,54000,64000], brazil:[60000,100000,120000] },
@@ -496,7 +502,54 @@ const RULES = {
   // capacity per company, area and model"; the consumer chip market hovers around a
   // quarter of the PC market in units (less in Brazil).
   potential:{ pcPlantsPerArea:1.2, chipShareOfPcMarket:{us:0.25, europe:0.25, brazil:0.18},
-    growth:'ארה״ב: שוק השבבים צומח מהר מהמחשבים · אירופה: במקביל, יתרון קל למחשבים · ברזיל: המחשבים צומחים מהר בהרבה מהשבבים (§5.2)' },
+    growth:'ארה״ב: שוק השבבים צומח מהר מהמחשבים · אירופה: במקביל, יתרון קל למחשבים · ברזיל: המחשבים צומחים מהר בהרבה מהשבבים (§5.2)',
+    // Data Log 10 (src): with n of N firms marketing in an area the potential per firm is
+    // below normal but above a plain n/N split — thin areas are relatively better to be in.
+    nLessThanN:{ rule:'אם רק n מתוך N החברות משווקות באזור, הפוטנציאל לחברה נמוך מהרגיל אך גבוה מ-n/N — אזור שנטוש חלקית עדיף יחסית',
+      factor:(n,N)=>{ if(!(n>0)||!(N>0)||n>=N) return 1; const share=n/N; return share+(1-share)*0.5; }, src:'Data Log 10' } },
+
+  // §4.9 (src) — a HARD legality rule with a punitive fallback: a company may market (or
+  // hold in inventory) only TWO grades of a product in an area at a time. Introducing a
+  // third without clearing one first automatically downgrades the middle grade to the
+  // lowest of the three — a silent write-down of good inventory.
+  grades:{ maxPerProductPerArea:2,
+    thirdGradePenalty:'הדרגה האמצעית מבין השלוש מורדת אוטומטית לרמת הנמוכה — מחיקת שווי שקטה של מלאי טוב (§4.9)',
+    exits:['לדחות את הדרגה השלישית עד שהמלאי הקודם נמכר (או להוריד מחיר כדי לזרז)',
+           'להעביר את מלאי הדרגה הקודמת לאזור אחר',
+           'למכור את מלאי הדרגה הקודמת לחברה אחרת'],
+    airNote:'אם קונים דרגה שלישית (גבוהה) בהובלה אווירית — יש למכור אחת מהנמוכות בהובלה אווירית באותו רבעון, אחרת הדרגה האמצעית תורד (§4.9)' },
+
+  // Data Log 04 (src) — the legal office combinations. The engine must never recommend
+  // an illegal office count.
+  offices:{ minCentral:1, minRegional:1, maxCentral:1, maxRegional:9,
+    centralEqualsTwoRegional:true,
+    note:'הרכב חוקי: משרד מרכזי אחד + 1 עד 9 משרדים אזוריים. עלות מרכזי = 2 אזוריים (Data Log 04).' },
+
+  // §4.7 (src) + Data Log 03 — production cost structure beyond the cost tables.
+  production:{ twoGradeInterference:'ייצור שתי דרגות במפעל אחד גורר עלויות הפרעה — היעילות המרבית היא דרגה אחת בקיבולת מיטבית. עם 2+ מפעלים באזור, ייצר כל דרגה במפעל נפרד (§4.7)',
+    regionalCostPattern:'ארה״ב: שבבים זולים יותר, מחשבים יקרים יותר מאשר באירופה (Data Log 03)',
+    plantPaidInFirstConstructionQuarter:'מפעל משולם במזומן ברבעון הראשון של הבנייה — לא בפריסה (Data Log 03)' },
+
+  // Data Log 06 (src) — when carrying charges do and do not apply.
+  inventory:{ noChargeInProductionQuarter:'אין עלות אחזקה ברבעון שבו הסחורה יוצרה — החיוב מתחיל על מלאי שלא נמכר מרבעון קודם, או על סחורה שהוטסה ולא נמכרה עד סוף הרבעון (Data Log 06)',
+    exponentialSurcharge:'החיוב המינימלי בטבלה חל על סיטונאים רשומים בלבד; אחרים משלמים תוספת אקספוננציאלית לפי גודל המלאי — מלאי גדול נענש יותר מלינארית (Data Log 06)' },
+
+  // Data Log 07/09 (src) — cash-timing rules that the projection must respect.
+  tax:{ lossCarryForward:DATALOG.lossCarryForward,
+    note:'העברת הפסדים אוטומטית לרבעון אחד: ארה״ב 60% מההפסד · אירופה 30% · ברזיל אין · מטה 100% (Data Log 07)' },
+  arap:{ taxToAP1:'מסים בכל האזורים נזקפים ל-A/P1 — כלומר משולמים רבעון קדימה, לא מיד (Data Log 09)',
+    apScope:'זכאים כוללים עלויות ייצור משתנות, רכיבי Nippon ורכישות פנים-קבוצתיות. כל שאר ההוצאות — כולל עלות קבועה של מפעל — יוצאות ישירות מהמזומן (Data Log 09)',
+    outOfPhase:'אחוזי A/R ו-A/P זהים אך מוסטים ברבעון אחד: סחורה מיוצרת ב-Qt ונמכרת ב-Qt+1 (Data Log 09)' },
+
+  // Data Log 08 (src) — the timing skeleton of the whole game.
+  lags:{ productionToSale:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — פיגור של רבעון עד שניתן למכור אותה',
+    airResellSameQuarter:'סחורה שהוטסה ניתנת למכירה חוזרת באותו רבעון שבו הגיעה — אך לא בהטסה שנייה',
+    surfaceTransfer:'הובלה יבשתית בין-חברתית/בינלאומית אורכת רבעון; הסחורה נכנסת למלאי הקונה בסוף הרבעון',
+    rd:'יש פיגור לפני שהשקעת מו״פ אפקטיבית במלואה בהעלאת סיכוי השיפור',
+    patent:'רישיון פטנט ניתן להעניק רק רבעון לאחר שהמעניק קיבל את הדרגה; הזכיין יכול לנצל רבעון לאחר הקבלה; תקופת רישוי מינימלית 2 רבעונים (טופס H5)',
+    advertising:'ההשפעה העיקרית מיידית, עם שארית פוחתת ברבעונים הבאים',
+    stockConfidence:'שיפור או הרעה במצב החברה משתקפים באמון שוק ההון (ובשיעור ההון המגויס) רק בפיגור. אין ניכוי ממזומן בגלל חוסר אמון — אבל גם אין תגמול מיידי על רבעון טוב',
+    brazilDeposit:'כל מפעל חדש בברזיל שבנייתו מתחילה ב-Q1–Q3 מצריך פיקדון 1,000,000 BRL באג״ח ממשלת ברזיל, מופקד מחדש עד סוף Q3' },
 };
 const _rr=(t,prod,reg)=>((RULES[t]&&(RULES[t].elast||RULES[t].loss||RULES[t].threshold||RULES[t].sameQuarterShare)||{})[prod]||{})[reg];
 function advElast(reg,prod){ return (RULES.adv.elast[prod]||{})[reg] ?? 0.25; }
@@ -859,26 +912,40 @@ function projectCashflow(baseQuarter, leversByQuarter){
   const out=[]; const startIdx=qIndex(baseQuarter); let pipeline=[];
   const push=(region,fromIdx,amount)=>{ const sched=p.collection[region]||[100,0,0];
     sched.forEach((pct,k)=>{ if(pct>0 && fromIdx+k<QUARTERS.length) pipeline.push({region,q:QUARTERS[fromIdx+k],amount:amount*pct/100}); }); };
+  // Data Log 09: taxes go to A/P1 — accrued now, paid out of cash one quarter later.
+  // Data Log 07: a fraction of a loss carries forward automatically for exactly one quarter.
+  const taxDue={}, lossCarry={}; REGIONS.forEach(r=>{ taxDue[r.id]=0; lossCarry[r.id]=0; });
   for(let i=startIdx+1;i<QUARTERS.length;i++){
     const q=QUARTERS[i]; const lev=(leversByQuarter&&leversByQuarter[q])||{}; let taxSF=0;
+    const nextTaxDue={}, nextLoss={};
     REGIONS.forEach(r=>{
       const rl=(lev.regions&&lev.regions[r.id])||{};
       const sales=rl.sales||0, prodCost=(rl.production||0)*(rl.unitCost||0), adv=rl.advertising||0,
             invest=rl.invest||0, transferIn=rl.transferIn||0, transferOut=rl.transferOut||0, rd=(lev.rd||0)/REGIONS.length;
       const facCost=(rl.newFac||0)*(p.factoryCost||0), offCost=(rl.offices||0)*(p.officeCost||0); // WS-4: A2-1 build + A1-3 operating
-      // regional differential tax on operating profit (facCost is capex, excluded). Paid in cash when earned.
+      // regional differential tax on operating profit (facCost is capex, excluded)
       const pretax=sales - prodCost - adv - rd - offCost;
-      const tax=pretax>0 ? pretax*((p.tax[r.id]||0)/100) : 0; taxSF += tax*fxRate(r.cur);
+      // a carried loss shields this quarter's profit before tax is computed
+      const taxable=Math.max(0, pretax - (lossCarry[r.id]||0));
+      const tax=taxable*((p.tax[r.id]||0)/100); taxSF += tax*fxRate(r.cur);
+      nextTaxDue[r.id]=tax;                                   // paid next quarter (A/P1)
+      nextLoss[r.id]= pretax<0 ? (-pretax)*((DATALOG.lossCarryForward[r.id]||0)) : 0; // 1 quarter only, then it expires
       if(sales) push(r.id,i,sales);
       // Fix #1: A3-1 transfers conserve cash. transferIn credits this region (borrow inflows also use transferIn alone);
       // transferOut debits the source region and pays the real exchange commission (Data Log 07) — so a Brazil→HQ
       // move no longer creates money, it nets to ~zero minus the fee.
       const commRate=(DATALOG.exchangeCommission[r.id]||0)/100;
-      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost + tax - transferIn + transferOut*(1+commRate);
+      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost
+                   + (taxDue[r.id]||0)   // last quarter's tax bill lands now, not this quarter's
+                   - transferIn + transferOut*(1+commRate);
     });
+    REGIONS.forEach(r=>{ taxDue[r.id]=nextTaxDue[r.id]||0; lossCarry[r.id]=nextLoss[r.id]||0; });
     pipeline.filter(x=>x.q===q).forEach(x=> bal[x.region]+=x.amount);
     const loans=S.quarters[baseQuarter].financial.loans||0;
     bal.hq -= loans*(p.interest.bank/100)/4;
+    // Data Log 07: positive local balances earn interest each quarter. Small, but it is the
+    // difference between idle cash being dead and merely slow.
+    REGIONS.forEach(r=>{ if(bal[r.id]>0) bal[r.id] += bal[r.id]*((DATALOG.interest.posBalance.lc[r.id]||0)/100); });
     const cashByRegion={...bal};
     let unified=0; REGIONS.forEach(r=> unified += cashByRegion[r.id]*fxRate(r.cur));
     const floor=S.config.goals.floors[q]||0;
@@ -2668,7 +2735,22 @@ function renderRulesCard(){
       ${T('נזק אובדן מוניטין מחוסר מלאי (מדד 0–1) — הדירוג '+src,
         row('מחשב (Y)',RULES.goodwill.loss.Y,v=>v,'מחשב שנגמר בארה״ב/אירופה = הנזק הגדול במשחק')+
         row('שבב (X)',RULES.goodwill.loss.X,v=>v,'"חנונים מוכנים לחכות" — בברזיל שווה למחשב'))}
+      <div class="tag r" style="display:block;line-height:1.8;margin-bottom:12px;white-space:normal">${IC('warn')} <b>חוקים קשיחים — חריגה מהם נענשת אוטומטית:</b><br>
+        • <b>עד ${RULES.grades.maxPerProductPerArea} דרגות למוצר באזור (§4.9).</b> דרגה שלישית ללא פינוי קודם: ${RULES.grades.thirdGradePenalty}<br>
+        • <b>משרדי מכירות:</b> ${RULES.offices.note} משרד בודד = לא חוקי.<br>
+        • <b>תקרת מחיר:</b> מחשבי Y0–Y3 עד ${fmt(DATALOG.maxPCPriceY0toY3)} במטבע מקומי.<br>
+        • <b>מו״פ מינימלי:</b> שבב ${fmt(DATALOG.rdMinPerQuarter.X)} SF · מחשב ${fmt(DATALOG.rdMinPerQuarter.Y)} SF למדען לרבעון.<br>
+        • <b>מינימום מזומן במטה:</b> ${fmt(DATALOG.minHOCashSF)} SF בכל עת.<br>
+        • <b>שינוי מחיר מינימלי:</b> מחשב ${DATALOG.minPriceChange.Y.us}/${DATALOG.minPriceChange.Y.europe}/${DATALOG.minPriceChange.Y.brazil} · שבב ${DATALOG.minPriceChange.X.us}/${DATALOG.minPriceChange.X.europe}/${DATALOG.minPriceChange.X.brazil} (US/EU/BR).<br>
+        • <b>דרגות תואמות:</b> טבלת ההמרה X→Y חוסמת שילובים לא-תואמים (0 = לא ניתן לייצר).</div>
       <div class="small muted" style="line-height:1.8">${IC('info')} <b>תזמון:</b> ${RULES.adv.lagNote}<br>
+        <b>מס ותזרים:</b> ${RULES.arap.taxToAP1}<br>
+        <b>העברת הפסדים:</b> ${RULES.tax.note}<br>
+        <b>ריבית על יתרות חיוביות:</b> ארה״ב ${DATALOG.interest.posBalance.lc.us}% · אירופה ${DATALOG.interest.posBalance.lc.europe}% · ברזיל ${DATALOG.interest.posBalance.lc.brazil}% · מטה ${DATALOG.interest.posBalance.lc.hq}% לרבעון (מטבע זר משלם יותר)<br>
+        <b>מלאי:</b> ${RULES.inventory.noChargeInProductionQuarter}<br>
+        <b>ייצור:</b> ${RULES.production.twoGradeInterference}<br>
+        <b>אמון שוק ההון:</b> ${RULES.lags.stockConfidence}<br>
+        <b>פטנטים (H5):</b> ${RULES.lags.patent}<br>
         <b>סף:</b> ${RULES.adv.thresholdNote}<br>
         <b>גמישות צולבת (§5.2):</b> ${RULES.cross.note} אומדנים: ${['us','europe','brazil'].map(r=>rn[r]+' '+RULES.cross.chipVsPcPrice[r]).join(' · ')}<br>
         <b>צמיחה (§5.2):</b> ${RULES.potential.growth}<br>
@@ -2996,7 +3078,26 @@ function refreshSimEditor(){ if(_simEditId&&window._simShowQ&&_simEditQ&&documen
 // Stops the optimizer from assuming 100% sell-through of unlimited production.
 function marketCapUnits(product, regionId){
   const cap=(DATALOG.capacity[product]&&DATALOG.capacity[product][regionId])||0;
-  return product==='X' ? Math.round(cap*0.25*1.2) : Math.round(cap*1.2);
+  const share=product==='X' ? (RULES.potential.chipShareOfPcMarket[regionId] ?? 0.25) : 1;
+  let units=cap*share*RULES.potential.pcPlantsPerArea;
+  // Data Log 10: when only n of N firms market in an area, potential per firm is below
+  // normal but above a flat n/N split. Uses MR17/28 to count who is actually selling here.
+  const nn=marketingFirmsIn(regionId, product);
+  if(nn && nn.n>0 && nn.N>nn.n) units *= RULES.potential.nLessThanN.factor(nn.n, nn.N);
+  return Math.round(units);
+}
+/* How many companies actually market this product in this area (n), out of all firms seen
+   in the simulation (N) — read from the entered MR17/28 sales rows. */
+function marketingFirmsIn(regionId, product){
+  const entered=QUARTERS.filter(q=>S.quarters[q].entered);
+  if(!entered.length) return null;
+  const last=(S.quarters[entered[entered.length-1]].marketIntel||{});
+  const sales=last.sales||[]; if(!sales.length) return null;
+  const here=new Set(), all=new Set();
+  sales.forEach(s=>{ if(s.company!=null){ all.add(s.company);
+    if(s.region===regionId && s.product===product && (s.units||0)>0) here.add(s.company); } });
+  const N=Math.max(all.size, Object.keys(last.competitors||{}).length||0);
+  return (here.size&&N)?{n:here.size,N}:null;
 }
 // Price options for the A1-1/A1-2 form dropdown: anchored on observed market (MR28) or Data Log opening price.
 function priceAnchors(rid, product){
@@ -3226,7 +3327,10 @@ window.magicOptimize=(id)=>{
       const prod=plantProd[r.id]||0, sold=sellBy[r.id]||0, isPlant=prodRegions.some(x=>x.id===r.id);
       const priceR=Math.round(anchorOf(r.id)*pm); // realistic price from the market anchor
       const uc=(homePlant && r.id===homePlant.id && prod>0) ? Math.round(cost+totalFreight/prod) : cost;
-      const offices=isPlant?(cur.offices||0):(sold>0?1:0); // export: one sales office only where we actually sell; home keeps existing
+      // Data Log 04: the smallest legal captive sales organisation is 1 central + 1 regional,
+      // so an export market we actually sell in needs 2 — never 1 (which would be rejected).
+      const minCSO=RULES.offices.minCentral+RULES.offices.minRegional;
+      const offices=isPlant?(cur.offices||0):(sold>0?minCSO:0);
       levers[q].regions[r.id]={production:prod,unitCost:prod>0?uc:0,sales:sold*priceR,qtySold:sold,price:priceR,
         advertising:advBy[r.id]||0,invest:0,transferIn:0,offices,
         product:'Y',model:cur.model||'Standard',advPct:null}; }); });
@@ -3418,10 +3522,45 @@ function phantomTransfers(sc,targetQ){
   const hqCash=S.quarters[S.activeQuarter].financial.cash.hq||0;
   return totalIn>hqCash ? {totalIn,hqCash,gap:totalIn-hqCash} : null;
 }
+/* Guard — §4.9: only TWO grades of a product may be marketed or held in inventory in an
+   area at once. A third does not fail; the middle grade is silently downgraded to the
+   lowest, which writes down good inventory. Counts distinct grades already in inventory
+   per region×product and flags any region already at or over the limit. */
+function gradeLimitGuard(){
+  const op=S.quarters[S.activeQuarter].operational, out=[];
+  const by={};
+  (op.inventory||[]).filter(i=>(i.qty||0)>0).forEach(i=>{
+    const rid=i.region||'europe', prod=i.product||'Y';
+    const g=(i.grade!=null?i.grade:(i.model==='Deluxe'?1:0));
+    const k=rid+'|'+prod; (by[k]=by[k]||new Set()).add(String(g));
+  });
+  Object.entries(by).forEach(([k,set])=>{
+    const [rid,prod]=k.split('|'); const n=set.size;
+    if(n>=RULES.grades.maxPerProductPerArea){
+      const rn=(REGIONS.find(r=>r.id===rid)||{}).name||rid;
+      out.push({region:rid, regionName:rn, product:prod, grades:[...set], count:n,
+        over:n>RULES.grades.maxPerProductPerArea});
+    }
+  });
+  return out;
+}
+/* Guard — Data Log 04: the only legal office combination is 1 central + 1..9 regional.
+   The engine recommends office counts, so it must never propose an illegal one. */
+function officeLegality(sc,targetQ){
+  const lev=sc&&sc.levers[targetQ]; if(!lev) return [];
+  const out=[];
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const n=(lev.regions[r.id]||{}).offices;
+    if(n==null||n===0) return; // no captive sales organisation in that area at all — legal
+    if(n>RULES.offices.maxRegional) out.push({region:r.name, n, why:`מעל המקסימום — ${RULES.offices.maxCentral} מרכזי + עד ${RULES.offices.maxRegional} אזוריים`});
+    else if(n<RULES.offices.minCentral+RULES.offices.minRegional) out.push({region:r.name, n, why:`מתחת למינימום — נדרש ${RULES.offices.minCentral} מרכזי + ${RULES.offices.minRegional} אזורי לפחות`});
+  });
+  return out;
+}
 function renderChecklist(box,targetQ,sc){
   const Q=S.quarters[S.activeQuarter];
   const cg=chipGuard(sc,targetQ), val=scenarioValidation(sc,targetQ), caps=capacityCheck(sc,targetQ);
   const phantoms=phantomSales(sc,targetQ), ptrans=phantomTransfers(sc,targetQ);
+  const gl=gradeLimitGuard(), ol=officeLegality(sc,targetQ);
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
     {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
@@ -3434,12 +3573,16 @@ function renderChecklist(box,targetQ,sc){
     {t:'אין גירעון מטבע פתוח באף אזור',ok:REGIONS.every(r=>(Q.financial.cash[r.id]||0)>=0)},
     {t:'מו״פ מוזן (עקביות)',ok:(Q.operational.rd||0)>0||(sc&&sc.levers[targetQ]&&sc.levers[targetQ].rd>0)},
     {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
+    {t:`עד 2 דרגות למוצר באזור (§4.9)${gl.length?` · ${gl[0].regionName}/${gl[0].product} כבר ב-${gl[0].count}`:''}`,ok:!gl.some(g=>g.over)},
+    {t:`הרכב משרדי מכירות חוקי (Data Log 04)${ol.length?` · ${ol[0].region} ${ol[0].n}`:''}`,ok:ol.length===0},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
     ${phantoms.length?`<div class="tag a" style="margin-top:10px">${IC('warn')} מכירת-יתר: מתוכננת מכירה של <b>${fmt(phantoms[0].sold)}</b> יח׳ סה״כ אך ההיצע (מלאי מוגמר + ייצור) הוא <b>${fmt(phantoms[0].supply)}</b> — פער ${fmt(phantoms[0].gap)}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת.</div>`:''}
     ${ptrans?`<div class="tag a" style="margin-top:8px">${IC('warn')} העברת-פנטום: מעביר לאזורים ${fmt(ptrans.totalIn)} אך במטה יש רק ${fmt(ptrans.hqCash)} (חוסר ${fmt(ptrans.gap)}). העברה (A3-1) ממומנת מהמטה — אי-אפשר להעביר יותר ממה שיש בו.</div>`:''}
     ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
       (cg.gap>0?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם. <b>ההגשה חסומה.</b></div>`:'')}
+    ${gl.length?`<div class="tag ${gl.some(g=>g.over)?'r':'a'}" style="margin-top:8px">${IC('warn')} <b>מגבלת שתי דרגות (§4.9):</b> ${gl.map(g=>`${g.regionName}/${g.product==='Y'?'מחשב':'שבב'} מחזיק ${g.count} דרגות (${g.grades.join(', ')})`).join(' · ')}. הכנסת דרגה שלישית לאזור <b>תוריד אוטומטית את הדרגה האמצעית לרמת הנמוכה</b> — מחיקת שווי של מלאי טוב. מסלולי יציאה: ${RULES.grades.exits.join(' · ')}.</div>`:''}
+    ${ol.length?`<div class="tag r" style="margin-top:8px">${IC('warn')} <b>הרכב משרדים לא חוקי:</b> ${ol.map(o=>`${o.region}: ${o.n} — ${o.why}`).join(' · ')}.</div>`:''}
     ${caps.length?`<div class="tag a" style="margin-top:8px">${IC('warn')} חריגת קיבולת: ${caps.map(c=>`${c.name} ${c.product} ${fmt(c.prod)} יח׳ > ${fmt(c.cap)}/מפעל → נדרשים ${c.plants} מפעלים`).join(' · ')}.</div>`:''}
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;
 }
@@ -3734,6 +3877,14 @@ function rulesContextText(){
   L.push(`- **גמישות צולבת (§5.2, חוק מקור):** הביקוש לשבבים רגיש לשינוי במחיר המחשבים יותר מההיפך. חזק בארה״ב, בינוני באירופה, חלש בברזיל. העלאת מחיר מחשב מסיטה קונים לשבבים.`);
   L.push(`- **צמיחת שווקים (§5.2):** ${RULES.potential.growth}`);
   L.push(`- **פוטנציאל (§5.1):** לטווח ארוך מעט יותר ממפעל אחד בקיבולת אופטימלית לחברה/אזור/דגם. שוק השבבים לצרכן ~¼ משוק המחשבים (פחות בברזיל).`);
+  L.push(`- **${RULES.potential.nLessThanN.rule} (${RULES.potential.nLessThanN.src}).**`);
+  L.push(`- **מגבלת שתי דרגות (§4.9, חוק קשיח):** מותר לשווק או להחזיק במלאי **עד ${RULES.grades.maxPerProductPerArea} דרגות** של מוצר באזור אחד בו-זמנית. הכנסת דרגה שלישית ללא פינוי קודם: ${RULES.grades.thirdGradePenalty}. מסלולי יציאה: ${RULES.grades.exits.join(' · ')}. ${RULES.grades.airNote}`);
+  L.push(`- **משרדי מכירות (Data Log 04, חוק קשיח):** ${RULES.offices.note} המלצה של משרד בודד = לא חוקית.`);
+  L.push(`- **ייצור (§4.7):** ${RULES.production.twoGradeInterference} · ${RULES.production.regionalCostPattern} · ${RULES.production.plantPaidInFirstConstructionQuarter}`);
+  L.push(`- **מלאי (Data Log 06):** ${RULES.inventory.noChargeInProductionQuarter} · ${RULES.inventory.exponentialSurcharge}`);
+  L.push(`- **מס ותזרים (Data Log 07/09):** ${RULES.tax.note} · ${RULES.arap.taxToAP1} · ${RULES.arap.apScope} · ${RULES.arap.outOfPhase}`);
+  L.push(`- **ריבית על יתרות חיוביות (Data Log 07):** מקומי — ארה״ב ${DATALOG.interest.posBalance.lc.us}% · אירופה ${DATALOG.interest.posBalance.lc.europe}% · ברזיל ${DATALOG.interest.posBalance.lc.brazil}% · מטה ${DATALOG.interest.posBalance.lc.hq}% לרבעון. מטבע זר משלם יותר. מזומן סרק אינו חינם אבל גם אינו מת.`);
+  L.push(`- **השהיות (Data Log 08):** ${Object.entries(RULES.lags).map(([k,v])=>v).join(' · ')}`);
   return L.join('\n');
 }
 function buildAIContext(){
