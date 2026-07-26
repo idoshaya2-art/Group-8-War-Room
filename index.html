@@ -281,7 +281,9 @@ canvas{display:block;max-width:100%}
 .between{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .empty{text-align:center;padding:40px 20px;color:var(--muted)}
 .empty .ic{font-size:40px;opacity:.5;margin-bottom:8px}
-.chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:4px 11px;font-size:12.5px;font-weight:600}
+.est{border-bottom:1px dotted var(--amber);cursor:help}
+    .est sup{color:var(--amber);font-weight:700;margin-inline-start:1px}
+    .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:4px 11px;font-size:12.5px;font-weight:600}
 .hr{height:1px;background:var(--line);margin:16px 0;border:0}
 .src{font-size:11px;color:var(--muted2);font-style:italic}
 .pill-tabs{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
@@ -366,7 +368,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.5';
+const APP_VERSION = 'v8.6';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -627,6 +629,9 @@ function defaultState(){
         scoreTargets:{roe:25, roi:15, ros:10}, q9Score:75, q9Share:20,
         // Group 8 Q9 targets (Assignment 1, thousands SF → SF)
         cumProfitTarget:7046000, finalRETarget:4616000, equityTarget:12616000, debtFreeFrom:'Q8', noExternalLoans:true },
+      // Which plants make chips and which make computers. The report does not say, so it
+      // must be declared once; null means "not declared" and the engine refuses to guess.
+      plantSplit:{ us:{X:null,Y:null}, europe:{X:null,Y:null}, brazil:{X:null,Y:null} },
       contracts:[ // binding X3 supply commitment (Scenario 1)
         {id:'x3q5',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q5',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'},
         {id:'x3q6',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q6',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'} ],
@@ -727,6 +732,10 @@ function save(silent){
 }
 
 /* ---------- Utilities ---------- */
+/* Marks a figure that comes from a calibrated ESTIMATE rather than a sourced constant.
+   The distinction existed only inside the rules card; a player reading "פרסום 239,000"
+   on an action card had no way to know it rested on an assumed elasticity. */
+function est(html, why){ return `<span class="est" title="${esc(why||'אומדן מכויל — לא מספר מצוטט מחוקי המשחק')}">${html}<sup>~</sup></span>`; }
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const uid = ()=>Math.random().toString(36).slice(2,9);
@@ -957,6 +966,58 @@ function projectCashflow(baseQuarter, leversByQuarter){
   return out;
 }
 /* ==========================================================================
+   PLANT TYPE — declared, never assumed.
+   The report gives "PLANTS BUILT AND BUILDING" per area but does NOT say which are
+   chip plants and which are computer plants. Everything that talks about capacity
+   was quietly assuming a plant can make whatever we ask of it — which decides
+   whether a 30,000 X3 commitment is even physically possible. The split is now a
+   one-time declaration, and where it is missing the engine says "unknown" instead
+   of guessing.
+   ========================================================================== */
+function plantSplit(){ return (S.config && S.config.plantSplit) || {}; }
+/* Declared plants of a product in a region, or null when the team has not declared it. */
+function plantsForProduct(regionId, product){
+  const d=plantSplit()[regionId];
+  if(!d) return null;
+  const v=d[product];
+  return (v==null||v==='')?null:Math.max(0,Number(v)||0);
+}
+/* Does the declaration line up with the plant count the report actually shows? */
+function plantSplitStatus(){
+  const op=S.quarters[S.activeQuarter].operational, by=op.plantsByRegion||null;
+  const rows=REGIONS.filter(r=>r.id!=='hq').map(r=>{
+    const total=by?(by[r.id]||0):null;
+    const x=plantsForProduct(r.id,'X'), y=plantsForProduct(r.id,'Y');
+    const declared=(x!=null||y!=null);
+    const sum=(x||0)+(y||0);
+    return { rid:r.id, name:r.name, total, x, y, declared,
+      mismatch: declared && total!=null && sum!==total, sum };
+  });
+  return { rows, complete: rows.every(r=>r.total===0 || r.declared),
+    anyMismatch: rows.some(r=>r.mismatch) };
+}
+/* Chip capacity per quarter — only from plants declared as chip plants. Returns
+   {units, known}. known:false means we genuinely do not know, and callers must say so. */
+function capacityForProduct(product){
+  const op=S.quarters[S.activeQuarter].operational, by=op.plantsByRegion||null;
+  let units=0, known=true, anyPlants=false;
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    const total=by?(by[r.id]||0):0; if(total>0) anyPlants=true;
+    const n=plantsForProduct(r.id,product);
+    if(n==null){ if(total>0) known=false; return; }
+    units += n*((DATALOG.capacity[product]||{})[r.id]||0);
+  });
+  return { units, known: known||!anyPlants, anyPlants };
+}
+window.setPlantSplit=(rid,product,val)=>{
+  S.config.plantSplit=S.config.plantSplit||{};
+  S.config.plantSplit[rid]=S.config.plantSplit[rid]||{X:null,Y:null};
+  const n=(val===''||val==null)?null:Math.max(0,parseInt(val)||0);
+  S.config.plantSplit[rid][product]=n; save();
+  if(document.getElementById('goalBody')) goalTab('params');
+};
+
+/* ==========================================================================
    CASH FLOOR — derived, not guessed.
    The floor used to be a blank field defaulting to 0, with an unsourced 250,000
    fallback. A floor that means something answers one question: how much cash must
@@ -1087,10 +1148,10 @@ function contractPlan(){
     // Upper bound on how much we could make in one quarter, assuming existing plants can
     // run this product. The report gives total plants per area, not X vs Y, so this is a
     // ceiling — flagged as such rather than presented as fact.
-    const plantsBy=op.plantsByRegion||null;
-    let capPerQuarter=0, capKnown=!!plantsBy;
-    if(plantsBy) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
-      capPerQuarter += (plantsBy[r.id]||0)*((DATALOG.capacity[prod]||{})[r.id]||0); });
+    // Capacity for THIS product only — from plants declared as making it. Undeclared
+    // plants do not count toward a chip commitment just because they exist.
+    const capInfo=capacityForProduct(prod);
+    const capPerQuarter=capInfo.units, capKnown=capInfo.known;
     const unitCost=Math.round(((DATALOG.initialConsumerPrice[prod]||{}).europe||0)*
       ((DATALOG.varMfgCostPctOfRetail[prod]||[0.2,0.2])[1]));
     return { ...c, need, grade, prod, stock, wrongGrade, gap, productionQuarter, quartersLeft,
@@ -1512,7 +1573,9 @@ function computeAlerts(q){
         +` · <b>מועד ייצור אחרון: ${esc(c.productionQuarter)}</b>`
         +(c.tooLate?' <b style="color:var(--red)">— המועד חלף!</b>':(c.startNow?' <b style="color:var(--red)">— זהו הרבעון שמחליטים עליו עכשיו</b>':` (${c.slack} רבעוני מרווח)`))
         +(!c.techOK?` · <b style="color:var(--red)">דרגת ${esc(c.prod)} נוכחית ${c.tech} < ${c.grade} הנדרשת — נדרש מו״פ קודם</b>`:'')
-        +(c.capOK===false?` · <b style="color:var(--red)">מעל הקיבולת הזמינה (${fmt(c.capPerQuarter)}/רבעון)</b>`:'')
+        +(!c.capKnown?` · <b style="color:var(--amber)">קיבולת ${esc(c.prod)} לא ידועה — לא הוצהר אילו מפעלים מייצרים ${esc(c.prod)}. הצהר ב"הגדרות ויעדים → פרמטרים".</b>`
+          :(c.capPerQuarter===0?` · <b style="color:var(--red)">אין מפעל שמייצר ${esc(c.prod)} — ההתחייבות לא ניתנת לייצור עצמי. נדרש מפעל חדש (רבעון בנייה) או רכישה מחברה אחרת.</b>`
+          :(c.capOK===false?` · <b style="color:var(--red)">מעל הקיבולת הזמינה (${fmt(c.capPerQuarter)}/רבעון)</b>`:'')))
       ).join('<br>')}<br><span class="small">סחורה שיוצרה ברבעון נכנסת למלאי בסופו, ולכן ההפקה חייבת להסתיים רבעון לפני האספקה (Data Log 08).</span>`});
   }
   if(g.debtCeiling>0 && (Q.financial.loans||0)>g.debtCeiling) out.push({level:'amber',key:'debt',title:'חריגה מתקרת חוב',
@@ -2158,37 +2221,6 @@ function pcSellOptions(q){
     return {rid, reg, stock, cost, base, priceSrc, calibrated, mktCap, opts};
   });
 }
-function sellOptionsCard(groups, rows, targetQ){
-  const el=S.learning&&S.learning.elast?S.learning.elast.price:null;
-  return `<div class="card" style="margin-bottom:16px;border-color:var(--accent)">
-    <div class="ch"><h3>${IC('zap')} מכירת המלאי המוגמר — 3 אופציות תמחור ל-${targetQ}</h3><span class="tag b">A1-2</span></div>
-    <div class="cb">${groups.map(g=>`
-      <div class="between" style="flex-wrap:wrap;gap:6px;margin-bottom:8px"><b>${g.reg.name} · ${fmt(g.stock)} מחשבים במלאי</b>
-        <span class="small muted">מחיר בסיס ${fmt(g.base)} ${g.reg.cur} (${g.priceSrc}) · עלות/יח׳ ${fmt(g.cost)} ${g.reg.cur}</span></div>
-      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אופציה</th><th>מחיר/יח׳</th><th>יח׳ למכירה</th><th>% מהמלאי</th><th>הכנסה</th><th>רווח גולמי</th><th>פרסום</th><th></th></tr></thead>
-      <tbody>${g.opts.map(o=>{ const row=rows.find(r=>r.g===g&&r.o===o);
-        return `<tr>
-          <td style="text-align:start"><b>${o.name}</b><div class="small muted" style="max-width:210px;white-space:normal">${o.favors}</div></td>
-          <td class="num"><b>${fmt(o.price)}</b> ${g.reg.cur}</td>
-          <td class="num">${fmt(o.units)}${o.band?`<div class="small muted">${fmt(o.band[0])}–${fmt(o.band[1])}</div>`:''}</td>
-          <td class="num">${(o.cleared*100).toFixed(0)}%</td>
-          <td class="num">${fmt(o.revenue)}</td>
-          <td class="num" style="color:${o.grossMargin>=0?'var(--green)':'var(--red)'}">${fmt(o.grossMargin)}</td>
-          <td class="num">${fmt(o.adv)}</td>
-          <td><button class="btn sm primary" onclick="applyRecToSim(${row.idx})">${IC('zap')} החל</button></td>
-        </tr>`; }).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:6px">${IC('warn')} ${g.calibrated?`הכמויות נגזרות ממנוע הביקוש המכויל (גמישות מחיר ${el!=null?el.toFixed(2):'—'}). המחיר, ההכנסה והרווח מדויקים.`:`המחיר, ההכנסה והרווח הגולמי מדויקים. הכמויות מבוססות על <b>פוטנציאל השוק מה-Data Log</b> (${fmt(g.mktCap)} יח׳/רבעון ב${g.reg.name}) — אומדן טוב, אך יתכייל למחיר מדויק כשייקלט MR עם מחירי מתחרים.`}</div>`).join('<hr class="hr">')}
-      <details class="sec" style="margin:12px 0 0"><summary>${IC('search')} מקור המספרים וההנחות — מאיפה כל מספר</summary>
-        <div class="secbody small" style="line-height:1.9">
-          <b>מחיר בסיס</b> — לפי סדר עדיפות: (1) <b>עוגן ביקוש נלמד</b> מדוחות ה-MR שנקלטו; (2) אם אין MR — <b>מחיר הפתיחה מה-Data Log</b> (מחיר צרכן רשמי: PC אירופה 130 / ארה״ב 155 / ברזיל 800, מטבע מקומי); (3) אם אין — עלות×2; (4) 300. כרגע: <b>${esc(groups[0].priceSrc)}</b>.<br>
-          <b>שלושת המחירים</b> — נגזרים מהבסיס: נפח ×0.85 · מאוזן ×1.00 · פרמיום ×1.15. פריסת ±15% היא מדרג תמחור להצגת החלופות.<br>
-          <b>יח׳ למכירה</b> — ${groups.some(g=>g.calibrated)?'ממנוע הביקוש (גמישות מחיר שנלמדה מ-MR × גודל שוק).':`מבוססות על <b>פוטנציאל השוק מה-Data Log</b> (≈קיבולת מפעל אחד ×1.2 לכל חברה/דגם): נפח ≈ מלוא הפוטנציאל · מאוזן ≈80% · פרמיום ≈55%, מוגבל תמיד למלאי הקיים. זהו <b>נתון מהמשחק</b>, לא הנחה שרירותית — אך אינו מכויל לגמישות המחיר עד שייקלט MR.`}<br>
-          <b>פרסום</b> — נפח 8% · מאוזן 6% · פרמיום 4% מההכנסה (הנחת ברירת מחדל; ערוך בסימולטור).<br>
-          <b>רווח גולמי</b> = (מחיר − עלות/יח׳) × יח׳. <b>הכנסה</b> = מחיר × יח׳. שניהם מדויקים בהינתן המחיר והכמות.<br>
-          <span style="color:var(--amber)">${IC('warn')} בקצרה: המחיר והכמות נשענים כעת על נתוני Data Log אמיתיים (מחיר פתיחה + פוטנציאל שוק). מה שעדיין חסר לדיוק מלא: כיול גמישות המחיר מ-MR — עד אז הכמות היא אומדן טוב, לא תחזית מדויקת.</span>
-        </div></details>
-    </div></div>`;
-}
 /* ===== Option generators for the core quarterly decisions — each returns
    {optionCols, options:[{name,favors,cells,sim}]} so every action drills down
    to concrete numeric variants with one-click apply, like the sell panel. ===== */
@@ -2336,14 +2368,15 @@ function buildActionPlan(q,targetQ){
   const fg=finishedGoods(q);
   if(fg.hasFinished){
     const plan=fg.plan;
-    const planTxt=plan.map(p=>`${p.reg.name}: <b>${fmt(p.units)} יח׳ × ${fmt(p.price)} ${p.reg.cur}</b> = הכנסה פוטנציאלית ${fmt(p.revenue)} · פרסום ${fmt(p.adv)} <span class="small muted">(מקור מחיר: ${p.src} · ${esc(p.advWhy||'')})</span>`).join('<br>');
     const simRegions={}; plan.forEach(p=>{ simRegions[p.rid]={sales:p.revenue,advertising:p.adv,product:'Y',unitCost:p.cost,margin:null,advPct:null}; });
     const selling=(f.revenue||0)>0;
     // attach the 3 pricing options (volume/balanced/premium) so the sell action carries its own drill-down
     const so=pcSellOptions(q); const g0=so[0]; let sellOpts=null, sellCols=null;
-    if(g0){ sellCols=['מחיר/יח׳','יח׳','הכנסה','רווח גולמי'];
+    if(g0){ sellCols=['מחיר/יח׳','יח׳','הכנסה','רווח גולמי','פרסום'];
       sellOpts=g0.opts.map(o=>({ name:o.name, favors:o.favors,
-        cells:[fmt(o.price)+' '+g0.reg.cur, fmt(o.units), fmt(o.revenue), fmt(o.grossMargin)],
+        cells:[fmt(o.price)+' '+g0.reg.cur, fmt(o.units), fmt(o.revenue), fmt(o.grossMargin),
+          o.adv>0?est(fmt(o.adv),`תקציב פרסום לפי גמישות ${advElast(g0.rid,'Y')} וסף ${fmt(o.advThreshold)} ${g0.reg.cur} — הדירוג מהמדריך §5.4, הגודל אומדן מכויל`)
+                 :est('0','מתחת לסף האפקטיביות — פרסום כאן לא מחזיר את עצמו')],
         sim:{q:targetQ,regions:{[g0.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g0.cost,margin:null,advPct:null}}} })); }
     out.push({cat:'mkt',level:(fg.anyUnpriced||!selling)?'red':'amber',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
       title:`מכור ${fmt(fg.pcUnits)} מחשבים מוגמרים במלאי${fg.anyUnpriced?' — ללא מחיר, לא נמכרים!':''}`,
@@ -2484,18 +2517,32 @@ function buildActionPlan(q,targetQ){
       const grd=ct.grade!=null?ct.grade:null, prd=ct.product||'X';
       const curGrade=prd==='X'?op.techX:op.techY;
       const gradeReady=grd==null||curGrade>=grd; // is the required tech grade already achieved?
-      const cap=(DATALOG.capacity[prd]&&DATALOG.capacity[prd].europe)||0; // EU plant (their operating region)
-      const plants=cap?Math.ceil(short/cap):null;
-      const capNote=cap?`קיבולת מפעל אירופה ${fmt(cap)} ${prd}/רבעון → ${fmt(short)} ${plants>1?`דורש ${plants} מפעלים`:'נכנס במפעל אחד'}`:'';
+      // Capacity only from plants DECLARED as making this product — never assumed.
+      const _ci=capacityForProduct(prd);
+      // How many plants of this product a quantity needs — "?" when the split is undeclared.
+      const _perPlant=(DATALOG.capacity[prd]||{}).europe||0;
+      const _plantsNeeded=n=> !_ci.known ? '?' : (_perPlant?String(Math.ceil(n/_perPlant)):'—');
+      const capNote = !_ci.known
+        ? `<b style="color:var(--amber)">קיבולת ${prd} לא ידועה — לא הוצהר אילו מפעלים מייצרים ${prd}. הצהר ב"הגדרות ויעדים → פרמטרים" לפני שתסמוך על המספר.</b>`
+        : (_ci.units===0
+          ? `<b style="color:var(--red)">אין מפעל שמייצר ${prd} — לא ניתן לייצר את ההתחייבות עצמאית. נדרש מפעל חדש (רבעון בנייה, זמין רק מ-${QUARTERS[qIndex(q)+2]||'מאוחר יותר'}) או רכישה מחברה אחרת (H6).</b>`
+          : `קיבולת ${prd} מוצהרת ${fmt(_ci.units)}/רבעון → ${fmt(dueNow)} ${dueNow>_ci.units?`<b style="color:var(--red)">מעל הקיבולת — חסרים ${fmt(dueNow-_ci.units)}</b>`:'נכנס בקיבולת הקיימת'}`);
       out.push({cat:'ops',level:(urgent||!gradeReady)?'red':'amber',conf:'data',
       blocked: !gradeReady ? `נדרש קודם מו״פ להעלאת דרגה ל-${prodGrade} (אתה ב-${prd}${curGrade}). בצע את פעולת המו״פ (H1-1) לפני שאפשר לייצר.` : null,
       title:`${(urgent||!gradeReady)?'⚠ ':''}התחייבות ${prodGrade} — ${fmt(dueNow)} עד ${dueQ}${sched.length>1?` (מתוך ${fmt(short)} בסך הכל)`:''}${urgent?' — ייצר עכשיו!':''}`,form:`A2-3 (${prd==='X'?'Chip':'Computer'} Production) · דגם Deluxe`,
       detail:`<b>${esc(ct.counterparty||'התחייבות')}</b>: ${fmt(ct.qty)} × <b>${prodGrade} Deluxe</b> עד ${ct.deliveryQuarter}, במלאי ${fmt(inv)} — חסרים <b>${fmt(short)}</b>. ${ct.note?ct.note+'. ':''}${!gradeReady?`<b style="color:var(--red)">⚠ הדרגה טרם הושגה: אתה ב-${prd}${curGrade}, נדרש ${prodGrade} — חובה מו״פ (H1-1) עכשיו כדי לפתוח את הייצור.</b> `:''}${capNote?capNote+'. ':''}ייצור נכנס למלאי בסוף הרבעון וזמין למסירה רבעון אחריו — לכן <b>הייצור חייב להתבצע ב-${prodQ}</b>${urgent?' — כלומר בהחלטה שאתה מקבל עכשיו':''}.${ct._schedule&&ct._schedule.length>1?`<br><b>לוח האספקה בפועל:</b> ${ct._schedule.map(x=>`${fmt(x.qty)} ל-${x.q} (ייצור ב-${QUARTERS[qIndex(x.q)-1]||x.q})`).join(' · ')} — <b>אל תייצר את הכל מראש</b>, זה כובל מזומן רבעון מוקדם מדי.`:''}`,
       dep:`מו״פ→דרגה ${prodGrade} ⟵ ייצור A2-3 דגם Deluxe ⟵ מלאי סוף רבעון ⟵ מסירה. התחייבות ללא קנס — עמידה בזמן קריטית.`,
-      optionCols:['יח׳','דגם','מפעלים'],options:[
-        {name:'מלוא ההתחייבות',favors:'עומד ביעד המסירה במלואו',cells:[fmt(short),'Deluxe',plants||'—'],sim:{q:targetQ,regions:{europe:{production:short,product:prd,model:'Deluxe',unitCost:0}}}},
-        {name:'+ מלאי ביטחון 10%',favors:'כרית מפני פסולת/סטייה',cells:[fmt(Math.round(short*1.1)),'Deluxe',cap?Math.ceil(short*1.1/cap):'—'],sim:{q:targetQ,regions:{europe:{production:Math.round(short*1.1),product:prd,model:'Deluxe',unitCost:0}}}} ],
-      sim:{q:targetQ,regions:{europe:{production:short,product:prd,model:'Deluxe',unitCost:0}}}}); } } });
+      optionCols:['יח׳','דגם','מפעלים נדרשים'],options:[
+        {name:`מנת ${dueQ} בלבד`,favors:'מייצר רק את מה שחייב להיות מוכן למסירה הקרובה — לא כובל מזומן מראש',
+          cells:[fmt(dueNow),'Deluxe',_plantsNeeded(dueNow)],
+          sim:{q:targetQ,regions:{europe:{production:dueNow,product:prd,model:'Deluxe',unitCost:0}}}},
+        {name:'+ מלאי ביטחון 10%',favors:'כרית מפני פסולת/סטייה',
+          cells:[fmt(Math.round(dueNow*1.1)),'Deluxe',_plantsNeeded(Math.round(dueNow*1.1))],
+          sim:{q:targetQ,regions:{europe:{production:Math.round(dueNow*1.1),product:prd,model:'Deluxe',unitCost:0}}}},
+        ...(sched.length>1?[{name:'כל ההתחייבות מראש',favors:'מסיים את הנושא — אך כובל מזומן רבעון או יותר מוקדם מהנדרש',
+          cells:[fmt(short),'Deluxe',_plantsNeeded(short)],
+          sim:{q:targetQ,regions:{europe:{production:short,product:prd,model:'Deluxe',unitCost:0}}}}]:[]) ],
+      sim:{q:targetQ,regions:{europe:{production:dueNow,product:prd,model:'Deluxe',unitCost:0}}}}); } } });
   // 9. Debt — only worth raising when the company is actually cash-healthy (positive RE, ample cash)
   if((f.loans||0)>0 && (f.retainedEarnings||0)>=0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2 && !brk && minProj>=safety)
     out.push({cat:'fin',level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
@@ -2952,7 +2999,7 @@ function renderDemandEngine(){
     <div class="ch">${head}</div>
     <div class="cb">
       <div class="small" style="line-height:1.9;margin-bottom:10px">
-        גמישות מחיר מוערכת: <b class="num">${el}</b> ${ls.priceObs>0?`<span class="tag g">מכויל · ${ls.priceObs} תצפיות</span>`:'<span class="tag a">פריור — לא מכויל</span>'} — <span class="muted">−1% מחיר ≈ +${(ls.priceElast*-1).toFixed(2)}% ביקוש.</span>
+        גמישות מחיר מוערכת: <b class="num">${ls.priceObs>0?el:est(el,'פריור מהמדריך §5.3 — הדירוג בין אזורים מהמקור, המספר אומדן עד שיכויל מתצפיות מחיר אמיתיות')}</b> ${ls.priceObs>0?`<span class="tag g">מכויל · ${ls.priceObs} תצפיות</span>`:'<span class="tag a">פריור — לא מכויל</span>'} — <span class="muted">−1% מחיר ≈ +${(ls.priceElast*-1).toFixed(2)}% ביקוש.</span>
       </div>
       ${rows?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>שוק</th><th>מחיר נצפה</th><th>יח׳ נצפות</th><th>תחזית</th><th>טווח</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
       ${ls.trends.length?`<div style="margin-top:12px"><b class="small">${IC('trendUp')} מגמות מתחרים:</b><ul style="padding-inline-start:20px;line-height:1.8;margin:6px 0 0">${ls.trends.map(t=>`<li class="small">${esc(t.msg)}</li>`).join('')}</ul></div>`:''}
@@ -3054,6 +3101,48 @@ PAGE_RENDER.sim = (c)=>{
     </div>
     <div id="scenarioArea"></div>`;
   renderScenarios();
+  maybeSeedFromRecommendations();
+};
+/* The 5-step loop promised a pipeline but step 4 opened blank: the Decisions tab produced
+   a ranked action list and then asked the player to start a scenario from nothing. If no
+   scenario exists yet, build one from the mandatory recommendations so the plan arrives
+   already carrying what the engine just said had to happen. */
+function maybeSeedFromRecommendations(){
+  if(S.scenarios.length) return;
+  const q=S.activeQuarter, targetQ=nextQuarters(q)[0];
+  if(!targetQ) return;
+  let items=[]; try{ items=buildActionPlan(q,targetQ)||[]; }catch(e){ return; }
+  // Only the ones the engine called mandatory, and only those it can express as levers.
+  const musts=items.filter(it=>(it.level||it.sev)==='red' && it.sim && !it.blocked);
+  const area=$('#scenarioArea'); if(!area) return;
+  if(!musts.length){
+    area.innerHTML=`<div class="card pad" style="border-inline-start:4px solid var(--line)">
+      <b>${IC('info')} אין עדיין תרחיש</b>
+      <div class="small muted" style="margin-top:6px;line-height:1.7">המנוע לא מצא פעולות חובה שניתן להמיר אוטומטית לתוכנית. פתח תרחיש ריק, או חזור ל<b>"3 · החלטות"</b> ושלח משם פעולות לסימולטור.</div>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary" onclick="newScenario()">+ תרחיש חדש</button><button class="btn" onclick="go('plan')">← חזרה להחלטות</button></div></div>`;
+    return;
+  }
+  area.innerHTML=`<div class="card pad" style="border-inline-start:4px solid var(--accent)">
+    <b>${IC('zap')} ${musts.length} פעולות חובה מלשונית ההחלטות מוכנות להפוך לתוכנית</b>
+    <ul style="padding-inline-start:20px;line-height:1.8;margin:8px 0">${musts.map(m=>`<li class="small">${esc((m.title||'').slice(0,110))}</li>`).join('')}</ul>
+    <div class="row" style="gap:8px"><button class="btn primary" onclick="seedScenarioFromMusts()">${IC('zap')} צור תוכנית מההמלצות</button><button class="btn" onclick="newScenario()">התחל ריק</button></div>
+    <div class="small muted" style="margin-top:8px">נוצר תרחיש לכל הרבעונים עד Q9, עם המנופים שהמנוע כבר חישב. הכל נשאר לעריכה.</div></div>`;
+}
+window.seedScenarioFromMusts=()=>{
+  const q=S.activeQuarter, targetQ=nextQuarters(q)[0]; if(!targetQ) return;
+  const musts=(buildActionPlan(q,targetQ)||[]).filter(it=>(it.level||it.sev)==='red' && it.sim && !it.blocked);
+  const sc={id:uid(),name:'תוכנית הרבעון — מההמלצות',base:q,levers:{},createdAt:Date.now()};
+  planHorizon(q).forEach(hq=>{ sc.levers[hq]={rd:0,regions:{},actions:[]};
+    REGIONS.forEach(r=>sc.levers[hq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',margin:null,advPct:null,newFac:0,offices:0}); });
+  musts.forEach(m=>{ const sim=m.sim; if(!sim) return;
+    const lq=sim.q&&sc.levers[sim.q]?sim.q:targetQ;
+    if(sim.rd!=null) sc.levers[lq].rd=sim.rd;
+    Object.entries(sim.regions||{}).forEach(([rid,patch])=>{ sc.levers[lq].regions[rid]=Object.assign(sc.levers[lq].regions[rid]||{},patch); });
+  });
+  Object.keys(sc.levers).forEach(hq=>syncActionsToLevers(sc.levers[hq]));
+  S.scenarios.unshift(sc); save();
+  toast(`נוצרה תוכנית מ-${musts.length} פעולות חובה ✓`,'g');
+  renderScenarios(); editScenario(sc.id);
 };
 function renderScenarios(){
   const area=$('#scenarioArea'); if(!area)return;
@@ -3112,7 +3201,7 @@ window.editScenario=(id)=>{
       <div class="ch"><input class="f" style="max-width:240px;font-weight:700" value="${esc(sc.name)}" oninput="renameScenario('${id}',this.value)">
         <div class="row" style="margin-inline-start:auto;gap:8px"><button class="btn primary" onclick="magicOptimize('${id}')">${IC('zap')} קסם — מקסם ציון</button><span class="tag b">בסיס ${sc.base}</span></div></div>
       <div class="cb">
-        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: מחיר לפי <b>עוגן שוק</b> ×${m.pm} (לא עלות×מרווח) · עצימות ייצור ${(m.pf*100).toFixed(0)}%${m.invSold>0?` · <b>${fmt(m.invSold)} מחשבים במלאי נמכרים ראשונים</b>`:''}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.${m.advWhy?`<br><b>${IC('info')} פרסום:</b> ${esc(m.advWhy)} <span class="small muted">(חוקי המשחק §5.4 — גמישות פרסום וסף אפקטיביות)</span>`:''}</div></div>`:''}
+        ${m?`<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${m.feasible?'var(--green)':'var(--amber)'}"><div class="small" style="line-height:1.8"><b>${IC('zap')} תוצאת קסם:</b> ציון ${m.before.toFixed(0)} → <b>${m.after.toFixed(0)}</b> ${m.feasible?'<span class="tag g">ללא שבירת רצפה</span>':'<span class="tag a">גם המיטבי שובר רצפה — הגדל קיבולת/מחיר</span>'}<br>הנחות: מחיר לפי <b>עוגן שוק</b> ×${m.pm} (לא עלות×מרווח) · עצימות ייצור ${(m.pf*100).toFixed(0)}%${m.invSold>0?` · <b>${fmt(m.invSold)} מחשבים במלאי נמכרים ראשונים</b>`:''}${m.regions&&m.regions.length?`<br>ייצור רק ב: <b>${m.regions.join(', ')}</b> <span class="tag ${m.activeSrc==='מפעלים'?'g':'a'}">מקור: ${m.activeSrc||'—'}</span>${m.activeSrc&&m.activeSrc!=='מפעלים'?' — <b>קלוט מחדש את הדוח</b> לזיהוי מפעלים מדויק':''}${m.exported?`<br>${IC('exchange')} מכירות-יצוא: הסחורה משולחת מ<b>${m.homePlant}</b> לשווקים ללא מפעל (עלות שילוח + משרד מכירות נכללו).`:''}`:''}.${m.advWhy?`<br><b>${IC('info')} פרסום:</b> ${est(esc(m.advWhy),'מבוסס על גמישות וסף פרסום שהם אומדנים מכוילים בתוך גבולות המדריך §5.4')} <span class="small muted">(חוקי המשחק §5.4 — גמישות פרסום וסף אפקטיביות)</span>`:''}</div></div>`:''}
         <div id="simIntel" class="card pad" style="margin-bottom:12px;background:var(--bg2)"></div>
         <div class="between" style="margin-bottom:8px"><b class="small">${IC('sliders')} שלב 2 · כוונן את התוכנית</b><span class="small muted">בחר רבעון וכוונן את המנופים — התוצאה מתעדכנת מיד למטה</span></div>
         <div class="small muted" style="margin-bottom:10px;line-height:1.7">כל עמודה = מנוף אחר: <b>ייצור</b> = כמה יחידות לייצר · <b>מכירות</b> = ההכנסה המתוכננת · <b>פרסום</b> = דחיפת ביקוש · <b>השקעה/העברה</b> = תנועות מזומן · <b>מו״פ</b> = מנוע הפוטנציאל העתידי.</div>
@@ -3459,7 +3548,9 @@ window.magicOptimize=(id)=>{
   const prodRegions=activeRegions.length?activeRegions:REGIONS.filter(r=>r.id!=='hq'); // no signal at all → all
   if(!activeRegions.length) activeSrc='ללא נתוני מפעל — כל האזורים';
   const regionCap=r=>{ const perPlant=(DATALOG.capacity.Y||{})[r.id]||0;
-    return (hasPlants && plantsBy[r.id]>0) ? plantsBy[r.id]*perPlant : perPlant; }; // real ceiling per region
+    const declaredY=plantsForProduct(r.id,'Y');           // declared computer plants win over the raw total
+    if(declaredY!=null) return declaredY*perPlant;
+    return (hasPlants && plantsBy[r.id]>0) ? plantsBy[r.id]*perPlant : perPlant; };
   let cap=0; qs.forEach(q=>REGIONS.forEach(r=>{ cap=Math.max(cap,sc.levers[q].regions[r.id].production||0); }));
   if(!cap) cap=simCap(op)||prodRegions.reduce((a,r)=>a+regionCap(r),0)||8000; // Data Log capacity of ACTIVE regions
   const rd=op.rd||0, before=scoreProxy(sc.levers).value;
@@ -3882,7 +3973,28 @@ function goalTab(t){
     renderContracts();
   }
   if(t==='params'){
+    const _ps=plantSplitStatus();
     body.innerHTML=`
+    <div class="card" style="margin-bottom:14px;border-inline-start:4px solid ${_ps.complete?(_ps.anyMismatch?'var(--red)':'var(--green)'):'var(--amber)'}">
+      <div class="ch"><h3>${IC('factory')||IC('landmark')} מפעלים לפי מוצר — הצהרה חד-פעמית</h3>
+        <span class="tag ${_ps.complete?(_ps.anyMismatch?'r':'g'):'a'}">${_ps.complete?(_ps.anyMismatch?'אי-התאמה':'מוצהר'):'לא הוצהר'}</span></div>
+      <div class="cb">
+        <div class="small muted" style="line-height:1.8;margin-bottom:10px">${IC('warn')} דוח המשחק נותן <b>סך מפעלים לאזור</b> ואינו מפרט אילו מהם מייצרים שבבים ואילו מחשבים.
+          בלי ההצהרה הזו המנוע <b>לא יודע</b> אם התחייבות שבבים ניתנת לייצור — והוא יאמר "לא ידוע" במקום לנחש. השאר ריק אם אינך יודע.</div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אזור</th><th>סך מפעלים בדוח</th><th>מפעלי שבבים (X)</th><th>מפעלי מחשבים (Y)</th><th>קיבולת נגזרת</th></tr></thead><tbody>
+          ${_ps.rows.map(r=>`<tr${r.mismatch?' style="background:rgba(255,93,108,.10)"':''}>
+            <td style="text-align:start"><b>${esc(r.name)}</b></td>
+            <td class="num">${r.total==null?'—':fmt(r.total)}</td>
+            <td><input class="f" type="number" min="0" style="max-width:90px" value="${r.x==null?'':r.x}" placeholder="?" oninput="setPlantSplit('${r.rid}','X',this.value)"></td>
+            <td><input class="f" type="number" min="0" style="max-width:90px" value="${r.y==null?'':r.y}" placeholder="?" oninput="setPlantSplit('${r.rid}','Y',this.value)"></td>
+            <td class="small muted" style="text-align:start;white-space:normal">${r.declared?`X ${fmt((r.x||0)*((DATALOG.capacity.X||{})[r.rid]||0))} · Y ${fmt((r.y||0)*((DATALOG.capacity.Y||{})[r.rid]||0))} יח׳/רבעון${r.mismatch?` <b style="color:var(--red)">— סכום ${r.sum} ≠ ${r.total} בדוח</b>`:''}`:'לא הוצהר'}</td></tr>`).join('')}
+        </tbody></table></div>
+        ${(()=>{ const cx=capacityForProduct('X'), cy=capacityForProduct('Y');
+          return `<div class="small" style="margin-top:10px;line-height:1.8">
+            <b>קיבולת שבבים (X):</b> ${cx.known?(cx.units?`${fmt(cx.units)} יח׳/רבעון`:'<span style="color:var(--red)">0 — אין מפעל שבבים</span>'):'<span style="color:var(--amber)">לא ידוע</span>'} ·
+            <b>קיבולת מחשבים (Y):</b> ${cy.known?(cy.units?`${fmt(cy.units)} יח׳/רבעון`:'<span style="color:var(--red)">0 — אין מפעל מחשבים</span>'):'<span style="color:var(--amber)">לא ידוע</span>'}</div>`; })()}
+      </div>
+    </div>
     <div class="grid" style="grid-template-columns:1fr 1fr">
       <div class="card">
         <div class="ch"><h3>${IC('calendar')} לוחות גבייה (% לפי אזור)</h3></div>
