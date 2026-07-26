@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v7.7';
+const APP_VERSION = 'v7.8';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3740,12 +3740,24 @@ function renderAdvisorCard(q,targetQ){
       : `<div class="small muted">ה-AI בודק כל פעולה של המנוע מול 4 עמודים — <b>חוקים · מחקרי שוק · נזילות אזורית · כדאיות מול 50/50</b> — ומוציא רשימת פעולות מדויקת ומוכנה-להזנה, עם תיקונים ואזהרות. המספרים מהמנוע; השיפוט מה-AI. לחץ "הפעל יועץ" (קריאת API אחת).</div>`}</div>
   </div>`;
 }
+// Every request is time-boxed. Without this a stalled mobile connection leaves the
+// "מנתח…" placeholder on screen forever with no error and no way to retry.
+const LLM_TIMEOUT_MS=90000;
+async function fetchLLM(url,init){
+  const ac=new AbortController();
+  const t=setTimeout(()=>ac.abort(),LLM_TIMEOUT_MS);
+  try{ return await fetch(url,Object.assign({signal:ac.signal},init)); }
+  catch(e){ throw new Error(e&&e.name==='AbortError'
+    ? `הבקשה לא חזרה תוך ${LLM_TIMEOUT_MS/1000} שניות (TIMEOUT). נסה שוב, או בדוק חיבור/מכסה.`
+    : 'לא ניתן להגיע לשרת ה-AI: '+((e&&e.message)||e)); }
+  finally{ clearTimeout(t); }
+}
 async function callLLM(messages, system, opts={}){
   const prov=aiProvider(), key=getApiKey(prov);
   if(!key) throw new Error('NO_KEY');
   const readErr=async(res)=>{ let msg=res.status+' '+res.statusText; try{ const j=await res.json(); if(j.error&&j.error.message)msg=j.error.message; }catch(e){} return msg; };
   if(prov==='openai'){
-    const res=await fetch('https://api.openai.com/v1/chat/completions',{
+    const res=await fetchLLM('https://api.openai.com/v1/chat/completions',{
       method:'POST',
       headers:{ 'content-type':'application/json', 'Authorization':'Bearer '+key },
       body:JSON.stringify({ model:aiModel(), max_completion_tokens:opts.max_tokens||1200,
@@ -3753,10 +3765,12 @@ async function callLLM(messages, system, opts={}){
     });
     if(!res.ok) throw new Error(await readErr(res));
     const data=await res.json();
-    return ((data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||'').trim();
+    const txt=((data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||'').trim();
+    if(!txt) throw new Error('המודל החזיר תשובה ריקה (ייתכן שנגמרו הטוקנים). נסה שאלה קצרה יותר.');
+    return txt;
   }
   // Anthropic (default)
-  const res=await fetch('https://api.anthropic.com/v1/messages',{
+  const res=await fetchLLM('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{
       'content-type':'application/json',
@@ -3768,7 +3782,11 @@ async function callLLM(messages, system, opts={}){
   });
   if(!res.ok) throw new Error(await readErr(res));
   const data=await res.json();
-  return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+  const txt=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+  if(!txt) throw new Error(data.stop_reason==='max_tokens'
+    ? 'התשובה נקטעה לפני שנכתב טקסט (max_tokens). נסה שאלה ממוקדת יותר.'
+    : 'המודל החזיר תשובה ריקה.');
+  return txt;
 }
 
 const COUNCIL=[
@@ -3824,17 +3842,20 @@ PAGE_RENDER.ai = (c)=>{
         </div>
       </div>
     </div>`;
+  if(dropStalePending()) save();
   renderChatLog();
 };
 function renderChatLog(){
   const box=$('#chatLog'); if(!box)return;
   const chat=(S.ai&&S.ai.chat)||[];
   if(!chat.length){ box.innerHTML=`<div class="small muted" style="padding:12px 0">אין הודעות עדיין. שאל שאלה אנליטית — התשובה תתבסס על נתוני הרבעון עם ציטוט מקור.</div>`; return; }
-  box.innerHTML=chat.map(m=>{
-    const me=m.role==='user';
-    return `<div style="align-self:${me?'flex-start':'stretch'};max-width:${me?'80%':'100%'};background:${me?'var(--panel2)':'linear-gradient(180deg,var(--panel),var(--bg2))'};border:1px solid var(--line);border-radius:12px;padding:11px 14px">
-      <div class="small" style="color:${me?'var(--accent2)':'var(--purple)'};font-weight:700;margin-bottom:4px">${me?'אתה':IC('cpu')+' יועץ'}</div>
-      <div style="line-height:1.6;white-space:pre-wrap">${esc(m.content)}</div></div>`;
+  box.innerHTML=chat.map((m,i)=>{
+    const me=m.role==='user', pend=m.content===CHAT_PENDING, err=!!m.err;
+    const lastUser=chat.slice(0,i).reverse().find(x=>x.role==='user');
+    return `<div style="align-self:${me?'flex-start':'stretch'};max-width:${me?'80%':'100%'};background:${me?'var(--panel2)':'linear-gradient(180deg,var(--panel),var(--bg2))'};border:1px solid ${err?'var(--red)':'var(--line)'};border-radius:12px;padding:11px 14px">
+      <div class="small" style="color:${me?'var(--accent2)':(err?'var(--red)':'var(--purple)')};font-weight:700;margin-bottom:4px">${me?'אתה':(err?IC('warn')+' שגיאה':IC('cpu')+' יועץ')}</div>
+      <div style="line-height:1.6;white-space:pre-wrap">${esc(m.content)}${pend?' <span class="small muted">(עד 90 שניות)</span>':''}</div>
+      ${(err&&lastUser)?`<button class="btn sm" style="margin-top:8px" onclick="retryChat(${i})">נסה שוב</button>`:''}</div>`;
   }).join('');
   box.scrollTop=box.scrollHeight;
 }
@@ -3889,24 +3910,49 @@ window.saveAISettings=()=>{
   save(); closeModal(); toast('הגדרות AI נשמרו','g'); go('ai');
 };
 window.clearChat=()=>{ S.ai.chat=[]; save(); renderChatLog(); };
+// Re-ask the question that produced a failed answer, dropping the failed pair.
+window.retryChat=(i)=>{
+  const chat=(S.ai&&S.ai.chat)||[]; let ui=-1;
+  for(let k=i-1;k>=0;k--){ if(chat[k].role==='user'){ ui=k; break; } }
+  if(ui<0)return;
+  const q=chat[ui].content;
+  S.ai.chat=chat.slice(0,ui).concat(chat.slice(i+1));
+  save(); renderChatLog();
+  const el=$('#chatInput'); if(el){ el.value=q; sendChat(); }
+};
 window.quickAsk=(q)=>{ const el=$('#chatInput'); if(el){ el.value=q; sendChat(); } };
+const CHAT_PENDING='מנתח…';
+const CHAT_HISTORY_TURNS=10; // cap what we resend so the payload can't grow unbounded
+let _chatBusy=false;
+// A placeholder left behind by a tab that was closed mid-request would otherwise sit
+// in localStorage forever, and would also be resent as conversation history.
+function dropStalePending(){
+  if(!S.ai||!Array.isArray(S.ai.chat))return false;
+  const n=S.ai.chat.length; S.ai.chat=S.ai.chat.filter(m=>m&&m.content!==CHAT_PENDING);
+  return S.ai.chat.length!==n;
+}
 window.sendChat=async()=>{
   const input=$('#chatInput'); const q=(input.value||'').trim(); if(!q)return;
+  if(_chatBusy){ toast('יש שאלה בעיבוד — המתן לתשובה','a'); return; } // Enter could re-enter past the disabled button
   if(!getApiKey()){ openAISettings(); return; }
-  S.ai.chat=S.ai.chat||[]; S.ai.chat.push({role:'user',content:q}); save(); input.value=''; renderChatLog();
-  const btn=$('#chatSend'); btn.disabled=true; btn.textContent='...';
-  const thinking={role:'assistant',content:'מנתח…'}; S.ai.chat.push(thinking); renderChatLog();
+  _chatBusy=true;
+  S.ai.chat=S.ai.chat||[]; dropStalePending();
+  S.ai.chat.push({role:'user',content:q}); input.value='';
+  const slot=S.ai.chat.push({role:'assistant',content:CHAT_PENDING})-1; // write back to THIS slot, not to whatever is last
+  save(); renderChatLog();
+  const btn=$('#chatSend'); if(btn){ btn.disabled=true; btn.textContent='...'; }
   try{
     const ctx=buildAIContext();
-    const history=S.ai.chat.filter(m=>m.content!=='מנתח…').map(m=>({role:m.role,content:m.content}));
+    const history=S.ai.chat.filter(m=>m.content!==CHAT_PENDING).map(m=>({role:m.role,content:m.content})).slice(-CHAT_HISTORY_TURNS);
     // prepend context to the latest user turn
     history[history.length-1]={role:'user',content:ctx+'\n\n---\nשאלה: '+q};
-    const answer=await callLLM(history, AI_SYSTEM);
-    S.ai.chat[S.ai.chat.length-1]={role:'assistant',content:answer};
+    S.ai.chat[slot]={role:'assistant',content:await callLLM(history, AI_SYSTEM)};
   }catch(e){
-    S.ai.chat[S.ai.chat.length-1]={role:'assistant',content:aiErr(e)};
+    S.ai.chat[slot]={role:'assistant',content:aiErr(e),err:true};
   }
-  save(); renderChatLog(); btn.disabled=false; btn.textContent='שלח';
+  _chatBusy=false;
+  save(); renderChatLog();
+  const b2=$('#chatSend'); if(b2){ b2.disabled=false; b2.textContent='שלח'; }
 };
 function aiErr(e){
   if(e.message==='NO_KEY') return 'לא הוגדר מפתח API. פתח "הגדרות AI".';
