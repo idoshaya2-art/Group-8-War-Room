@@ -366,7 +366,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.3';
+const APP_VERSION = 'v8.4';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -956,6 +956,162 @@ function projectCashflow(baseQuarter, leversByQuarter){
   }
   return out;
 }
+/* ==========================================================================
+   CASH FLOOR — derived, not guessed.
+   The floor used to be a blank field defaulting to 0, with an unsourced 250,000
+   fallback. A floor that means something answers one question: how much cash must
+   we hold at the END of a quarter to survive the NEXT one?
+
+   The reasoning, and why revenue is not netted off:
+   Data Log 09 — consumer revenue arrives with a lag (US 40% cash / 60% after 1Q;
+   Europe 50/20/30; Brazil 30/30/40). So next quarter's sales cannot pay next
+   quarter's bills. Data Log 09 also says fixed plant costs and all other expenses
+   come straight out of cash, while only variable manufacturing and tax sit in A/P.
+   So the floor = the legal minimum + the outflows of the next quarter that cannot
+   be deferred, and it deliberately does NOT count on incoming sales.
+   ========================================================================== */
+function floorComponents(forQuarter){
+  const base=S.activeQuarter, p=S.config.params, op=S.quarters[base].operational, f=S.quarters[base].financial;
+  const sc=S.scenarios[0];
+  const nextQ=QUARTERS[qIndex(forQuarter)+1]||null;    // the quarter this floor has to fund
+  const lev=(sc&&nextQ&&sc.levers[nextQ])||(sc&&sc.levers[forQuarter])||null;
+  const plantsBy=op.plantsByRegion||null;
+  const items=[]; const add=(label,sf,src)=>{ if(sf>0) items.push({label,sf:Math.round(sf),src}); };
+
+  add('מינימום חוקי במטה', DATALOG.minHOCashSF, 'Data Log 10 — נדרש בכל עת');
+
+  // Fixed plant cost — paid directly out of cash, never deferred (Data Log 09)
+  let plantFixed=0;
+  if(plantsBy) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const n=plantsBy[r.id]||0;
+    for(let k=0;k<n;k++){ const tbl=(DATALOG.plantFixedCost.Y[r.id]||[]); plantFixed += (tbl[Math.min(k,tbl.length-1)]||0)*fxRate(r.cur); } });
+  add('עלות קבועה של מפעלים', plantFixed, 'Data Log 03/09 — יוצאת ישירות מהמזומן');
+
+  // Captive sales offices — fixed quarterly cost
+  let offices=0;
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const n=(lev&&lev.regions[r.id]?lev.regions[r.id].offices:0)||0;
+    if(n>0) offices += ((DATALOG.officeFixedCost.central[r.id]||0) + Math.max(0,n-1)*(DATALOG.officeFixedCost.regional[r.id]||0))*fxRate(r.cur); });
+  add('משרדי מכירות', offices, 'Data Log 04 — מרכזי + אזוריים');
+
+  // R&D at least at the legal minimum for whatever we are actually pursuing
+  const rdPlanned=(lev&&lev.rd)||0;
+  add('מו״פ', Math.max(rdPlanned, DATALOG.rdMinPerQuarter.X), 'Data Log 06 — מינימום חוקי לרבעון');
+
+  // Cash share of variable manufacturing
+  let varCash=0, adv=0;
+  if(lev) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{};
+    varCash += (rl.production||0)*(rl.unitCost||0)*((p.productionPay[0]||0)/100)*fxRate(r.cur);
+    adv += (rl.advertising||0)*fxRate(r.cur); });
+  add('חלק המזומן בעלות ייצור משתנה', varCash, 'Data Log 09 — היתר ב-A/P');
+  add('פרסום', adv, 'הוצאה שוטפת — יוצאת מהמזומן');
+
+  // Tax accrued this quarter lands next quarter (A/P1)
+  const projNow=projectCashflow(base, sc?sc.levers:null);
+  const taxRow=projNow.find(x=>x.q===forQuarter);
+  add('מס שנצבר וישולם ברבעון הבא', (taxRow&&taxRow.tax)||0, 'Data Log 09 — מסים נזקפים ל-A/P1');
+
+  add('ריבית על חוב קיים', ((f.loans||0)*((p.interest.bank||0)/100)/4), 'Data Log 07');
+
+  // Brazil deposit is only live for construction started in Q1–Q3
+  if(qIndex(forQuarter)<=qIndex('Q3') && plantsBy && (plantsBy.brazil||0)>0)
+    add('פיקדון מפעל ברזיל', DATALOG.brazilPlantDepositBRL*fxRate('BRL'), 'Data Log 08/10 — מופקד מחדש עד סוף Q3');
+
+  // Contractual deliveries that must be produced/bought regardless of market conditions
+  const ct=contractPlan().filter(c=>c.productionQuarter===nextQ && c.gap>0);
+  let ctCost=0; ct.forEach(c=>{ ctCost += c.estCostSF||0; });
+  add('ייצור להתחייבויות חוזיות', ctCost, 'התחייבות מקודשת — לא ניתן לדחות');
+
+  const total=items.reduce((a,i)=>a+i.sf,0);
+  return {quarter:forQuarter, fundsQuarter:nextQ, items, total,
+    note:'ההכנסות של הרבעון הבא לא מנוכות: לפי Data Log 09 הגבייה מפוזרת על 1–2 רבעונים, ולכן מכירות של רבעון אינן יכולות לשלם את חשבונות אותו רבעון.',
+    planned:!!lev };
+}
+function recommendFloors(){
+  const out={}; const detail={};
+  planHorizon(S.activeQuarter).forEach(q=>{ const c=floorComponents(q); out[q]=c.total; detail[q]=c; });
+  // Quarters already played keep whatever is set — a floor for the past is meaningless.
+  return {floors:out, detail};
+}
+/* Shows WHY each floor is that number — the whole point of a floor is that the team can
+   defend it. Every component names its Data Log source. */
+function floorExplainer(){
+  const hz=planHorizon(S.activeQuarter); if(!hz.length) return '';
+  const rec=recommendFloors(); const first=rec.detail[hz[0]];
+  if(!first) return '';
+  const set=S.config.goals.floors||{};
+  const unset=hz.every(q=>!(set[q]>0));
+  return `<div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${unset?'var(--amber)':'var(--purple)'};background:var(--bg2)">
+    <div class="small" style="line-height:1.9">
+      ${unset?`<b style="color:var(--amber)">${IC('warn')} הרצפות עדיין 0 — כלומר אין באמת רצפה.</b><br>`:''}
+      <b>${IC('info')} איך המנוע מגזיר את המספר:</b> הרצפה של רבעון היא המזומן שצריך להחזיק ב<b>סופו</b> כדי לשרוד את הרבעון <b>הבא</b>.
+      <b>ההכנסות של הרבעון הבא לא מנוכות במכוון</b> — לפי Data Log 09 הגבייה מתפרסת על 1–2 רבעונים (ארה״ב 40% מזומן, אירופה 50%, ברזיל 30%), ולכן מכירות של רבעון אינן יכולות לשלם את חשבונות אותו רבעון.
+    </div>
+    <div style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>מרכיב (עבור ${esc(hz[0])} → מממן את ${esc(first.fundsQuarter||'—')})</th><th>SF</th><th>מקור</th></tr></thead><tbody>
+      ${first.items.map(i=>`<tr><td style="text-align:start">${esc(i.label)}</td><td class="num">${fmt(i.sf)}</td><td class="small muted" style="text-align:start;white-space:normal">${esc(i.src)}</td></tr>`).join('')}
+      <tr style="background:rgba(139,124,255,.08)"><td><b>סה״כ רצפה מוצעת ל-${esc(hz[0])}</b></td><td class="num"><b>${fmt(first.total)}</b></td><td></td></tr>
+    </tbody></table></div>
+    ${!first.planned?`<div class="small" style="color:var(--amber);margin-top:8px">${IC('warn')} אין עדיין תוכנית לרבעון הבא, ולכן מרכיבי הייצור/פרסום מבוססים על מה שקיים. בנה תרחיש וחשב מחדש לדיוק גבוה יותר.</div>`:''}
+    <div class="small muted" style="margin-top:8px">רצפות מוצעות לכל האופק: ${hz.map(q=>`${q} <b class="num">${fmt(rec.floors[q]||0)}</b>`).join(' · ')}</div>
+  </div>`;
+}
+window.applyRecommendedFloors=()=>{
+  const rec=recommendFloors();
+  Object.entries(rec.floors).forEach(([q,v])=>{ S.config.goals.floors[q]=v; });
+  save(); toast('רצפות חושבו מהמנוע והוחלו ✓','g');
+  if(document.getElementById('goalBody')) goalTab('floors'); // only re-render when the goals page is mounted
+};
+
+/* ==========================================================================
+   CONTRACTUAL COMMITMENTS — grade-aware, deadline-aware, capacity-aware.
+   The old risk test compared TOTAL inventory of a product against the contracted
+   quantity, so 30,000 X0 chips silently "covered" a 30,000 X3 commitment. It also
+   treated the delivery quarter as the deadline, when goods produced in a quarter
+   only enter inventory at its END (Data Log 08) — so the real production deadline
+   is one quarter EARLIER than delivery.
+   ========================================================================== */
+function contractPlan(){
+  const base=S.activeQuarter, op=S.quarters[base].operational;
+  const cs=Array.isArray(S.config.contracts)?S.config.contracts:[];
+  return cs.filter(c=>c.deliveryQuarter && qIndex(c.deliveryQuarter)>=qIndex(base)).map(c=>{
+    const need=c.qty||0, grade=(c.grade!=null?c.grade:0), prod=c.product||'X';
+    // Only stock of the right product AND a grade that can actually satisfy the contract.
+    const eligible=(op.inventory||[]).filter(i=>i.product===prod && (i.grade!=null?i.grade:0)>=grade);
+    const stock=eligible.reduce((a,i)=>a+(i.qty||0),0);
+    const wrongGrade=(op.inventory||[]).filter(i=>i.product===prod && (i.grade!=null?i.grade:0)<grade)
+      .reduce((a,i)=>a+(i.qty||0),0);
+    const gap=Math.max(0,need-stock);
+    // Data Log 08: produced in Qt → in inventory at end of Qt → deliverable in Qt+1.
+    const productionQuarter=QUARTERS[qIndex(c.deliveryQuarter)-1]||c.deliveryQuarter;
+    const quartersLeft=qIndex(productionQuarter)-qIndex(base);
+    const tech=prod==='X'?(op.techX||0):(op.techY||0);
+    const techOK=tech>=grade;
+    // Upper bound on how much we could make in one quarter, assuming existing plants can
+    // run this product. The report gives total plants per area, not X vs Y, so this is a
+    // ceiling — flagged as such rather than presented as fact.
+    const plantsBy=op.plantsByRegion||null;
+    let capPerQuarter=0, capKnown=!!plantsBy;
+    if(plantsBy) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+      capPerQuarter += (plantsBy[r.id]||0)*((DATALOG.capacity[prod]||{})[r.id]||0); });
+    const unitCost=Math.round(((DATALOG.initialConsumerPrice[prod]||{}).europe||0)*
+      ((DATALOG.varMfgCostPctOfRetail[prod]||[0.2,0.2])[1]));
+    return { ...c, need, grade, prod, stock, wrongGrade, gap, productionQuarter, quartersLeft,
+      tech, techOK, capPerQuarter, capKnown,
+      capOK: !capKnown ? null : (gap<=capPerQuarter*Math.max(1,quartersLeft)),
+      // base is the last COMPLETED quarter, so the quarter being decided right now is base+1.
+      // quartersLeft===1 means the production deadline IS this decision; <=0 means it has passed.
+      tooLate: quartersLeft<=0,
+      startNow: quartersLeft===1,
+      slack: Math.max(0,quartersLeft-1),
+      estCostSF: Math.round(gap*unitCost*fxRate('EUR')),
+      eligibleGrades:[...new Set(eligible.map(i=>i.grade))].sort() };
+  }).sort((a,b)=>qIndex(a.deliveryQuarter)-qIndex(b.deliveryQuarter));
+}
+/* Total committed units per production quarter — what any plan MUST make, on top of
+   whatever it wants to sell on the open market. */
+function contractRequirements(){
+  const byQ={}; contractPlan().forEach(c=>{ if(c.gap<=0) return;
+    const k=c.productionQuarter; (byQ[k]=byQ[k]||[]).push(c); });
+  return byQ;
+}
 /* ---------- WS-1: the real INTOPIA final score — 50% past performance / 50% future potential ----------
    Past  = cumulative net profit ranked vs competitors (MR74) + efficiency (ROE/ROI/ROS vs targets).
    Future= tech vs target + market share (MR17&28) + financial health, weighted, with maturation to Q9.
@@ -1344,15 +1500,20 @@ function computeAlerts(q){
   if((Q.operational.rd||0)===0) out.push({level:'amber',key:'rd',title:'מו״פ = 0',
     desc:'אין השקעת מו״פ ברבעון זה — שים לב לקנס עקביות ולפיגור טכנולוגי מול מתחרים.'});
   // Contracts at risk are grouped into ONE alert — near-identical rows per quarter were flooding the list.
-  const atRisk=S.config.contracts.filter(c=>{
-    if(!c.deliveryQuarter || qIndex(c.deliveryQuarter)<qIndex(q)) return false;
-    const invQty=Q.operational.inventory.filter(i=>i.product===c.product).reduce((a,i)=>a+(i.qty||0),0);
-    return invQty<(c.qty||0);
-  });
+  // Grade-aware, deadline-aware. The production deadline is one quarter BEFORE delivery
+  // (Data Log 08), and only stock of a sufficient grade counts toward the commitment.
+  const atRisk=contractPlan().filter(c=>c.gap>0);
   if(atRisk.length){
-    const invOf=c=>Q.operational.inventory.filter(i=>i.product===c.product).reduce((a,i)=>a+(i.qty||0),0);
-    out.push({level:'amber',key:'ct_group',title:atRisk.length===1?'התחייבות חוזית בסיכון':`${atRisk.length} התחייבויות חוזיות בסיכון`,
-      desc:`${atRisk.map(c=>`<b>${esc(c.deliveryQuarter)}</b>: ${fmt(c.qty)} × ${esc(c.product||'—')}${c.counterparty?' ('+esc(c.counterparty)+')':''} — במלאי ${fmt(invOf(c))}`).join(' · ')}. חסר ייצור/רכש לפני מועד האספקה.`});
+    const urgent=atRisk.some(c=>c.tooLate||c.startNow);
+    out.push({level:urgent?'red':'amber',key:'ct_group',
+      title:atRisk.length===1?'התחייבות חוזית בסיכון':`${atRisk.length} התחייבויות חוזיות בסיכון`,
+      desc:`${atRisk.map(c=>`<b>${esc(c.deliveryQuarter)}</b>: ${fmt(c.need)} × ${esc(c.prod)}${c.grade} — במלאי מתאים ${fmt(c.stock)}, חסר <b>${fmt(c.gap)}</b>`
+        +(c.wrongGrade>0?` <span style="color:var(--amber)">(יש ${fmt(c.wrongGrade)} יח׳ ${esc(c.prod)} בדרגה נמוכה מדי — לא נחשבות)</span>`:'')
+        +` · <b>מועד ייצור אחרון: ${esc(c.productionQuarter)}</b>`
+        +(c.tooLate?' <b style="color:var(--red)">— המועד חלף!</b>':(c.startNow?' <b style="color:var(--red)">— זהו הרבעון שמחליטים עליו עכשיו</b>':` (${c.slack} רבעוני מרווח)`))
+        +(!c.techOK?` · <b style="color:var(--red)">דרגת ${esc(c.prod)} נוכחית ${c.tech} < ${c.grade} הנדרשת — נדרש מו״פ קודם</b>`:'')
+        +(c.capOK===false?` · <b style="color:var(--red)">מעל הקיבולת הזמינה (${fmt(c.capPerQuarter)}/רבעון)</b>`:'')
+      ).join('<br>')}<br><span class="small">סחורה שיוצרה ברבעון נכנסת למלאי בסופו, ולכן ההפקה חייבת להסתיים רבעון לפני האספקה (Data Log 08).</span>`});
   }
   if(g.debtCeiling>0 && (Q.financial.loans||0)>g.debtCeiling) out.push({level:'amber',key:'debt',title:'חריגה מתקרת חוב',
     desc:`חוב ${fmt(Q.financial.loans)} מעל התקרה שהוגדרה (${fmt(g.debtCeiling)}).`});
@@ -3684,8 +3845,9 @@ function goalTab(t){
       </tbody></table></div>
     </div>
     <div class="card" style="margin-top:14px">
-      <div class="ch"><h3>${IC('dollar')} רצפות מזומן ומשמעת חוב</h3></div>
-      <div class="cb"><div class="grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="ch"><h3>${IC('dollar')} רצפות מזומן ומשמעת חוב</h3>
+        <button class="btn sm primary" style="margin-inline-start:auto" onclick="applyRecommendedFloors()">חשב רצפות מהמנוע</button></div>
+      <div class="cb">${floorExplainer()}<div class="grid" style="grid-template-columns:repeat(3,1fr)">
         ${QUARTERS.map(q=>`<div class="field"><label class="fl">${q}${q===base?' ●':''}</label><input class="f" type="number" value="${g.floors[q]||0}" oninput="setGoal('floors.${q}',this.value)"></div>`).join('')}
       </div>
       <div class="row" style="gap:10px;margin-top:12px;flex-wrap:wrap">
@@ -4068,7 +4230,8 @@ function parseStrategyJSON(txt, horizon){
           price, qtySold:qty, sales:Math.round(price*qty),
           advertising:n(g.advertising), invest:n(g.invest), transferIn:n(g.transferIn),
           newFac:Math.min(3,Math.round(n(g.newFac))), offices:Math.round(n(g.offices)),
-          product:'Y', model:g.model==='Deluxe'?'Deluxe':'Standard', margin:null, advPct:null };
+          product:(g.product==='X'?'X':'Y'), grade:(g.grade!=null&&isFinite(Number(g.grade)))?Math.max(0,Math.min(9,Math.round(Number(g.grade)))):undefined,
+          model:g.model==='Deluxe'?'Deluxe':'Standard', margin:null, advPct:null };
       });
     });
     return { name:String(v.name||'ללא שם').slice(0,40), thesis:String(v.thesis||'').slice(0,400),
@@ -4097,6 +4260,15 @@ function scoreStrategyVariant(v, base){
     const rd=v.levers[q].rd||0;
     if(rd>0 && rd<DATALOG.rdMinPerQuarter.X) violations.push(`${q}: מו״פ ${fmt(rd)} מתחת למינימום החוקי`);
   });
+  // A plan that does not cover a binding commitment is not a valid plan.
+  Object.entries(contractRequirements()).forEach(([pq,list])=>{
+    list.forEach(c=>{
+      const lv=v.levers[pq];
+      const made=lv?REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>{ const rl=lv.regions[r.id]||{};
+        return a+((rl.product===c.prod)?(rl.production||0):0); },0):0;
+      if(made<c.gap) violations.push(`${pq}: לא מכסה התחייבות ${fmt(c.gap)} × ${c.prod}${c.grade} (מתוכנן ${fmt(made)})`);
+    });
+  });
   return { ...v, score:sp.value, past:sp.pastHalf, pot:sp.potentialHalf, endCash:sp.endCash,
     breaches:breaches.length, worstBreach:breaches.length?breaches[0].q:null,
     violations:violations.slice(0,4), legal:violations.length===0, feasible:breaches.length===0 };
@@ -4115,6 +4287,15 @@ function strategyContext(base, horizon){
     const cap=marketCapUnits('Y',r.id);
     L.push(`- ${r.name}: עוגן מחיר מחשב ${fmt(a.base)} ${r.cur} (${a.src}) · תקרת שוק ~${fmt(cap)} יח׳/רבעון · סף פרסום ${fmt(advThreshold(r.id,'Y'))} ${r.cur} · גמישות מחיר ${priceElast(r.id,'Y')}`); });
   L.push(`- מו״פ: מינימום חוקי שבב ${fmt(DATALOG.rdMinPerQuarter.X)} SF · מחשב ${fmt(DATALOG.rdMinPerQuarter.Y)} SF לרבעון. דרגה עולה ≤1/רבעון, ולכן פיזור על פני רבעונים עדיף על מכה אחת.`);
+  const ct=contractPlan().filter(c=>c.gap>0);
+  if(ct.length){
+    L.push(`## התחייבויות חוזיות מקודשות [אילוץ קשיח — תוכנית שלא מכסה אותן נדחית]`);
+    ct.forEach(c=> L.push(`- **${fmt(c.need)} יח׳ ${c.prod}${c.grade} לאספקה ב-${c.deliveryQuarter}.** במלאי בדרגה מתאימה ${fmt(c.stock)} → חסר **${fmt(c.gap)}**. `
+      +`הייצור חייב להסתיים ב-**${c.productionQuarter}** (סחורה נכנסת למלאי בסוף רבעון הייצור). `
+      +`דרגת ${c.prod} נוכחית ${c.tech}${c.techOK?' — מספיקה':` — **לא מספיקה, נדרש מו״פ ל-${c.prod}${c.grade} לפני הייצור**`}.`
+      +(c.capKnown?` תקרת ייצור תאורטית ${fmt(c.capPerQuarter)} יח׳/רבעון.`:'')));
+    L.push(`- תכנן ייצור **${ct[0].prod}** (לא רק מחשבים) ברבעונים הרלוונטיים, בשדה production של אזור עם מפעל, עם "product":"${ct[0].prod}" ו-"grade":${ct[0].grade}. אלה התחייבויות מקודשות — אי-עמידה היא כשל אסטרטגי.`);
+  }
   return L.join('\n');
 }
 window.runStrategy=async()=>{
