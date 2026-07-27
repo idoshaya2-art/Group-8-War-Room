@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.9';
+const APP_VERSION = 'v9.0';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -651,7 +651,7 @@ function defaultState(){
     scenarios:[],
     decisions:[],
     ui:{ seen:{}, sent:{} }, // seen = how-to legend views (auto-collapses once learned) · sent = which recommendations were pushed to a scenario, per target quarter
-    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[], strategy:null, enriched:null },
+    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[], strategy:null, review:null },
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
     masterPlan:{ snapshots:[] },
@@ -1989,13 +1989,16 @@ PAGE_RENDER.plan = (c)=>{
   if(!Q.entered){ c.innerHTML=quartersStrip()+emptyBlock(IC('clipboard'),'אין בסיס לתוכנית','קלוט רבעון כדי לקבל תוכנית פעולה מעשית לרבעון הבא.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const targetQ=nextQuarters(q)[0]||q;
   const items=buildActionPlan(q,targetQ);
-  // Layer 4: AI suggestions that PASSED engine validation join the list, clearly labelled.
-  // Rejected ones are shown separately with the rule they broke — never silently dropped.
-  const enr=(S.ai&&S.ai.enriched&&S.ai.enriched.q===targetQ)?S.ai.enriched.actions:[];
-  const enrOk=enr.filter(a=>a._v&&a._v.ok), enrBad=enr.filter(a=>!(a._v&&a._v.ok));
-  enrOk.forEach(a=>items.push(a));
-  const ord0={red:0,amber:1,info:2,good:3};
-  items.sort((a,b)=>(ord0[a.level]??2)-(ord0[b.level]??2));
+  // Layer 4: when a review exists for this target quarter the page renders the AI's full
+  // ordered list instead of the engine's raw one. The engine still had the last word — every
+  // modified or added action passed its guards, and a mandatory action could not be removed.
+  const rv=(S.ai&&S.ai.review&&S.ai.review.q===targetQ)?S.ai.review:null;
+  // items2 must be a COPY when there is no review — otherwise it aliases `items` and the
+  // clear-then-refill below empties both, leaving the page with no decisions at all.
+  const items2=rv?rv.list:items.slice();
+  items.length=0; items2.forEach(x=>items.push(x));
+  if(!rv){ const ord0={red:0,amber:1,info:2,good:3};
+    items.sort((a,b)=>(ord0[a.level]??2)-(ord0[b.level]??2)); }  // AI order is respected as given
   window._recSims=items.map(it=>it.sim||null);
   window._recKeys=items.map(it=>sentKeyFor(it));
   // register each action's option sims for one-click apply from the drill-down
@@ -2054,6 +2057,7 @@ PAGE_RENDER.plan = (c)=>{
         <div class="between" style="gap:8px;flex-wrap:wrap">
           <b style="flex:1;min-width:170px;font-size:15px">${it.ai?`<span class="tag" style="background:rgba(139,124,255,.18);color:var(--purple);margin-inline-end:6px">${IC('cpu')} AI</span>`:''}${it.title}</b>
           <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
+        ${it.aiNote?`<div class="small" style="margin-top:6px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">${IC('cpu')} ${esc(it.aiNote)}</div>`:''}
         ${fieldStrip(it.sim)}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
         <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
@@ -2102,18 +2106,23 @@ PAGE_RENDER.plan = (c)=>{
       <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
       <span class="row" style="gap:6px">${sentCount?`<span class="tag g">✓ ${sentCount}/${decisionCount} הועברו</span>`:''}${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
     </div>
-    <div class="card pad" style="margin-bottom:14px;background:var(--bg2)">
+    <div class="card pad" style="margin-bottom:14px;background:var(--bg2);${rv?'border-inline-start:4px solid var(--purple)':''}">
       <div class="between" style="flex-wrap:wrap;gap:8px">
         <div class="small" style="line-height:1.8"><b>${IC('info')} על מה ההחלטות האלה נבנו:</b>
           <span class="tag g">1 · חוקי המשחק</span> <span class="tag g">2 · המצב מהדוח האחרון</span> <span class="tag g">3 · היעדים</span>
-          <span class="tag ${enrOk.length?'b':'a'}">4 · AI ${enrOk.length?`· ${enrOk.length} נוספו`:'· טרם הורץ'}</span></div>
+          <span class="tag ${rv?'b':'a'}">4 · AI ${rv?'· נבחן':'· טרם הורץ'}</span></div>
         <div class="row" style="gap:8px">
-          <button class="btn sm" id="enrichBtn" onclick="enrichDecisions()">${IC('cpu')} הצע מה שהמנוע פספס</button>
-          ${enr.length?`<button class="btn sm ghost" onclick="clearEnriched()">נקה הצעות</button>`:''}</div>
+          <button class="btn sm ${rv?'':'primary'}" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'בחן והצע רשימה מלאה'}</button>
+          ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</div>
       </div>
       <div id="enrichOut" style="margin-top:8px"></div>
-      ${enrBad.length?`<div class="tag a" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>${enrBad.length} הצעות AI נדחו על-ידי המנוע</b> ולא נכנסו לרשימה: ${enrBad.map(a=>`"${esc(a.title)}" — ${esc(a._v.why)}`).join(' · ')}</div>`:''}
-      <div class="small muted" style="margin-top:6px">שכבות 1–3 דטרמיניסטיות ורצות תמיד. שכבה 4 רצה <b>לפי בקשה</b> (קריאת API), וכל הצעה עוברת את אותן בדיקות חוקיות כמו כל תוכנית — מה שנכשל מוצג למעלה ולא נכנס.</div>
+      ${rv?`
+        ${rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
+        ${rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
+          <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
+        ${rv.rejected&&rv.rejected.length?`<div class="tag a" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b> ולא נכנסו: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
+      `:''}
+      <div class="small muted" style="margin-top:6px">שכבות 1–3 דטרמיניסטיות ורצות תמיד. שכבה 4 רצה <b>לפי בקשה</b>: ה-AI בוחן כל פעולה של המנוע (לאשר · לשנות · לוותר) ומחזיר רשימה מלאה ומסודרת. <b>למנוע המילה האחרונה</b> — שינוי או תוספת שנכשלים בבדיקות החוקיות נדחים, ופעולת חובה לא ניתנת להסרה.</div>
     </div>
     ${actionList}
     <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--accent)">
@@ -4598,57 +4607,72 @@ window.applyStrategy=(i)=>{
    labelled so nobody confuses it with an engine-derived action.
    It runs on demand, not on render: it costs an API call, and the page must work offline.
    ========================================================================== */
-const ENRICH_SYSTEM = `אתה אסטרטג INTOPIA בכיר לחברה 8. המנוע הדטרמיניסטי כבר בנה רשימת החלטות מ-3 שכבות: חוקי המשחק, המצב הנוכחי מהדוח האחרון, והיעדים. תפקידך להוסיף את מה שהוא **פספס**.
+const REVIEW_SYSTEM = `אתה אסטרטג INTOPIA בכיר לחברה 8. המנוע הדטרמיניסטי בנה רשימת החלטות מ-3 שכבות: חוקי המשחק, המצב מהדוח האחרון, והיעדים. תפקידך: **לבחון כל פעולה שלו ולהחזיר את רשימת הפעולות המלאה והמומלצת** לרבעון היעד.
 
-חפש בפרט מהלכים שכללים דטרמיניסטיים נוטים לא לייצר: ניצול הפרשי ריבית ומס בין אזורים · תזמון מו״פ מול חלון ההבשלה עד Q9 · מסחר בין-חברתי (H4/H5/H6) · מכירת רכיבים · מינוף מחקרי שוק להחלטה ספציפית · ויתור מכוון על שוק כדי למקד משאבים.
+לכל פעולה של המנוע החלט אחת מ:
+- "keep" — נכונה כמו שהיא.
+- "modify" — הכיוון נכון אך המספרים/העדיפות שגויים. החזר sim מתוקן ונמק מה שינית ולמה.
+- "drop" — לא כדאית ברבעון הזה. נמק. (פעולות שסומנו "חובה" לא יוסרו — ההסתייגות שלך תוצג עליהן.)
+ובנוסף הוסף פעולות שהמנוע פספס לגמרי.
 
-כללים מחייבים:
-- אל תחזור על פעולה שכבר ברשימה.
-- אל תמציא מספרים: השתמש רק בעוגנים שבהקשר. אם אין עוגן — אל תציע את המהלך.
-- ייצור רק באזור עם מפעל מוצהר. מכירה לא מעבר להיצע. משרדי מכירות 0 או 2–10. מו״פ ≥ המינימום החוקי.
-- כל הצעה חייבת להיות ניתנת לביצוע ברבעון היעד, בטופס INTOPIA אמיתי.
+סדר את הרשימה המלאה לפי מה שממקסם את הציון הסופי (50% ביצועים פיננסיים + 50% פוטנציאל), בהתחשב במה שדחוף באמת ובמה שכובל מזומן.
+
+כללים מחייבים — הפרה תגרום לדחיית הפעולה על-ידי המנוע:
+- אל תמציא מספרים. השתמש רק בעוגנים שבהקשר.
+- ייצור רק באזור עם מפעל. מכירה לא מעבר להיצע. משרדי מכירות 0 או 2–10. מו״פ ≥ המינימום החוקי.
+- כל פעולה חייבת להיות ניתנת לביצוע בטופס INTOPIA אמיתי ברבעון היעד.
 
 החזר **JSON תקין בלבד**:
-{"actions":[{"title":"כותרת קצרה ומעשית","form":"A3-3","level":"amber","why":"למה זה משתלם, במשפט-שניים, עם המספר מההקשר","sim":{"q":"Q4","rd":0,"regions":{"europe":{"advertising":60000,"invest":0,"production":0,"price":0,"qtySold":0,"offices":0}}}}]}
+{"rationale":"משפט-שניים: מה העיקרון שהנחה את הסדר שקבעת",
+ "plan":[
+  {"ref":1,"verdict":"keep","why":"קצר"},
+  {"ref":3,"verdict":"modify","why":"מה שינית ולמה","level":"red","sim":{"q":"Q4","regions":{"europe":{"advertising":60000}}}},
+  {"ref":2,"verdict":"drop","why":"למה לא ברבעון הזה"},
+  {"ref":null,"verdict":"add","title":"כותרת קצרה","form":"A3-3","level":"amber","why":"למה זה משתלם, עם המספר מההקשר","sim":{"q":"Q4","regions":{"brazil":{"invest":500000}}}}
+ ]}
 
-level: "red" חובה · "amber" מומלץ · "info" אופציונלי. החזר עד 4 פעולות. אם אין לך מה להוסיף שעומד בכללים — החזר {"actions":[]}.`;
+ref = מספר הפעולה ברשימת המנוע. הסדר במערך plan הוא הסדר המומלץ. כלול **כל** פעולה של המנוע בדיוק פעם אחת.`;
 
-function parseEnrichJSON(txt,targetQ){
+function parseReviewJSON(txt,targetQ,engineCount){
   let raw=String(txt||'').trim();
   const fence=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) raw=fence[1].trim();
   const a=raw.indexOf('{'), b=raw.lastIndexOf('}'); if(a<0||b<=a) throw new Error('התשובה לא הכילה JSON');
   let obj; try{ obj=JSON.parse(raw.slice(a,b+1)); }catch(e){ throw new Error('JSON לא תקין: '+e.message); }
   const n=v=>{ const x=Number(v); return isFinite(x)&&x>=0?x:0; };
-  return (obj.actions||[]).slice(0,4).map(x=>{
-    const regions={};
-    Object.entries(((x.sim||{}).regions)||{}).forEach(([rid,g])=>{
-      if(!REGIONS.some(r=>r.id===rid)) return;
+  const simOf=(sim)=>{ if(!sim) return null; const regions={};
+    Object.entries(sim.regions||{}).forEach(([rid,g])=>{ if(!REGIONS.some(r=>r.id===rid)) return;
       const price=n(g.price), qty=n(g.qtySold);
       regions[rid]={ production:n(g.production), unitCost:n(g.unitCost), price, qtySold:qty,
-        sales:Math.round(price*qty), advertising:n(g.advertising), invest:n(g.invest),
+        sales:(price&&qty)?Math.round(price*qty):n(g.sales), advertising:n(g.advertising), invest:n(g.invest),
         transferIn:n(g.transferIn), offices:Math.round(n(g.offices)),
-        product:(g.product==='X'?'X':'Y'), model:g.model==='Deluxe'?'Deluxe':'Standard' };
-    });
-    const lvl=['red','amber','info'].includes(x.level)?x.level:'info';
-    return { cat:'strat', level:lvl, conf:'est', ai:true,
-      title:String(x.title||'הצעת AI').slice(0,90),
-      form:String(x.form||'').slice(0,60),
-      detail:String(x.why||'').slice(0,600),
-      sim: Object.keys(regions).length||x.sim&&x.sim.rd ? {q:targetQ, rd:((x.sim||{}).rd!=null?n(x.sim.rd):undefined), regions} : null };
-  }).filter(x=>x.sim);
+        product:(g.product==='X'?'X':'Y'), model:g.model==='Deluxe'?'Deluxe':'Standard' }; });
+    const rd=(sim.rd!=null)?n(sim.rd):null;
+    return (Object.keys(regions).length||rd!=null)?{q:targetQ, rd:(rd!=null?rd:undefined), regions}:null; };
+  const plan=(obj.plan||[]).slice(0,24).map(e=>{
+    const ref=(e.ref==null||e.ref==='')?null:parseInt(e.ref,10);
+    const verdict=['keep','modify','drop','add'].includes(e.verdict)?e.verdict:'keep';
+    return { ref:(Number.isInteger(ref)&&ref>=1&&ref<=engineCount)?ref-1:null, verdict,
+      why:String(e.why||'').slice(0,400),
+      title:e.title?String(e.title).slice(0,90):null,
+      form:e.form?String(e.form).slice(0,60):null,
+      level:['red','amber','info'].includes(e.level)?e.level:null,
+      sim:simOf(e.sim) };
+  });
+  return { rationale:String(obj.rationale||'').slice(0,400), plan };
 }
-/* Engine-side validation: a suggestion only reaches the list if a scenario built from it
-   breaks no rule. Anything it violates is reported instead of quietly accepted. */
+/* Engine-side validation: a proposed action only reaches the list if a scenario built from
+   it breaks no rule. This is what keeps the model advisory — it may judge, it may not
+   override the rule book. */
 function validateEnriched(act,targetQ){
   const base=S.activeQuarter;
   const levers={}; planHorizon(base).forEach(hq=>{ levers[hq]={rd:0,regions:{}};
     REGIONS.forEach(r=>levers[hq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',newFac:0,offices:0}); });
   const tq=levers[targetQ]?targetQ:Object.keys(levers)[0];
   if(!tq) return {ok:false,why:'אין רבעון יעד'};
+  if(!act||!act.sim) return {ok:false,why:'ללא מנופים'};
   if(act.sim.rd!=null) levers[tq].rd=act.sim.rd;
-  Object.entries(act.sim.regions||{}).forEach(([rid,p])=>{ levers[tq].regions[rid]=Object.assign(levers[tq].regions[rid],p); });
-  const fake={levers};
-  const v=[];
+  Object.entries(act.sim.regions||{}).forEach(([rid,p])=>{ if(levers[tq].regions[rid]) levers[tq].regions[rid]=Object.assign(levers[tq].regions[rid],p); });
+  const fake={levers}; const v=[];
   if(phantomSales(fake,tq).length) v.push('מכירה מעבר להיצע');
   const ol=officeLegality(fake,tq); if(ol.length) v.push(ol[0].region+': '+ol[0].why);
   const caps=capacityCheck(fake,tq); if(caps.length) v.push('חריגת קיבולת ב'+caps[0].name);
@@ -4659,31 +4683,67 @@ function validateEnriched(act,targetQ){
   if(rd>0 && rd<DATALOG.rdMinPerQuarter.X) v.push('מו״פ מתחת למינימום החוקי');
   return {ok:v.length===0, why:v.join(' · ')};
 }
-window.enrichDecisions=async()=>{
+/* Turn the model's review into the list the page renders. The engine has the last word:
+   a modified or added action is only accepted if it passes the legality guards, and a
+   MANDATORY engine action can never be removed — the model's objection is shown on it
+   instead. Nothing the model said disappears silently. */
+function applyReview(engineItems, review, targetQ){
+  const seen=new Set(), list=[], dropped=[], rejected=[];
+  (review.plan||[]).forEach(e=>{
+    if(e.ref!=null){
+      if(seen.has(e.ref)) return; seen.add(e.ref);
+      const base=engineItems[e.ref]; if(!base) return;
+      if(e.verdict==='drop'){
+        if(base.level==='red'){ list.push({...base, aiNote:'⚠ ה-AI המליץ לוותר: '+e.why+' — הפעולה נשארת כי היא מסומנת חובה', aiVerdict:'drop-blocked'}); }
+        else dropped.push({...base, aiNote:e.why});
+        return;
+      }
+      if(e.verdict==='modify' && e.sim){
+        const cand={...base, sim:e.sim, level:e.level||base.level};
+        const v=validateEnriched(cand,targetQ);
+        if(v.ok) list.push({...cand, aiNote:'שונה ע״י AI: '+e.why, aiVerdict:'modify'});
+        else { rejected.push({title:base.title, why:v.why}); list.push({...base, aiNote:'ה-AI הציע שינוי שנדחה על-ידי המנוע ('+v.why+') — נשמרה גרסת המנוע', aiVerdict:'modify-rejected'}); }
+        return;
+      }
+      list.push({...base, aiNote:e.why?('אושר ע״י AI: '+e.why):null, aiVerdict:'keep'});
+      return;
+    }
+    if(e.verdict==='add' && e.sim && e.title){
+      const cand={ cat:'strat', level:e.level||'info', conf:'est', ai:true,
+        title:e.title, form:e.form||'', detail:e.why, sim:e.sim };
+      const v=validateEnriched(cand,targetQ);
+      if(v.ok) list.push({...cand, aiVerdict:'add'});
+      else rejected.push({title:e.title, why:v.why});
+    }
+  });
+  // Any engine action the model forgot to mention stays in the list — never lost by omission.
+  engineItems.forEach((it,i)=>{ if(!seen.has(i) && !dropped.some(d=>d.title===it.title)) list.push({...it, aiVerdict:'untouched'}); });
+  return {list, dropped, rejected};
+}
+window.reviewDecisions=async()=>{
   if(!getApiKey()){ openAISettings(); return; }
   const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q;
-  const btn=$('#enrichBtn'); if(btn){ btn.disabled=true; btn.textContent='חושב…'; }
-  const box=$('#enrichOut'); if(box) box.innerHTML=`<div class="chip">${IC('clock')} האסטרטג בוחן מה המנוע פספס…</div>`;
+  const btn=$('#enrichBtn'); if(btn){ btn.disabled=true; btn.textContent='בוחן…'; }
+  const box=$('#enrichOut'); if(box) box.innerHTML=`<div class="chip">${IC('clock')} ה-AI בוחן כל פעולה של המנוע ובונה רשימה מלאה…</div>`;
   try{
     const items=buildActionPlan(q,targetQ)||[];
-    const ctx=[buildAIContext(),
-      `## רשימת ההחלטות שהמנוע כבר בנה ל-${targetQ} [אל תחזור עליהן]`,
-      ...items.map((it,i)=>`${i+1}. [${it.level}] ${it.title} — ${it.form||''}`),
+    const listTxt=items.map((it,i)=>`${i+1}. [${it.level}] ${it.title}${it.form?' — '+it.form:''}`
+      +(it.sim?`  ‹מנופים: ${JSON.stringify(it.sim.regions||{}).slice(0,220)}${it.sim.rd!=null?' rd='+it.sim.rd:''}›`:'  ‹ללא מנופים›')).join('\n');
+    const ctx=[buildAIContext(), `## רשימת המנוע ל-${targetQ} — בחן כל אחת מהן`, listTxt,
       `## רבעון היעד: ${targetQ}`].join('\n');
-    const txt=await callLLM([{role:'user',content:ctx+`\n\n---\nמה המנוע פספס? החזר JSON בלבד לפי המבנה שנקבע.`}],
-      ENRICH_SYSTEM,{max_tokens:1800});
-    const parsed=parseEnrichJSON(txt,targetQ);
-    const checked=parsed.map(a=>({...a, _v:validateEnriched(a,targetQ)}));
-    S.ai.enriched={q:targetQ, at:Date.now(), actions:checked};
+    const txt=await callLLM([{role:'user',content:ctx+`\n\n---\nבחן כל פעולה והחזר את רשימת הפעולות המלאה והמומלצת. JSON בלבד.`}],
+      REVIEW_SYSTEM,{max_tokens:2600});
+    const review=parseReviewJSON(txt,targetQ,items.length);
+    const applied=applyReview(items,review,targetQ);
+    S.ai.review={q:targetQ, at:Date.now(), rationale:review.rationale, ...applied};
     save(); go('plan');
-    const kept=checked.filter(a=>a._v.ok).length;
-    toast(kept?`${kept} הצעות עברו אימות מנוע ונוספו`:'לא נמצאו הצעות חוקיות להוסיף', kept?'g':'a');
+    toast(`הרשימה נבחנה: ${applied.list.length} פעולות${applied.dropped.length?` · ${applied.dropped.length} הוסרו`:''}${applied.rejected.length?` · ${applied.rejected.length} נדחו ע״י המנוע`:''}`,'g');
   }catch(e){
     if(box) box.innerHTML=`<div class="tag r" style="display:block;line-height:1.7;white-space:normal">${IC('warn')} ${esc(aiErr(e))}</div>`;
   }
-  const b2=$('#enrichBtn'); if(b2){ b2.disabled=false; b2.textContent='הצע מה שהמנוע פספס'; }
+  const b2=$('#enrichBtn'); if(b2){ b2.disabled=false; b2.textContent='בחן והצע רשימה מלאה'; }
 };
-window.clearEnriched=()=>{ if(S.ai) S.ai.enriched=null; save(); go('plan'); };
+window.clearReview=()=>{ if(S.ai) S.ai.review=null; save(); go('plan'); };
 
 const ADVISOR_SYSTEM = `אתה יועץ בכיר ומנוסה לצוות INTOPIA (חברה 8). "המנוע" הדטרמיניסטי כבר חישב את המספרים וההמלצות הקונקרטיות לרבעון {targetQ}. תפקידך: לוודא שכל פעולה מדויקת, חוקית וכדאית — ולהוציא רשימת פעולות מוכנה-להזנה. שיפוט, לא חשבון.
 

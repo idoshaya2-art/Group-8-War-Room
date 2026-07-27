@@ -56,43 +56,88 @@ await page.waitForTimeout(500);
 ck('the mark can be undone',
    await page.evaluate(()=>[...document.querySelectorAll('.act')].filter(a=>/הועבר לסימולטור/.test(a.textContent)).length)===0);
 
-/* ---- layer 4: AI suggestions are validated by the engine, never trusted ---- */
+/* ---- layer 4: the AI reviews the ENGINE'S list and returns the full recommended list ---- */
 const ai=await page.evaluate(()=>{
-  const t=nextQuarters(S.activeQuarter)[0];
-  const good=JSON.stringify({actions:[{title:'הפקד עודף בברזיל',form:'A3-3',level:'amber',why:'4.5% לרבעון',
-    sim:{q:t,regions:{brazil:{invest:500000}}}}]});
-  const bad=JSON.stringify({actions:[{title:'ייצר בארה״ב',form:'A2-3',level:'red',why:'x',
-    sim:{q:t,regions:{us:{production:20000,unitCost:70,offices:2}}}}]});
-  const worse=JSON.stringify({actions:[{title:'משרד בודד',form:'A1-3',level:'amber',why:'x',
-    sim:{q:t,regions:{europe:{offices:1,advertising:1000}}}}]});
-  const g=parseEnrichJSON(good,t)[0], b=parseEnrichJSON(bad,t)[0], w=parseEnrichJSON(worse,t)[0];
-  return {parsedGood:!!g, aiFlag:g&&g.ai===true,
-    goodOk:validateEnriched(g,t).ok,
-    badRejected:!validateEnriched(b,t).ok, badWhy:validateEnriched(b,t).why,
-    officeRejected:!validateEnriched(w,t).ok,
-    garbage:(()=>{ try{ parseEnrichJSON('not json',t); return false; }catch(e){ return true; } })(),
-    empty:parseEnrichJSON('{"actions":[]}',t).length===0 };
+  const q=S.activeQuarter, t=nextQuarters(q)[0];
+  const eng=buildActionPlan(q,t)||[];
+  const redIdx=eng.findIndex(x=>x.level==='red');
+  const amberIdx=eng.findIndex(x=>x.level==='amber'&&x.sim);
+  const payload={rationale:'קודם להפוך מלאי למזומן',plan:[
+    {ref:redIdx+1, verdict:'keep', why:'זו הפעולה עם התשואה הגבוהה ביותר'},
+    {ref:amberIdx+1, verdict:'drop', why:'לא ברבעון הזה — כובל מזומן'},
+    {ref:null, verdict:'add', title:'הפקד עודף בברזיל', form:'A3-3', level:'amber',
+      why:'4.5% לרבעון על מזומן שיושב', sim:{q:t,regions:{brazil:{invest:400000}}}},
+    {ref:null, verdict:'add', title:'ייצר בארה״ב', form:'A2-3', level:'red',
+      why:'לא חוקי', sim:{q:t,regions:{us:{production:20000,unitCost:70,offices:2}}}}
+  ]};
+  const parsed=parseReviewJSON(JSON.stringify(payload),t,eng.length);
+  const applied=applyReview(eng,parsed,t);
+  // a review that tries to drop a MANDATORY action
+  const dropRed={rationale:'',plan:[{ref:redIdx+1,verdict:'drop',why:'לדעתי מיותר'}]};
+  const app2=applyReview(eng,parseReviewJSON(JSON.stringify(dropRed),t,eng.length),t);
+  // a review that MODIFIES an action illegally
+  const badMod={rationale:'',plan:[{ref:redIdx+1,verdict:'modify',why:'מכור הכל',
+    sim:{q:t,regions:{europe:{price:130,qtySold:999999,offices:2}}}}]};
+  const app3=applyReview(eng,parseReviewJSON(JSON.stringify(badMod),t,eng.length),t);
+  return {
+    engineCount:eng.length,
+    listCount:applied.list.length,
+    keptNote:(applied.list.find(x=>x.aiVerdict==='keep')||{}).aiNote||'',
+    droppedCount:applied.dropped.length,
+    addedOk:applied.list.some(x=>x.aiVerdict==='add'&&/ברזיל/.test(x.title)),
+    illegalAddRejected:!applied.list.some(x=>/ייצר בארה״ב/.test(x.title)) && applied.rejected.some(r=>/ארה״ב/.test(r.title)),
+    noneLostByOmission:applied.list.length+applied.dropped.length>=eng.length,
+    rationale:parsed.rationale,
+    redCannotBeDropped:app2.dropped.length===0 && app2.list.some(x=>x.aiVerdict==='drop-blocked'),
+    redObjectionShown:/המליץ לוותר/.test((app2.list.find(x=>x.aiVerdict==='drop-blocked')||{}).aiNote||''),
+    badModifyFallsBack:app3.list.some(x=>x.aiVerdict==='modify-rejected'),
+    badModifyReported:app3.rejected.length===1,
+    garbage:(()=>{ try{ parseReviewJSON('not json',t,eng.length); return false; }catch(e){ return true; } })(),
+    outOfRangeRef:parseReviewJSON(JSON.stringify({plan:[{ref:999,verdict:'keep'}]}),t,eng.length).plan[0].ref===null
+  };
 });
-ck('a well-formed AI suggestion parses', ai.parsedGood);
-ck('AI suggestions are flagged as AI-originated', ai.aiFlag);
-ck('a legal AI suggestion passes engine validation', ai.goodOk);
-ck('an AI suggestion that produces without a plant is REJECTED', ai.badRejected, ai.badWhy);
-ck('an AI suggestion with an illegal office count is REJECTED', ai.officeRejected);
+ck('the AI returns a full list, not just additions', ai.listCount>=ai.engineCount-1, `engine ${ai.engineCount} → list ${ai.listCount}`);
+ck('a kept action carries the AI\'s endorsement', /אושר ע״י AI/.test(ai.keptNote), ai.keptNote.slice(0,50));
+ck('the AI can drop a non-mandatory action', ai.droppedCount===1);
+ck('a valid AI addition joins the list', ai.addedOk);
+ck('an illegal AI addition is rejected and reported', ai.illegalAddRejected);
+ck('no engine action is lost by omission', ai.noneLostByOmission);
+ck('the AI states the principle behind its ordering', !!ai.rationale, ai.rationale);
+ck('a MANDATORY action cannot be dropped by the AI', ai.redCannotBeDropped);
+ck('and the AI\'s objection is shown on that action instead', ai.redObjectionShown);
+ck('an illegal AI modification falls back to the engine version', ai.badModifyFallsBack);
+ck('and the rejection is reported, not hidden', ai.badModifyReported);
 ck('malformed model output throws rather than corrupting the list', ai.garbage);
-ck('an empty suggestion set is handled', ai.empty);
+ck('an out-of-range action reference is neutralised', ai.outOfRangeRef);
 
-/* ---- rejected suggestions must be visible, not silently dropped ---- */
-await page.evaluate(()=>{ const t=nextQuarters(S.activeQuarter)[0];
-  const bad=parseEnrichJSON(JSON.stringify({actions:[{title:'ייצר בארה״ב',form:'A2-3',level:'red',why:'x',
-    sim:{q:t,regions:{us:{production:20000,unitCost:70,offices:2}}}}]}),t)[0];
-  S.ai.enriched={q:t,at:Date.now(),actions:[{...bad,_v:validateEnriched(bad,t)}]}; save(); go('plan'); });
-await page.waitForTimeout(500);
-ck('a rejected AI suggestion is shown with the rule it broke',
-   await page.evaluate(()=>/נדחו על-ידי המנוע/.test(document.body.innerText)));
-ck('and it does NOT appear as an actionable card',
-   await page.evaluate(()=>![...document.querySelectorAll('.act')].some(a=>/ייצר בארה״ב/.test(a.textContent))));
-ck('the four layers are named on the page',
-   await page.evaluate(()=>/חוקי המשחק/.test(document.body.innerText)&&/המצב מהדוח האחרון/.test(document.body.innerText)&&/היעדים/.test(document.body.innerText)));
+/* ---- the reviewed list is what the page renders ---- */
+await page.evaluate(()=>{
+  const q=S.activeQuarter,t=nextQuarters(q)[0]; const eng=buildActionPlan(q,t)||[];
+  const amberIdx=eng.findIndex(x=>x.level==='amber'&&x.sim);
+  const parsed=parseReviewJSON(JSON.stringify({rationale:'מזומן לפני הכל',plan:[
+    {ref:amberIdx+1,verdict:'drop',why:'כובל מזומן'},
+    {ref:null,verdict:'add',title:'הפקד עודף בברזיל',form:'A3-3',level:'amber',why:'4.5%',
+      sim:{q:t,regions:{brazil:{invest:400000}}}}]}),t,eng.length);
+  S.ai.review={q:t,at:Date.now(),rationale:parsed.rationale,...applyReview(eng,parsed,t)};
+  save(); go('plan');
+});
+await page.waitForTimeout(600);
+const ui=await page.evaluate(()=>({
+  banner:/נבחן/.test(document.body.innerText),
+  rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.innerText),
+  droppedSection:/המליץ לוותר עליהן/.test(document.body.innerText),
+  aiTagOnCard:[...document.querySelectorAll('.act')].some(a=>/\bAI\b/.test(a.textContent)),
+  revertBtn:!![...document.querySelectorAll('button')].find(b=>/חזור לרשימת המנוע/.test(b.textContent)),
+  addedVisible:[...document.querySelectorAll('.act')].some(a=>/ברזיל/.test(a.textContent))
+}));
+ck('the page shows it is running the reviewed list', ui.banner);
+ck('the ordering principle is displayed', ui.rationaleShown);
+ck('dropped actions are still visible, in their own section', ui.droppedSection);
+ck('AI-originated actions are labelled on the card', ui.aiTagOnCard);
+ck('the AI addition appears as a real actionable card', ui.addedVisible);
+ck('you can revert to the engine list', ui.revertBtn);
+await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
+ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
 
 const jsErr=errors.filter(e=>!/Failed to load resource|net::ERR_/.test(e));
 ck('no JavaScript errors', jsErr.length===0, jsErr.slice(0,2).join(' | '));

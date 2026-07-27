@@ -19,7 +19,7 @@ mocked. Only the AI provider is stubbed (no network), because the app is bring-y
 | `contract-card` | The Decisions card asks for the tranche that is actually due, not the grouped total. |
 | `plant-split-pipeline` | Chip vs computer plant declaration, and that the Decisions → Simulator handoff is not a dead end. |
 | `strategist` | The AI strategist's output is parsed defensively and every number is re-derived by the engine; illegal plans are rejected. |
-| `decisions` | The action list covers every decision family (advertising, financing, production, sales, R&D), sending marks the card without navigating away, and AI suggestions only join the list after passing engine validation — rejected ones are shown with the rule they broke. |
+| `decisions` | The action list covers every decision family (advertising, financing, production, sales, R&D), sending marks the card without navigating away, and the AI review layer returns a full list whose every modification and addition the engine validated — a mandatory action cannot be dropped, nothing is lost by omission, and rejections are shown with the rule they broke. |
 | `player-path` | **Walks the journey a team actually takes**, in order, and asserts each step hands something usable to the next — including mobile. This is the suite that catches what unit tests miss. |
 
 ## Why `player-path` exists
