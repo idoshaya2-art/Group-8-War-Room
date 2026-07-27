@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.7';
+const APP_VERSION = 'v8.8';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -2019,56 +2019,84 @@ PAGE_RENDER.plan = (c)=>{
     if(!out.length) return '';
     return `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px;padding:7px 9px;background:var(--bg2);border:1px solid var(--line);border-radius:8px">
       <span class="small muted" style="font-weight:700">להזנה →</span>${out.join('')}</div>`; };
-  // ONE numbered priority list (buildActionPlan already sorts by severity)
-  const actionList = items.map((it,i)=>{ const bd=badge(it.level); const blk=it.blocked;
-    const optDrill = it.options ? `<details class="fverd" style="margin-top:9px"><summary>${IC('sliders')} ${it.options.length} אופציות ומספרים — לחץ לפירוט ⌄</summary>
+  // ONE numbered priority list. Structure per card: WHAT to do, the numbers to type, and the
+  // way forward — always visible. Reasoning and alternatives are one click away, never in the way.
+  // An item with no lever payload and no button is an observation, not a decision. Those were
+  // padding the numbered list and diluting it; they now sit with the situation, above.
+  const decisionIdx=[], insightIdx=[];
+  items.forEach((it,i)=>{ ((it.sim||it.action)?decisionIdx:insightIdx).push(i); });
+  const insightList = insightIdx.map(i=>{ const it=items[i]; const bd=badge(it.level);
+    return `<div class="row" style="gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line)">
+      <span class="tag ${bd.c}" style="flex:0 0 auto">${bd.t}</span>
+      <div style="flex:1"><b class="small">${it.title}</b>${it.detail?`<details class="fverd"><summary class="small">הרחבה ⌄</summary><div class="small muted" style="line-height:1.75;padding:6px 2px 2px">${it.detail}</div></details>`:''}</div></div>`; }).join('');
+  const actionList = decisionIdx.map((i,pos)=>{ const it=items[i]; const bd=badge(it.level); const blk=it.blocked;
+    const hasOpts = !!(it.options && it.options.length);
+    const optDrill = hasOpts ? `<details class="fverd" id="opt${i}" style="margin-top:8px"><summary>${IC('sliders')} ${it.options.length} אופציות אחרות ⌄</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>אופציה</th>${it.optionCols.map(cc=>`<th>${cc}</th>`).join('')}<th></th></tr></thead>
       <tbody>${it.options.map(o=>`<tr><td style="text-align:start"><b>${o.name}</b>${o.favors?`<div class="small muted" style="white-space:normal;max-width:220px">${o.favors}</div>`:''}</td>${o.cells.map(cell=>`<td class="num">${cell}</td>`).join('')}<td>${o.sim&&!blk?`<button class="btn sm primary" onclick="applyRecToSim(${o._idx})">${IC('zap')} שלח</button>`:''}</td></tr>`).join('')}</tbody></table></div></details>` : '';
+    // The reasoning paragraph is the single biggest source of clutter on this page; it is
+    // valuable when you want it and noise when you are executing. Collapsed by default.
+    const why = (it.detail||it.dep) ? `<details class="fverd" style="margin-top:8px"><summary>${IC('info')} למה, ומה התלויות ⌄</summary>
+      <div style="padding:10px 2px 2px;line-height:1.75">${it.detail||''}${it.dep?`<div class="dep" style="margin-top:8px">${IC('sliders')} תלוי ב: ${it.dep}</div>`:''}</div></details>` : '';
     return `<div class="act ${blk?'':it.level}" style="${blk?'opacity:.9':''}">
-      <div class="an">${i+1}</div>
+      <div class="an">${pos+1}</div>
       <div class="at">
-        <div class="between" style="gap:8px;flex-wrap:wrap"><b style="flex:1;min-width:170px">${it.title}</b>
-          <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}<span class="fchip">${catName[it.cat]||'—'}</span></span></div>
-        <p>${it.detail}</p>
-        ${it.form?`<span class="form">${IC('share')} ${it.form}</span>`:''}
-        ${!it.options?fieldStrip(it.sim):''}
-        ${it.dep?`<div class="dep">${IC('sliders')} תלוי ב: ${it.dep}</div>`:''}
+        <div class="between" style="gap:8px;flex-wrap:wrap">
+          <b style="flex:1;min-width:170px;font-size:15px">${it.title}</b>
+          <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
+        ${fieldStrip(it.sim)}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
-        ${optDrill}
-        <div class="row" style="gap:8px;margin-top:10px">
-          ${(it.sim&&!it.options&&!blk)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} שלח לסימולטור</button>`:''}
+        <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+          ${(it.sim&&!blk)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} שלח לסימולטור${hasOpts?' (מומלץ)':''}</button>`:''}
           ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
         </div>
+        ${optDrill}${why}
       </div></div>`; }).join('');
-  const mustCount=items.filter(i=>i.level==='red'&&!i.blocked).length;
+  const mustCount=decisionIdx.filter(i=>items[i].level==='red'&&!items[i].blocked).length;
+  const decisionCount=decisionIdx.length;
   const _q=S.activeQuarter, _f=S.quarters[_q].financial, _op=S.quarters[_q].operational;
   const _sp=scoreProxy(null); const _share=(_sp.parts&&_sp.parts.share!=null)?(_sp.parts.share*100).toFixed(1)+'%':'—';
   const _topPivot=(mp.pivots&&mp.pivots.length)?mp.pivots[0].replace(/<[^>]+>/g,''):'';
   c.innerHTML=`
+    <!-- ===== PART 1 · THE SITUATION. Everything narrative lives here, above the fold,
+         and nothing narrative appears again between the decisions below. ===== -->
     <div class="planhero"><div class="top">
       <span class="sc" style="font-size:26px">${mp.remaining>0?`+${Math.max(0,mp.tScore-mp.score).toFixed(0)}`:'—'}</span>
       <span class="arrow">נק׳ עד יעד ${mp.tScore}</span>
       <span class="tag ${trackTag}">${trackTxt}</span>
-      <span class="small muted">${mp.remaining} רבעונים ל-Q9${mp.required>0?` · נדרש ${mp.required.toFixed(1)} נק׳/רבעון`:''}</span></div>
+      <span class="small muted">${mp.remaining} רבעונים ל-Q9${mp.required>0?` · נדרש ${mp.required.toFixed(1)} נק׳/רבעון`:''}</span>
+      <button class="btn sm primary" style="margin-inline-start:auto" onclick="document.getElementById('decisions').scrollIntoView({behavior:'smooth',block:'start'})">↓ ${mustCount?`${mustCount} החלטות חובה`:'לרשימת ההחלטות'}</button></div>
       <div class="row" style="gap:7px;flex-wrap:wrap;margin-top:10px">
         <span class="tag b">${IC('dollar')} מטה ${fmt(_f.cash.hq||0)} SF</span>
-        <span class="tag b">מאוחד ${fmt(unifiedCashOf(_q))}</span>
         <span class="tag b">${IC('cpu')} טק X${_op.techX}/Y${_op.techY}</span>
-        <span class="tag b">נתח ${_share}</span>
         <span class="tag b">מו״פ ${fmt(_op.rd||0)}</span>
       </div>
       ${_topPivot?`<div class="tag a" style="display:block;margin-top:10px;line-height:1.6">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
     </div>
     ${howTo('plan',`${IC('clipboard')} איך עובדים כאן (הזנות ל-${targetQ})`,
-      `<b>1.</b> רשימה <b>ממוספרת לפי עדיפות</b> — עבור מלמעלה למטה. <b>2.</b> תגית לכל פעולה: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (חסום = אסור עד שהתלות מתקיימת).<br>
-      <b>3.</b> "<b>שלח לסימולטור</b>" מעביר את המספרים של <b>אותה פעולה בלבד</b> לתרחיש. יש אופציות? בחר אחת בפירוט. <b>4.</b> "תלוי ב:" = מה חייב קודם. <b>5.</b> היועץ (למטה) נותן חוות-דעת — <b>לא משנה</b> את הרשימה.`)}
-    <div class="between" style="margin:2px 2px 10px"><b>${items.length} פעולות ל-${targetQ}${mustCount?` · ${mustCount} חובה`:''}</b><span class="small muted">כל מספר מחושב במנוע</span></div>
-    ${actionList}
-    <div class="small muted" style="margin:16px 2px 6px">${IC('cpu')} <b>חוות דעת שנייה (לא משנה את הרשימה למעלה):</b> היועץ בודק את הפעולות מול חוקים · שוק · נזילות · כדאיות 50/50.</div>
-    ${renderAdvisorCard(q,targetQ)}
-    <details class="sec" style="margin-top:14px"><summary>${IC('trendUp')} מפה אסטרטגית — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
+      `<b>1.</b> ההחלטות ממוספרות <b>לפי עדיפות</b> — עבור מלמעלה למטה. תגיות: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (אסור עד שהתלות מתקיימת).<br>
+      <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
+      <b>3.</b> חלופות ב<b>"אופציות אחרות"</b> · נימוק ותלויות ב<b>"למה, ומה התלויות"</b>. כל מספר מחושב במנוע.`)}
+    ${insightList?`<div class="card pad" style="margin-bottom:14px"><b class="small">${IC('search')} מה שכדאי לדעת לפני שמחליטים</b>${insightList}</div>`:''}
+    <details class="sec" style="margin-bottom:14px"><summary>${IC('trendUp')} רקע אסטרטגי — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
       <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}</div></details>
-    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="go('sim')">${IC('sliders')} סימולטור</button><button class="btn" onclick="go('export')">${IC('share')} גיליון הזנה</button></div>`;
+    <details class="sec" style="margin-bottom:18px"><summary>${IC('cpu')} חוות דעת שנייה מהיועץ (אינה משנה את הרשימה)</summary>
+      <div class="secbody">${renderAdvisorCard(q,targetQ)}</div></details>
+
+    <!-- ===== PART 2 · THE DECISIONS. Nothing above this line repeats below it. ===== -->
+    <div id="decisions" class="between" style="margin:0 2px 12px;padding-top:14px;border-top:2px solid var(--line2);flex-wrap:wrap;gap:8px;scroll-margin-top:12px">
+      <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
+      <span class="row" style="gap:6px">${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
+    </div>
+    ${actionList}
+    <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--accent)">
+      <b>${IC('check')} סיימת לשלוח פעולות?</b>
+      <div class="small muted" style="margin:6px 0 10px;line-height:1.7">בסימולטור תכוונן את המספרים ותראה את ההשפעה על הציון והמזומן, ואז תעבור להזנה.</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn primary" onclick="go('sim')">${IC('sliders')} המשך לסימולטור →</button>
+        <button class="btn" onclick="go('export')">${IC('share')} דלג לגיליון ההזנה</button>
+      </div>
+    </div>`
 };
 /* Decision-dependency layer: the canonical INTOPIA decision chain + the
    cross-decision prerequisites that are relevant to the current state, so the
