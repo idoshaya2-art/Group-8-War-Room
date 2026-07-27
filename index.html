@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v8.8';
+const APP_VERSION = 'v8.9';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -650,8 +650,8 @@ function defaultState(){
     quarters:q,
     scenarios:[],
     decisions:[],
-    ui:{ seen:{} }, // how many times each how-to legend was shown — auto-collapses once learned
-    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[], strategy:null },
+    ui:{ seen:{}, sent:{} }, // seen = how-to legend views (auto-collapses once learned) · sent = which recommendations were pushed to a scenario, per target quarter
+    ai:{ provider:'anthropic', models:{anthropic:'claude-sonnet-5', openai:'gpt-4o'}, chat:[], strategy:null, enriched:null },
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
     masterPlan:{ snapshots:[] },
@@ -1989,9 +1989,18 @@ PAGE_RENDER.plan = (c)=>{
   if(!Q.entered){ c.innerHTML=quartersStrip()+emptyBlock(IC('clipboard'),'אין בסיס לתוכנית','קלוט רבעון כדי לקבל תוכנית פעולה מעשית לרבעון הבא.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const targetQ=nextQuarters(q)[0]||q;
   const items=buildActionPlan(q,targetQ);
+  // Layer 4: AI suggestions that PASSED engine validation join the list, clearly labelled.
+  // Rejected ones are shown separately with the rule they broke — never silently dropped.
+  const enr=(S.ai&&S.ai.enriched&&S.ai.enriched.q===targetQ)?S.ai.enriched.actions:[];
+  const enrOk=enr.filter(a=>a._v&&a._v.ok), enrBad=enr.filter(a=>!(a._v&&a._v.ok));
+  enrOk.forEach(a=>items.push(a));
+  const ord0={red:0,amber:1,info:2,good:3};
+  items.sort((a,b)=>(ord0[a.level]??2)-(ord0[b.level]??2));
   window._recSims=items.map(it=>it.sim||null);
+  window._recKeys=items.map(it=>sentKeyFor(it));
   // register each action's option sims for one-click apply from the drill-down
-  items.forEach(it=>{ if(it.options) it.options.forEach(o=>{ o._idx=window._recSims.length; window._recSims.push(o.sim||null); }); });
+  items.forEach(it=>{ if(it.options) it.options.forEach(o=>{ o._idx=window._recSims.length;
+    window._recSims.push(o.sim||null); window._recKeys.push(sentKeyFor(it)); }); });
   const mp=masterPlanStatus();
   const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
   const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר');
@@ -2030,6 +2039,7 @@ PAGE_RENDER.plan = (c)=>{
       <span class="tag ${bd.c}" style="flex:0 0 auto">${bd.t}</span>
       <div style="flex:1"><b class="small">${it.title}</b>${it.detail?`<details class="fverd"><summary class="small">הרחבה ⌄</summary><div class="small muted" style="line-height:1.75;padding:6px 2px 2px">${it.detail}</div></details>`:''}</div></div>`; }).join('');
   const actionList = decisionIdx.map((i,pos)=>{ const it=items[i]; const bd=badge(it.level); const blk=it.blocked;
+    const _k=sentKeyFor(it), sent=isSent(targetQ,_k);
     const hasOpts = !!(it.options && it.options.length);
     const optDrill = hasOpts ? `<details class="fverd" id="opt${i}" style="margin-top:8px"><summary>${IC('sliders')} ${it.options.length} אופציות אחרות ⌄</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>אופציה</th>${it.optionCols.map(cc=>`<th>${cc}</th>`).join('')}<th></th></tr></thead>
@@ -2038,22 +2048,26 @@ PAGE_RENDER.plan = (c)=>{
     // valuable when you want it and noise when you are executing. Collapsed by default.
     const why = (it.detail||it.dep) ? `<details class="fverd" style="margin-top:8px"><summary>${IC('info')} למה, ומה התלויות ⌄</summary>
       <div style="padding:10px 2px 2px;line-height:1.75">${it.detail||''}${it.dep?`<div class="dep" style="margin-top:8px">${IC('sliders')} תלוי ב: ${it.dep}</div>`:''}</div></details>` : '';
-    return `<div class="act ${blk?'':it.level}" style="${blk?'opacity:.9':''}">
-      <div class="an">${pos+1}</div>
+    return `<div class="act ${blk?'':it.level}" style="${blk?'opacity:.9':''}${sent?';opacity:.72':''}">
+      <div class="an"${sent?' style="background:var(--green);color:#04120c"':''}>${sent?'✓':pos+1}</div>
       <div class="at">
         <div class="between" style="gap:8px;flex-wrap:wrap">
-          <b style="flex:1;min-width:170px;font-size:15px">${it.title}</b>
+          <b style="flex:1;min-width:170px;font-size:15px">${it.ai?`<span class="tag" style="background:rgba(139,124,255,.18);color:var(--purple);margin-inline-end:6px">${IC('cpu')} AI</span>`:''}${it.title}</b>
           <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
         ${fieldStrip(it.sim)}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
-        <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
-          ${(it.sim&&!blk)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} שלח לסימולטור${hasOpts?' (מומלץ)':''}</button>`:''}
+        <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+          ${sent?`<span class="tag g" style="font-weight:800">✓ הועבר לסימולטור</span>
+            <button class="btn sm ghost" onclick="unmarkSent('${_k}')">בטל סימון</button>
+            ${it.sim?`<button class="btn sm ghost" onclick="applyRecToSim(${i})">שלח שוב</button>`:''}`
+          :`${(it.sim&&!blk)?`<button class="btn sm primary" onclick="applyRecToSim(${i})">${IC('zap')} שלח לסימולטור${hasOpts?' (מומלץ)':''}</button>`:''}`}
           ${it.action?`<button class="btn sm" onclick="${it.action}">${it.actionLabel||'פתח'}</button>`:''}
         </div>
         ${optDrill}${why}
       </div></div>`; }).join('');
   const mustCount=decisionIdx.filter(i=>items[i].level==='red'&&!items[i].blocked).length;
   const decisionCount=decisionIdx.length;
+  const sentCount=decisionIdx.filter(i=>isSent(targetQ,sentKeyFor(items[i]))).length;
   const _q=S.activeQuarter, _f=S.quarters[_q].financial, _op=S.quarters[_q].operational;
   const _sp=scoreProxy(null); const _share=(_sp.parts&&_sp.parts.share!=null)?(_sp.parts.share*100).toFixed(1)+'%':'—';
   const _topPivot=(mp.pivots&&mp.pivots.length)?mp.pivots[0].replace(/<[^>]+>/g,''):'';
@@ -2086,7 +2100,20 @@ PAGE_RENDER.plan = (c)=>{
     <!-- ===== PART 2 · THE DECISIONS. Nothing above this line repeats below it. ===== -->
     <div id="decisions" class="between" style="margin:0 2px 12px;padding-top:14px;border-top:2px solid var(--line2);flex-wrap:wrap;gap:8px;scroll-margin-top:12px">
       <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
-      <span class="row" style="gap:6px">${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
+      <span class="row" style="gap:6px">${sentCount?`<span class="tag g">✓ ${sentCount}/${decisionCount} הועברו</span>`:''}${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
+    </div>
+    <div class="card pad" style="margin-bottom:14px;background:var(--bg2)">
+      <div class="between" style="flex-wrap:wrap;gap:8px">
+        <div class="small" style="line-height:1.8"><b>${IC('info')} על מה ההחלטות האלה נבנו:</b>
+          <span class="tag g">1 · חוקי המשחק</span> <span class="tag g">2 · המצב מהדוח האחרון</span> <span class="tag g">3 · היעדים</span>
+          <span class="tag ${enrOk.length?'b':'a'}">4 · AI ${enrOk.length?`· ${enrOk.length} נוספו`:'· טרם הורץ'}</span></div>
+        <div class="row" style="gap:8px">
+          <button class="btn sm" id="enrichBtn" onclick="enrichDecisions()">${IC('cpu')} הצע מה שהמנוע פספס</button>
+          ${enr.length?`<button class="btn sm ghost" onclick="clearEnriched()">נקה הצעות</button>`:''}</div>
+      </div>
+      <div id="enrichOut" style="margin-top:8px"></div>
+      ${enrBad.length?`<div class="tag a" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>${enrBad.length} הצעות AI נדחו על-ידי המנוע</b> ולא נכנסו לרשימה: ${enrBad.map(a=>`"${esc(a.title)}" — ${esc(a._v.why)}`).join(' · ')}</div>`:''}
+      <div class="small muted" style="margin-top:6px">שכבות 1–3 דטרמיניסטיות ורצות תמיד. שכבה 4 רצה <b>לפי בקשה</b> (קריאת API), וכל הצעה עוברת את אותן בדיקות חוקיות כמו כל תוכנית — מה שנכשל מוצג למעלה ולא נכנס.</div>
     </div>
     ${actionList}
     <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--accent)">
@@ -2187,8 +2214,8 @@ window.applyRecToSim=(idx)=>{
       </select></div>
     <div class="field" id="recNewWrap" style="display:${S.scenarios.length?'none':'block'}">
       <label class="fl">שם התרחיש החדש</label><input class="f" id="recNewName" value="תוכנית הרבעון — מההמלצות"></div>
-    <div class="small muted">ההמלצה תמוזג לרבעון <b>${rec.q}</b> בתרחיש הנבחר — מנופים אחרים שכבר הוזנו בו יישמרו.</div>`,
-    `<button class="btn primary" onclick="applyRecConfirm(${idx})">${IC('zap')} החל ופתח בסימולטור</button>`);
+    <div class="small muted">ההמלצה תמוזג לרבעון <b>${rec.q}</b> בתרחיש הנבחר — מנופים אחרים שכבר הוזנו בו יישמרו. <b>תישאר בדף ההחלטות</b> והפעולה תסומן ✓.</div>`,
+    `<button class="btn primary" onclick="applyRecConfirm(${idx})">${IC('zap')} העבר לתרחיש</button>`);
 };
 window.applyRecConfirm=(idx)=>{
   const rec=window._recSims[idx]; if(!rec) return;
@@ -2211,9 +2238,22 @@ window.applyRecConfirm=(idx)=>{
   (rec.actions||[]).forEach(a=>{ if(!lev.actions.some(x=>x.form===a.form&&x.region===a.region)) lev.actions.push({aid:uid(),form:a.form,region:a.region,note:a.note,amount:a.amount}); });
   // reconcile the action list so every patched field shows up as an editable action card
   syncActionsToLevers(lev);
-  closeModal(); save(); toast('הוחל על "'+sc.name+'" — נפתח בסימולטור ✓','g');
-  go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
+  // Stay on the decisions page. Jumping to the simulator after every send broke the flow of
+  // working down the list; the card marks itself sent instead.
+  markSent(rec._key||window._recKeys?.[idx]);
+  closeModal(); save();
+  toast('הועבר ל"'+sc.name+'" ✓ — נשארת בהחלטות','g');
+  if(currentPage==='plan') go('plan'); else { go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60); }
 };
+/* Which recommendations have already been pushed into a scenario, per target quarter.
+   Cleared automatically when the target quarter changes, so each quarter starts fresh. */
+function sentStore(){ S.ui=S.ui||{}; S.ui.sent=S.ui.sent||{}; return S.ui.sent; }
+function sentKeyFor(it){ return [it.cat||'', it.form||'', (it.title||'').replace(/[\d,]/g,'').slice(0,40)].join('|'); }
+function isSent(q,key){ const st=sentStore()[q]; return !!(st && key && st[key]); }
+function markSent(key){ if(!key) return; const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const st=sentStore(); st[q]=st[q]||{}; st[q][key]=Date.now(); save(true); }
+window.unmarkSent=(key)=>{ const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const st=sentStore(); if(st[q]) delete st[q][key]; save(); go('plan'); };
 /* Concrete sell-plan per region from finished-PC inventory: units, price (best source available), advertising. */
 function pcPlanFor(q){
   const out=[]; (S.quarters[q].operational.inventory||[]).filter(i=>i.product==='Y'&&(i.qty||0)>0).forEach(i=>{
@@ -2553,6 +2593,68 @@ function buildActionPlan(q,targetQ){
           cells:[fmt(short),'Deluxe',_plantsNeeded(short)],
           sim:{q:targetQ,regions:{europe:{production:short,product:prd,model:'Deluxe',unitCost:0}}}}]:[]) ],
       sim:{q:targetQ,regions:{europe:{production:dueNow,product:prd,model:'Deluxe',unitCost:0}}}}); } } });
+  // 9a. ADVERTISING (A1-1/A1-2, Guide §5.4) — a lever in its own right, not a footnote of the
+  // sell action. The engine sets each region's budget where the next unit of spend still pays
+  // for itself, and says plainly where NOT to spend: below the effectiveness threshold the
+  // money is simply wasted, and when supply — not demand — is the constraint it buys nothing.
+  (()=>{
+    const rows=[]; const simRegions={};
+    REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+      const stock=(op.inventory||[]).filter(i=>i.product==='Y'&&(i.region||'')===r.id).reduce((a,i)=>a+(i.qty||0),0);
+      const cap=marketCapUnits('Y',r.id);
+      const units=Math.min(stock||0, cap);
+      if(!units) return;
+      const pa=priceAnchors(r.id,'Y'); const price=pa.base||0;
+      const cost=(op.inventory||[]).filter(i=>i.product==='Y'&&(i.region||'')===r.id&&i.cost>0).map(i=>i.cost)[0]||0;
+      const ar=recommendAdSpend(r.id,'Y',units,price,cost);
+      rows.push({r,units,price,ar});
+      if(ar.spend>0) simRegions[r.id]={advertising:ar.spend};
+    });
+    if(!rows.length) return;
+    const worth=rows.filter(x=>x.ar.spend>0), skip=rows.filter(x=>x.ar.spend===0);
+    const total=worth.reduce((a,x)=>a+x.ar.spend,0);
+    out.push({cat:'mkt', level: worth.length?'amber':'info', conf:'est',
+      title: worth.length ? `תקציב פרסום ל-${targetQ} — ${fmt(total)} סה״כ` : 'פרסום — לא כדאי ברבעון הזה',
+      form:'A1-2 (PC Prices & Advertising) · A1-1 לשבבים',
+      detail:`תקציב הפרסום נקבע בנקודה שבה <b>השקל הבא מפסיק להחזיר את עצמו</b> (גמישות וסף לפי §5.4), ולא כאחוז שרירותי מההכנסה.<br>`
+        +(worth.length?`<b>כדאי:</b> ${worth.map(x=>`${x.r.name} <b>${fmt(x.ar.spend)} ${x.r.cur}</b> (סף ${fmt(x.ar.threshold)}; תוספת צפויה ~${fmt(Math.round((advResponse(x.r.id,'Y',x.ar.spend).now-1)*x.units))} יח׳${x.ar.nextQuarterTail>0?`, ועוד ~${fmt(x.ar.nextQuarterTail)} ${x.r.cur} זולגים לרבעון הבא`:''})`).join(' · ')}<br>`:'')
+        +(skip.length?`<b>לא כדאי:</b> ${skip.map(x=>`${x.r.name} — ${esc(x.ar.why)}`).join(' · ')}<br>`:'')
+        +`<b>תזמון (§5.4):</b> הפרסום עובד <b>באותו רבעון שבו שולם</b> — זה החלק הגדול; השארית זולגת לרבעון הבא (הזנב הגדול ביותר בארה״ב, הקטן בברזיל).`,
+      dep:'מלאי/ייצור זמין למכירה ⟵ מחיר מוזן (A1-2) ⟵ פרסום. פרסום בלי מחיר או בלי סחורה = כסף שנשרף.',
+      sim: Object.keys(simRegions).length?{q:targetQ,regions:simRegions}:null});
+  })();
+
+  // 9b. IDLE CASH (A3-3, Data Log 07) — the financing actions above are all defensive. Cash
+  // sitting still is not free: government securities pay every quarter, and Brazil pays 4.5%
+  // (about 19% annualised). Only offers what is genuinely spare after the derived floor.
+  (()=>{
+    const floorNext=(function(){ try{ return floorComponents(q).total; }catch(e){ return 0; } })();
+    const rows=[];
+    REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+      const cash=f.cash[r.id]||0; if(cash<=0) return;
+      const rate=(DATALOG.interest.govSecurities[r.id]||0);
+      const share=floorNext/3;                                  // rough per-region share of the floor
+      const idle=Math.round(cash-share);
+      if(idle<50000||rate<=0) return;
+      rows.push({r,idle,rate,gain:Math.round(idle*rate/100)});
+    });
+    const hq=f.cash.hq||0, hqIdle=Math.round(hq-DATALOG.minHOCashSF*5);
+    const hqRate=DATALOG.interest.hoSecurities.sf||0;
+    if(!rows.length && hqIdle<50000) return;
+    const totalGain=rows.reduce((a,x)=>a+x.gain,0)+(hqIdle>=50000?Math.round(hqIdle*hqRate/100):0);
+    if(totalGain<5000) return;                                   // not worth an action card
+    out.push({cat:'fin', level:'info', conf:'rule',
+      title:`מזומן סרק — הפקד ${fmt(totalGain)} SF/רבעון של ריבית שלא נגבית`,
+      form:'A3-3 (Invest in Government Securities) · H2 לניירות ערך במטה',
+      detail:`מזומן שיושב ללא שימוש אינו ניטרלי — הוא ריבית שלא נגבית. שיעורים רבעוניים (Data Log 07): `
+        +`ארה״ב ${DATALOG.interest.govSecurities.us}% · אירופה ${DATALOG.interest.govSecurities.europe}% · <b>ברזיל ${DATALOG.interest.govSecurities.brazil}%</b> · מטה ${hqRate}%.<br>`
+        +(rows.length?rows.map(x=>`<b>${x.r.name}</b>: פנוי ~${fmt(x.idle)} ${x.r.cur} → ${x.rate}% = <b>${fmt(x.gain)} ${x.r.cur}/רבעון</b>`).join(' · ')+'<br>':'')
+        +(hqIdle>=50000?`<b>מטה</b>: פנוי ~${fmt(hqIdle)} SF → ${hqRate}% = <b>${fmt(Math.round(hqIdle*hqRate/100))} SF/רבעון</b><br>`:'')
+        +`<b>שים לב:</b> החידוש דורש החלטה מפורשת בכל רבעון (Data Log 07), והסכום חושב <b>אחרי</b> רצפת המזומן הנגזרת — אל תפקיד כסף שתצטרך.`,
+      dep:'רצפת מזומן מכוסה ⟵ עודף אמיתי ⟵ הפקדה. חידוש נדרש כל רבעון מחדש.',
+      sim: rows.length?{q:targetQ,regions:Object.fromEntries(rows.map(x=>[x.r.id,{invest:x.idle}]))}:null});
+  })();
+
   // 9. Debt — only worth raising when the company is actually cash-healthy (positive RE, ample cash)
   if((f.loans||0)>0 && (f.retainedEarnings||0)>=0 && (f.consolidated||unifiedCashOf(q)) > (f.loans||0)*2 && !brk && minProj>=safety)
     out.push({cat:'fin',level:'info',title:'שקול פירעון חוב',form:'A3-2 / H4 (מימון)',
@@ -4483,6 +4585,106 @@ window.applyStrategy=(i)=>{
   S.scenarios.unshift(sc); save(); toast('נוצר תרחיש "'+sc.name+'" — נפתח בסימולטור','g');
   go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
 };
+/* ==========================================================================
+   DECISION ENRICHMENT — the fourth layer.
+   The action list is built deterministically from three layers: (1) the game's rule
+   book, (2) the current position from the latest ingested results, (3) the team's
+   goals. That backbone is verifiable and costs nothing to compute.
+
+   This adds the fourth: the model looks at all three plus the engine's own list and
+   proposes moves the deterministic rules did not think to generate. Same contract as
+   everywhere else — the model proposes, the ENGINE validates. Every suggestion is run
+   through the legality guards and scored before it is allowed onto the list, and it is
+   labelled so nobody confuses it with an engine-derived action.
+   It runs on demand, not on render: it costs an API call, and the page must work offline.
+   ========================================================================== */
+const ENRICH_SYSTEM = `אתה אסטרטג INTOPIA בכיר לחברה 8. המנוע הדטרמיניסטי כבר בנה רשימת החלטות מ-3 שכבות: חוקי המשחק, המצב הנוכחי מהדוח האחרון, והיעדים. תפקידך להוסיף את מה שהוא **פספס**.
+
+חפש בפרט מהלכים שכללים דטרמיניסטיים נוטים לא לייצר: ניצול הפרשי ריבית ומס בין אזורים · תזמון מו״פ מול חלון ההבשלה עד Q9 · מסחר בין-חברתי (H4/H5/H6) · מכירת רכיבים · מינוף מחקרי שוק להחלטה ספציפית · ויתור מכוון על שוק כדי למקד משאבים.
+
+כללים מחייבים:
+- אל תחזור על פעולה שכבר ברשימה.
+- אל תמציא מספרים: השתמש רק בעוגנים שבהקשר. אם אין עוגן — אל תציע את המהלך.
+- ייצור רק באזור עם מפעל מוצהר. מכירה לא מעבר להיצע. משרדי מכירות 0 או 2–10. מו״פ ≥ המינימום החוקי.
+- כל הצעה חייבת להיות ניתנת לביצוע ברבעון היעד, בטופס INTOPIA אמיתי.
+
+החזר **JSON תקין בלבד**:
+{"actions":[{"title":"כותרת קצרה ומעשית","form":"A3-3","level":"amber","why":"למה זה משתלם, במשפט-שניים, עם המספר מההקשר","sim":{"q":"Q4","rd":0,"regions":{"europe":{"advertising":60000,"invest":0,"production":0,"price":0,"qtySold":0,"offices":0}}}}]}
+
+level: "red" חובה · "amber" מומלץ · "info" אופציונלי. החזר עד 4 פעולות. אם אין לך מה להוסיף שעומד בכללים — החזר {"actions":[]}.`;
+
+function parseEnrichJSON(txt,targetQ){
+  let raw=String(txt||'').trim();
+  const fence=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) raw=fence[1].trim();
+  const a=raw.indexOf('{'), b=raw.lastIndexOf('}'); if(a<0||b<=a) throw new Error('התשובה לא הכילה JSON');
+  let obj; try{ obj=JSON.parse(raw.slice(a,b+1)); }catch(e){ throw new Error('JSON לא תקין: '+e.message); }
+  const n=v=>{ const x=Number(v); return isFinite(x)&&x>=0?x:0; };
+  return (obj.actions||[]).slice(0,4).map(x=>{
+    const regions={};
+    Object.entries(((x.sim||{}).regions)||{}).forEach(([rid,g])=>{
+      if(!REGIONS.some(r=>r.id===rid)) return;
+      const price=n(g.price), qty=n(g.qtySold);
+      regions[rid]={ production:n(g.production), unitCost:n(g.unitCost), price, qtySold:qty,
+        sales:Math.round(price*qty), advertising:n(g.advertising), invest:n(g.invest),
+        transferIn:n(g.transferIn), offices:Math.round(n(g.offices)),
+        product:(g.product==='X'?'X':'Y'), model:g.model==='Deluxe'?'Deluxe':'Standard' };
+    });
+    const lvl=['red','amber','info'].includes(x.level)?x.level:'info';
+    return { cat:'strat', level:lvl, conf:'est', ai:true,
+      title:String(x.title||'הצעת AI').slice(0,90),
+      form:String(x.form||'').slice(0,60),
+      detail:String(x.why||'').slice(0,600),
+      sim: Object.keys(regions).length||x.sim&&x.sim.rd ? {q:targetQ, rd:((x.sim||{}).rd!=null?n(x.sim.rd):undefined), regions} : null };
+  }).filter(x=>x.sim);
+}
+/* Engine-side validation: a suggestion only reaches the list if a scenario built from it
+   breaks no rule. Anything it violates is reported instead of quietly accepted. */
+function validateEnriched(act,targetQ){
+  const base=S.activeQuarter;
+  const levers={}; planHorizon(base).forEach(hq=>{ levers[hq]={rd:0,regions:{}};
+    REGIONS.forEach(r=>levers[hq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',newFac:0,offices:0}); });
+  const tq=levers[targetQ]?targetQ:Object.keys(levers)[0];
+  if(!tq) return {ok:false,why:'אין רבעון יעד'};
+  if(act.sim.rd!=null) levers[tq].rd=act.sim.rd;
+  Object.entries(act.sim.regions||{}).forEach(([rid,p])=>{ levers[tq].regions[rid]=Object.assign(levers[tq].regions[rid],p); });
+  const fake={levers};
+  const v=[];
+  if(phantomSales(fake,tq).length) v.push('מכירה מעבר להיצע');
+  const ol=officeLegality(fake,tq); if(ol.length) v.push(ol[0].region+': '+ol[0].why);
+  const caps=capacityCheck(fake,tq); if(caps.length) v.push('חריגת קיבולת ב'+caps[0].name);
+  const plantsBy=S.quarters[base].operational.plantsByRegion;
+  if(plantsBy) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    if((levers[tq].regions[r.id].production||0)>0 && !(plantsBy[r.id]>0)) v.push('ייצור ב'+r.name+' ללא מפעל'); });
+  const rd=levers[tq].rd||0;
+  if(rd>0 && rd<DATALOG.rdMinPerQuarter.X) v.push('מו״פ מתחת למינימום החוקי');
+  return {ok:v.length===0, why:v.join(' · ')};
+}
+window.enrichDecisions=async()=>{
+  if(!getApiKey()){ openAISettings(); return; }
+  const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q;
+  const btn=$('#enrichBtn'); if(btn){ btn.disabled=true; btn.textContent='חושב…'; }
+  const box=$('#enrichOut'); if(box) box.innerHTML=`<div class="chip">${IC('clock')} האסטרטג בוחן מה המנוע פספס…</div>`;
+  try{
+    const items=buildActionPlan(q,targetQ)||[];
+    const ctx=[buildAIContext(),
+      `## רשימת ההחלטות שהמנוע כבר בנה ל-${targetQ} [אל תחזור עליהן]`,
+      ...items.map((it,i)=>`${i+1}. [${it.level}] ${it.title} — ${it.form||''}`),
+      `## רבעון היעד: ${targetQ}`].join('\n');
+    const txt=await callLLM([{role:'user',content:ctx+`\n\n---\nמה המנוע פספס? החזר JSON בלבד לפי המבנה שנקבע.`}],
+      ENRICH_SYSTEM,{max_tokens:1800});
+    const parsed=parseEnrichJSON(txt,targetQ);
+    const checked=parsed.map(a=>({...a, _v:validateEnriched(a,targetQ)}));
+    S.ai.enriched={q:targetQ, at:Date.now(), actions:checked};
+    save(); go('plan');
+    const kept=checked.filter(a=>a._v.ok).length;
+    toast(kept?`${kept} הצעות עברו אימות מנוע ונוספו`:'לא נמצאו הצעות חוקיות להוסיף', kept?'g':'a');
+  }catch(e){
+    if(box) box.innerHTML=`<div class="tag r" style="display:block;line-height:1.7;white-space:normal">${IC('warn')} ${esc(aiErr(e))}</div>`;
+  }
+  const b2=$('#enrichBtn'); if(b2){ b2.disabled=false; b2.textContent='הצע מה שהמנוע פספס'; }
+};
+window.clearEnriched=()=>{ if(S.ai) S.ai.enriched=null; save(); go('plan'); };
+
 const ADVISOR_SYSTEM = `אתה יועץ בכיר ומנוסה לצוות INTOPIA (חברה 8). "המנוע" הדטרמיניסטי כבר חישב את המספרים וההמלצות הקונקרטיות לרבעון {targetQ}. תפקידך: לוודא שכל פעולה מדויקת, חוקית וכדאית — ולהוציא רשימת פעולות מוכנה-להזנה. שיפוט, לא חשבון.
 
 ## איך אתה עובד — ביקורת 4 עמודים לכל פעולה
