@@ -139,6 +139,56 @@ ck('you can revert to the engine list', ui.revertBtn);
 await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
 ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
 
+/* ---- CONTRACT ROUTES: producing it ourselves is one option, not the question ---- */
+const rt=await page.evaluate(()=>{
+  const before={techX:S.quarters.Q3.operational.techX};
+  S.quarters.Q3.operational.techX=2;                    // grade too low to make X3 in Q4
+  setPlantSplit('europe','X',0); setPlantSplit('europe','Y',2);  // no chip plant at all
+  const c=contractPlan()[0], r=contractRoutes(c);
+  const by=k=>r.routes.find(x=>x.key===k);
+  const out={
+    productionDeadline:c.productionQuarter, decideNow:r.decideQ,
+    gradeGap:r.quartersToGrade, gradeReadyIn:r.gradeReadyForProductionIn,
+    produceInfeasible:!by('produce').feasible,
+    produceReasonNamesGrade:/דרגת/.test(by('produce').why),
+    surfaceFeasible:by('buy-surface').feasible,
+    airFeasible:by('buy-air').feasible,
+    airCitesSameQuarterResale:/quarter of shipment|באותו רבעון/.test(by('buy-air').why),
+    plantTooLateForThisTranche:!by('plant').feasible,
+    plantSaysItHelpsLater:/מאוחר מדי למנה הזו/.test(by('plant').why),
+    expediteAlwaysAvailable:by('expedite').feasible && by('expedite').fallback,
+    expediteCitesTheRule:/enforced by expediting/.test(by('expedite').why),
+    bestIsNotProduce:r.best.key!=='produce',
+    bestIsCheapestFeasible:r.best.key==='buy-surface'
+  };
+  // with the grade and a chip plant in place, producing becomes the answer again
+  S.quarters.Q3.operational.techX=3; setPlantSplit('europe','X',1); setPlantSplit('europe','Y',1);
+  const r2=contractRoutes(contractPlan()[0]);
+  out.withGradeAndPlantProduceWins=r2.best.key==='produce';
+  out.produceNowFeasible=r2.routes.find(x=>x.key==='produce').feasible;
+  // undeclared split must not pretend to know
+  setPlantSplit('europe','X',null); setPlantSplit('europe','Y',null);
+  out.undeclaredIsUnknown=contractRoutes(contractPlan()[0]).routes.find(x=>x.key==='produce').unknown===true;
+  setPlantSplit('europe','X',0); setPlantSplit('europe','Y',2);
+  S.quarters.Q3.operational.techX=before.techX;
+  return out;
+});
+ck('the production deadline is a quarter before delivery', rt.productionDeadline==='Q4' && rt.decideNow==='Q4');
+ck('a grade gap is measured in quarters of R&D', rt.gradeGap===1, `X3 available to produce from ${rt.gradeReadyIn}`);
+ck('self-production is correctly ruled out when the grade cannot mature in time', rt.produceInfeasible);
+ck('and the reason names the grade, not something vague', rt.produceReasonNamesGrade);
+ck('buying by surface the quarter before is offered', rt.surfaceFeasible);
+ck('buying by air in the delivery quarter is offered', rt.airFeasible);
+ck('and it cites the same-quarter resale rule that makes it work', rt.airCitesSameQuarterResale);
+ck('building a plant is shown as too late for this tranche', rt.plantTooLateForThisTranche);
+ck('but flagged as the answer for the later ones', rt.plantSaysItHelpsLater);
+ck('doing nothing is presented as enforced expediting, not as default', rt.expediteAlwaysAvailable);
+ck('quoting the rule that makes it a cost problem, not a failure', rt.expediteCitesTheRule);
+ck('the recommended route is not "just produce it"', rt.bestIsNotProduce);
+ck('it is the cheapest route that still meets the calendar', rt.bestIsCheapestFeasible);
+ck('with the grade and a chip plant, self-production wins again', rt.withGradeAndPlantProduceWins && rt.produceNowFeasible);
+ck('an undeclared plant split reports unknown rather than guessing', rt.undeclaredIsUnknown);
+
 /* ---- DEMAND: no recommendation may exceed what the reports show the market absorbs ---- */
 const dem=await page.evaluate(()=>{
   const q=S.activeQuarter,t=nextQuarters(q)[0];

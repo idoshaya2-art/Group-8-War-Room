@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.4';
+const APP_VERSION = 'v9.5';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1309,6 +1309,68 @@ function contractPlan(){
       eligibleGrades:[...new Set(eligible.map(i=>i.grade))].sort() };
   }).sort((a,b)=>qIndex(a.deliveryQuarter)-qIndex(b.deliveryQuarter));
 }
+/* Every route to honouring a supply commitment, with the calendar attached.
+   Producing it ourselves is only one of them, and when the grade or the plant is missing it
+   is often not even available — but the commitment does not therefore fail. Guide §4.14.2:
+   "the seller's obligations will be enforced by expediting missing units, if necessary",
+   so the real question is never "can we deliver" but "at what cost, by which route". */
+function contractRoutes(c){
+  const base=S.activeQuarter, op=S.quarters[base].operational;
+  const decideQ=nextQuarters(base)[0];                 // the quarter being decided right now
+  const prodQ=c.productionQuarter;                     // production must finish here
+  const idx=q=>qIndex(q);
+  const routes=[];
+  const cap=capacityForProduct(c.prod);
+  const gradeNow=c.tech, need=c.grade;
+  // R&D lifts a grade by at most 1 per quarter and matures a quarter forward.
+  const quartersToGrade=Math.max(0, need-gradeNow);
+  const gradeReadyForProductionIn = quartersToGrade===0 ? decideQ : QUARTERS[idx(decideQ)+quartersToGrade];
+  const canProduceInProdQ = quartersToGrade===0 || (gradeReadyForProductionIn && idx(gradeReadyForProductionIn)<=idx(prodQ));
+
+  routes.push({ key:'produce', name:`ייצור עצמי ב-${prodQ}`,
+    feasible: canProduceInProdQ && cap.known && cap.units>=c.gap,
+    unknown: !cap.known,
+    why: !cap.known ? `לא הוצהר אילו מפעלים מייצרים ${c.prod} — אי-אפשר לדעת אם יש קיבולת`
+      : (!canProduceInProdQ ? `דרגת ${c.prod}${gradeNow} נמוכה מ-${c.prod}${need}. מו״פ מעלה דרגה אחת לרבעון ומבשיל רבעון קדימה → ${c.prod}${need} יהיה זמין לייצור רק ב-${gradeReadyForProductionIn||'מאוחר יותר'}, אחרי מועד הייצור ${prodQ}`
+      : (cap.units<c.gap ? `קיבולת ${c.prod} מוצהרת ${fmt(cap.units)}/רבעון מול ${fmt(c.gap)} נדרשים` : `דרגה ${c.prod}${gradeNow} מספיקה וקיבולת ${fmt(cap.units)}/רבעון מכסה`)),
+    cost:'עלות ייצור משתנה בלבד — הזול ביותר' });
+
+  // Bought by surface in the quarter BEFORE the production deadline: on hand in time.
+  const surfaceBuyQ=QUARTERS[idx(prodQ)];
+  routes.push({ key:'buy-surface', name:`רכישה מחברה אחרת בהובלה יבשתית ב-${surfaceBuyQ}`,
+    feasible: !!surfaceBuyQ && idx(surfaceBuyQ)>=idx(decideQ),
+    why:`§4.14.2: הובלה יבשתית דורשת רבעון אחד לפני שהקונה יכול למכור הלאה. רכישה ב-${surfaceBuyQ} → זמין למסירה ב-${c.deliveryQuarter}. ${idx(surfaceBuyQ)<idx(decideQ)?'<b>המועד חלף.</b>':'<b>זה המסלול הזול מבין הרכישות.</b>'}`,
+    cost:`שילוח יבשתי לפי Data Log 05 + מחיר מוסכם (H6)`, form:'H6' });
+
+  // Bought by AIR in the delivery quarter itself: arrives and may be resold the same quarter.
+  routes.push({ key:'buy-air', name:`רכישה בהובלה אווירית ב-${c.deliveryQuarter}`,
+    feasible: idx(c.deliveryQuarter)>=idx(decideQ),
+    why:`§4.14.2: "Airfreight permits surface resale to others in the quarter of shipment" — סחורה שהוטסה נמכרת הלאה <b>באותו רבעון</b>. זה המסלול היחיד שעדיין עומד גם אם מועד הייצור חלף. <b>יקר משמעותית</b> (Data Log 05: אווירי ~3–4× יבשתי).`,
+    cost:'שילוח אווירי + מחיר מוסכם — יקר', form:'H6' });
+
+  // Build capacity — too late for this tranche, but it is the answer for the ones after it.
+  const plantReadyQ=QUARTERS[idx(decideQ)+1];
+  routes.push({ key:'plant', name:`בניית/רכישת מפעל ${c.prod}`,
+    feasible: !!plantReadyQ && idx(plantReadyQ)<=idx(prodQ),
+    why:`מפעל נבנה רבעון ומייצר מהרבעון שאחריו → הזמנה ב-${decideQ} מייצרת מ-${plantReadyQ||'—'}. ${plantReadyQ&&idx(plantReadyQ)<=idx(prodQ)?'בזמן למנה הזו.':'<b>מאוחר מדי למנה הזו — אבל זה הפתרון למנות הבאות ולטווח הארוך.</b>'} אפשר גם לקנות מפעל מ-Nippon (חברה 99) בתוספת ~10% על מחיר ה-Data Log, לפי Gazette.`,
+    cost:`רכישת מפעל ${c.prod} — ${fmt((DATALOG.plantAcqCost[c.prod]||{}).europe||0)} EUR באירופה`, form:'A2-1 / W2' });
+
+  // Doing nothing is not a default — it is an expensive automatic fulfilment.
+  routes.push({ key:'expedite', name:'לא לעשות כלום — המערכת תשלים בעלותנו',
+    feasible:true, fallback:true,
+    why:`§4.14.2: <b>"the seller's obligations will be enforced by expediting missing units, if necessary"</b> — ההתחייבות תקוים גם אם לא נספק, והיחידות החסרות יושלמו <b>על חשבוננו בתעריף מזורז</b>. כלומר הסיכון אינו כשל אספקה אלא <b>עלות</b>, והיא הגבוהה מכל המסלולים.`,
+    cost:'תעריף מזורז — היקר ביותר', form:'—' });
+
+  return {decideQ, prodQ, cap, quartersToGrade, gradeReadyForProductionIn, routes,
+    best: routes.find(r=>r.feasible && !r.fallback) || routes[routes.length-1]};
+}
+/* Who could sell us the grade — the MR items that answer it. */
+function whoHasGrade(prod, grade){
+  const last=latestEntered(); const mi=last?(S.quarters[last].marketIntel||{}):{};
+  const rows=(mi.generic||[]).length?mi.generic:[];
+  return { known:false, mr:['MR29 (דרגות מלאי סגירה לפי חברה)','MR30 (דרגות שיוצרו לרבעון הבא לפי חברה)'],
+    why:`כדי לדעת ממי אפשר לקנות ${prod}${grade} צריך לראות מי מחזיק או מייצר את הדרגה. שני המחקרים האלה עונים על זה בדיוק, והם בתשלום — זה שימוש משתלם באחד משלושת המקומות.` };
+}
 /* Total committed units per production quarter — what any plan MUST make, on top of
    whatever it wants to sell on the open market. */
 function contractRequirements(){
@@ -2226,6 +2288,18 @@ PAGE_RENDER.plan = (c)=>{
         ${_a.revenue>0?`<div class="small" style="margin-top:7px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25)">
           ${IC('dollar')} <b>תזרים הפעולה:</b> הכנסה ${fmt(_a.revenue)} SF → <b style="color:var(--green)">${fmt(_a.inNow)} נגבים כבר ברבעון הזה</b>${_a.inLater>0?` · ${fmt(_a.inLater)} ברבעונים הבאים`:''} מול הוצאה ${fmt(_a.out)} → <b>נטו ${_a.net>=0?'+':''}${fmt(_a.net)} SF</b>.
           ${_a.net>0?'<b>הפעולה הזו מממנת את עצמה ואת מה שמתחתיה.</b>':''}</div>`:''}
+        ${it.routes?`<details class="fverd" style="margin-top:8px" open><summary>${IC('share')} כל המסלולים לעמידה בהתחייבות — ומה עוד עומד בלוח הזמנים ⌄</summary>
+          <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>מסלול</th><th>עומד בזמן?</th><th>למה</th><th>עלות</th></tr></thead><tbody>
+          ${it.routes.routes.map(r=>`<tr${r===it.routes.best?' style="background:rgba(52,211,153,.09)"':''}>
+            <td style="text-align:start"><b>${esc(r.name)}</b>${r.form&&r.form!=='—'?` <span class="form">${esc(r.form)}</span>`:''}${r===it.routes.best?' <span class="tag g">המסלול המומלץ</span>':''}</td>
+            <td>${r.unknown?'<span class="tag a">לא ידוע</span>':(r.feasible?(r.fallback?'<span class="tag a">תמיד</span>':'<span class="tag g">כן</span>'):'<span class="tag r">לא</span>')}</td>
+            <td style="text-align:start;white-space:normal;line-height:1.65;max-width:420px">${r.why}</td>
+            <td style="text-align:start;white-space:normal;max-width:150px" class="small muted">${esc(r.cost)}</td></tr>`).join('')}
+          </tbody></table></div>
+          <div class="small muted" style="margin-top:8px;line-height:1.7">${IC('info')} ${(()=>{const w=whoHasGrade(it.routes.cap&&'X'||'X',0);return '';})()}
+            <b>כדי לדעת ממי לקנות</b> צריך לראות מי מחזיק או מייצר את הדרגה — <b>MR29</b> (דרגות מלאי סגירה לפי חברה) ו-<b>MR30</b> (דרגות שיוצרו לרבעון הבא לפי חברה). שימוש משתלם באחד משלושת המקומות בתשלום.
+            <br>${IC('warn')} <b>מלכודת שתי הדרגות (§4.9):</b> אם תחזיק כבר שתי דרגות של ${esc(it.routes.cap?'':'')}המוצר באזור והדרגה החדשה תיכנס כשלישית — הדרגה האמצעית <b>תרד אוטומטית לרמת הנמוכה</b>. אל תייצר שתי דרגות נמוכות "בינתיים".</div>
+        </details>`:''}
         ${it.aiNote?`<div class="small" style="margin-top:6px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">${IC('cpu')} ${esc(it.aiNote)}</div>`:''}
         ${fieldStrip(it.sim)}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
@@ -2841,7 +2915,8 @@ function buildActionPlan(q,targetQ){
       blocked: !gradeReady ? `נדרש קודם מו״פ להעלאת דרגה ל-${prodGrade} (אתה ב-${prd}${curGrade}). בצע את פעולת המו״פ (H1-1) לפני שאפשר לייצר.` : null,
       title:`${(urgent||!gradeReady)?'⚠ ':''}התחייבות ${prodGrade} — ${fmt(dueNow)} עד ${dueQ}${sched.length>1?` (מתוך ${fmt(short)} בסך הכל)`:''}${urgent?' — ייצר עכשיו!':''}`,form:`A2-3 (${prd==='X'?'Chip':'Computer'} Production) · דגם Deluxe`,
       detail:`<b>${esc(ct.counterparty||'התחייבות')}</b>: ${fmt(ct.qty)} × <b>${prodGrade} Deluxe</b> עד ${ct.deliveryQuarter}, במלאי ${fmt(inv)} — חסרים <b>${fmt(short)}</b>. ${ct.note?ct.note+'. ':''}${!gradeReady?`<b style="color:var(--red)">⚠ הדרגה טרם הושגה: אתה ב-${prd}${curGrade}, נדרש ${prodGrade} — חובה מו״פ (H1-1) עכשיו כדי לפתוח את הייצור.</b> `:''}${capNote?capNote+'. ':''}ייצור נכנס למלאי בסוף הרבעון וזמין למסירה רבעון אחריו — לכן <b>הייצור חייב להתבצע ב-${prodQ}</b>${urgent?' — כלומר בהחלטה שאתה מקבל עכשיו':''}.${ct._schedule&&ct._schedule.length>1?`<br><b>לוח האספקה בפועל:</b> ${ct._schedule.map(x=>`${fmt(x.qty)} ל-${x.q} (ייצור ב-${QUARTERS[qIndex(x.q)-1]||x.q})`).join(' · ')} — <b>אל תייצר את הכל מראש</b>, זה כובל מזומן רבעון מוקדם מדי.`:''}`,
-      dep:`מו״פ→דרגה ${prodGrade} ⟵ ייצור A2-3 דגם Deluxe ⟵ מלאי סוף רבעון ⟵ מסירה. התחייבות ללא קנס — עמידה בזמן קריטית.`,
+      dep:`מו״פ→דרגה ${prodGrade} ⟵ ייצור A2-3 ⟵ מלאי סוף רבעון ⟵ מסירה. §4.14.2: אי-אספקה אינה כשל אלא השלמה אוטומטית בתעריף מזורז על חשבוננו.`,
+      routes:(()=>{ try{ const cp=contractPlan().find(x=>x.deliveryQuarter===dueQ&&x.prod===prd); return cp?contractRoutes(cp):null; }catch(e){ return null; } })(),
       optionCols:['יח׳','דגם','מפעלים נדרשים'],options:[
         {name:`מנת ${dueQ} בלבד`,favors:'מייצר רק את מה שחייב להיות מוכן למסירה הקרובה — לא כובל מזומן מראש',
           cells:[fmt(dueNow),'Deluxe',_plantsNeeded(dueNow)],
