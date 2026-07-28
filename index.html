@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.5';
+const APP_VERSION = 'v9.6';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1355,11 +1355,32 @@ function contractRoutes(c){
     why:`מפעל נבנה רבעון ומייצר מהרבעון שאחריו → הזמנה ב-${decideQ} מייצרת מ-${plantReadyQ||'—'}. ${plantReadyQ&&idx(plantReadyQ)<=idx(prodQ)?'בזמן למנה הזו.':'<b>מאוחר מדי למנה הזו — אבל זה הפתרון למנות הבאות ולטווח הארוך.</b>'} אפשר גם לקנות מפעל מ-Nippon (חברה 99) בתוספת ~10% על מחיר ה-Data Log, לפי Gazette.`,
     cost:`רכישת מפעל ${c.prod} — ${fmt((DATALOG.plantAcqCost[c.prod]||{}).europe||0)} EUR באירופה`, form:'A2-1 / W2' });
 
-  // Doing nothing is not a default — it is an expensive automatic fulfilment.
+  // §4.12 draws a sharp line that changes the whole calculus: filling the contract from
+  // inventory of a HIGHER grade costs "rather nominal" remanufacturing, while having no
+  // usable grade at all costs "substantial" production plus a Sales Expediting surcharge.
+  // So the goal is not "30,000 X3 exactly" — it is "30,000 units at X3 OR BETTER on hand".
+  const higher=Math.max(need, gradeNow);
+  routes.push({ key:'produce-higher', name:`ייצור דרגה ${c.prod}${need} או גבוהה יותר עד ${prodQ}`,
+    feasible: canProduceInProdQ && cap.known && cap.units>0,
+    unknown: !cap.known,
+    why:`§4.12: אם במלאי יש דרגה <b>גבוהה מזו שבחוזה</b>, המערכת משתמשת בה והעלות היא <b>"rather nominal"</b> — רק עלות עיבוד מחדש מינימלית. `
+      +`<b>לכן היעד אינו "בדיוק 30,000 X3" אלא "30,000 יחידות בדרגה ${c.prod}${need} ומעלה במלאי".</b> `
+      +`דרגה <b>נמוכה</b> מהחוזה אינה עוזרת כלל — היא נופלת למקרה היקר.`,
+    cost:'עלות ייצור + עיבוד מחדש מינימלי — זול', form:'A2-3' });
+
+  // Partial coverage is the real hedge: the surcharge applies only to the MISSING units.
+  routes.push({ key:'partial', name:'כיסוי חלקי — לספק מה שאפשר, השאר בהשלמה',
+    feasible:true,
+    why:`ההתחייבות אינה "הכל או כלום". §4.12: העלות הכבדה חלה על <b>היחידות החסרות בלבד</b> ("the production costs incurred to make up for <b>the missing units</b>"). `
+      +`כל יחידה שתספק בעצמך או תרכוש מקטינה את הבסיס לחיוב. <b>זה מוריד את הסיכון מ"חייב למצוא מוכר ל-30,000" ל"כל יחידה שתשיג חוסכת".</b>`,
+    cost:'תוספת רק על הפער', form:'A2-3 + H6' });
+
+  // Doing nothing is not a default — it is an automatic fulfilment at a defined premium.
   routes.push({ key:'expedite', name:'לא לעשות כלום — המערכת תשלים בעלותנו',
     feasible:true, fallback:true,
-    why:`§4.14.2: <b>"the seller's obligations will be enforced by expediting missing units, if necessary"</b> — ההתחייבות תקוים גם אם לא נספק, והיחידות החסרות יושלמו <b>על חשבוננו בתעריף מזורז</b>. כלומר הסיכון אינו כשל אספקה אלא <b>עלות</b>, והיא הגבוהה מכל המסלולים.`,
-    cost:'תעריף מזורז — היקר ביותר', form:'—' });
+    why:`§4.14.2: <b>"the seller's obligations will be enforced by expediting missing units"</b> — הקונה מובטח בכמות ובדרגה, ההתחייבות תקוים. §4.12 מגדיר את המחיר: <b>"much higher manufacturing costs for the missing goods and a Sales Expediting surcharge on the Income Statement"</b>. `
+      +`כלומר הסיכון אינו כשל אספקה אלא <b>עלות ייצור מנופחת + היטל בדוח רו״ה</b> — פגיעה ישירה במחצית העבר של הציון. המדריך אינו נוקב בשיעור המדויק.`,
+    cost:'ייצור מנופח + היטל Sales Expediting — היקר ביותר', form:'—' });
 
   return {decideQ, prodQ, cap, quartersToGrade, gradeReadyForProductionIn, routes,
     best: routes.find(r=>r.feasible && !r.fallback) || routes[routes.length-1]};

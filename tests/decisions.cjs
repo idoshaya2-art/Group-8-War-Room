@@ -188,6 +188,42 @@ ck('the recommended route is not "just produce it"', rt.bestIsNotProduce);
 ck('it is the cheapest route that still meets the calendar', rt.bestIsCheapestFeasible);
 ck('with the grade and a chip plant, self-production wins again', rt.withGradeAndPlantProduceWins && rt.produceNowFeasible);
 ck('an undeclared plant split reports unknown rather than guessing', rt.undeclaredIsUnknown);
+/* 4.12 — a HIGHER grade fills the contract cheaply; a lower one does not. And the heavy
+   cost applies only to the missing units, which makes partial coverage a real hedge. */
+const g412=await page.evaluate(()=>{
+  const c=contractPlan()[0], r=contractRoutes(c);
+  const by=k=>r.routes.find(x=>x.key===k);
+  // stock of a HIGHER grade must satisfy the commitment
+  const inv=S.quarters.Q3.operational.inventory;
+  S.quarters.Q3.operational.inventory=[{product:'X',grade:5,region:'europe',qty:30000}];
+  const higherCovers=contractPlan()[0].gap===0;
+  // a LOWER grade must not
+  S.quarters.Q3.operational.inventory=[{product:'X',grade:2,region:'europe',qty:60000}];
+  const lowerDoesNot=contractPlan()[0].gap===30000;
+  const lowerReported=contractPlan()[0].wrongGrade===60000;
+  // partial stock reduces the gap proportionally
+  S.quarters.Q3.operational.inventory=[{product:'X',grade:3,region:'europe',qty:12000}];
+  const partialGap=contractPlan()[0].gap;
+  S.quarters.Q3.operational.inventory=inv;
+  return {higherCovers, lowerDoesNot, lowerReported, partialGap,
+    higherRouteExists:!!by('produce-higher'),
+    higherRouteCitesNominal:/rather nominal|נומינלי|מינימלי/.test(by('produce-higher').why),
+    higherRouteRejectsLower:/נמוכה.*אינה עוזרת/.test(by('produce-higher').why),
+    partialRouteExists:!!by('partial') && by('partial').feasible,
+    partialCitesMissingUnitsOnly:/missing units|הפער|החסרות/.test(by('partial').why),
+    expediteNamesTheSurcharge:/Sales Expediting/.test(by('expedite').why),
+    expediteAdmitsRateUnknown:/אינו נוקב/.test(by('expedite').why)};
+});
+ck('inventory of a HIGHER grade satisfies the commitment (4.12)', g412.higherCovers);
+ck('a LOWER grade does not, and is reported as unusable', g412.lowerDoesNot && g412.lowerReported);
+ck('partial stock reduces the gap rather than all-or-nothing', g412.partialGap===18000, 'gap '+g412.partialGap);
+ck('a "produce this grade or better" route is offered', g412.higherRouteExists);
+ck('it cites that a higher grade costs only nominal remanufacturing', g412.higherRouteCitesNominal);
+ck('and warns that a lower grade does not help at all', g412.higherRouteRejectsLower);
+ck('partial coverage is offered as a route in its own right', g412.partialRouteExists);
+ck('stating that the heavy cost applies only to the missing units', g412.partialCitesMissingUnitsOnly);
+ck('the fallback names the Sales Expediting surcharge', g412.expediteNamesTheSurcharge);
+ck('and admits the guide does not state the rate', g412.expediteAdmitsRateUnknown);
 
 /* ---- DEMAND: no recommendation may exceed what the reports show the market absorbs ---- */
 const dem=await page.evaluate(()=>{
