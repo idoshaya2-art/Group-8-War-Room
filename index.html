@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.0';
+const APP_VERSION = 'v9.1';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -857,6 +857,56 @@ function go(id){
   renderNorthStar();
 }
 // WS-6: the persistent North-Star bar — score (real 50/50), cash-vs-floor, and the top action, on every page.
+/* The full derivation of the score, on demand. Two numbers on a strip cannot explain
+   themselves; this shows every input, its weight, and what would move it. */
+window.openScoreBreakdown=()=>{
+  const base=S.activeQuarter, sp=scoreProxy(null), g=S.config.goals, f=S.quarters[base].financial, op=S.quarters[base].operational;
+  const P=sp.parts, t=g.scoreTargets||{roe:25,roi:15,ros:10};
+  const pct=v=>(v==null?'—':(v*100).toFixed(0));
+  const row=(label,val,weight,src,detail)=>`<tr>
+    <td style="text-align:start">${label}${detail?`<div class="small muted" style="white-space:normal;max-width:290px;line-height:1.6">${detail}</div>`:''}</td>
+    <td class="num">${val}</td><td class="num">${weight}</td>
+    <td class="small muted" style="text-align:start;white-space:normal;max-width:170px">${src}</td></tr>`;
+  const pt=projectedTechAt(base,null);
+  openModal(`פירוק הציון — ${sp.value.toFixed(0)}/100`,`
+    <div class="small" style="line-height:1.9;margin-bottom:12px">
+      <b>הציון הסופי = ממוצע פשוט של שתי מחציות, פחות קנס.</b><br>
+      <span class="num" style="font-size:15px">(${sp.pastHalf.toFixed(0)} + ${sp.potentialHalf.toFixed(0)}) ÷ 2${sp.breaches?` − ${Math.min(18,sp.breaches*4)}`:''} = <b>${sp.value.toFixed(0)}</b></span><br>
+      כל מחצית היא ציון <b>0–100</b> בפני עצמה. שיפור של נקודה במחצית = חצי נקודה בציון.
+    </div>
+
+    <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid var(--accent)">
+      <div class="between"><b>מחצית 1 · ביצועי עבר — הכסף שכבר עשית</b><span class="sc" style="font-size:20px">${sp.pastHalf.toFixed(0)}<span style="font-size:11px">/100</span></span></div>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>מרכיב</th><th>ערך</th><th>משקל</th><th>מקור</th></tr></thead><tbody>
+        ${row('רווחיות מצטברת', pct(P.profScore)+'/100', '60%', 'רבעונים שנקלטו + MR74',
+          `מורכב מ-<b>70% דירוג מול המתחרים</b> (${P.rank?`אתה ${P.rank} מתוך ${P.rankN}`:'אין נתוני MR74 — נופל לגודל מוחלט בלבד'}) ו-<b>30% גודל מוחלט</b> (רווח מצטבר ${fmt(Math.round(P.cumNet))} SF מול הון פתיחה ${fmt(START_CAPITAL)}). רווח 0 = 50 נקודות.`)}
+        ${row('יעילות', pct(P.effScore)+'/100', '40%', 'דוח רבעוני',
+          `ממוצע שלושת היחסים מול היעד: ROE ${(f.roe||0)}% מול ${t.roe}% · ROI ${(f.roi||0)}% מול ${t.roi}% · ROS ${(f.ros||0)}% מול ${t.ros}%.`)}
+      </tbody></table></div>
+    </div>
+
+    <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid var(--purple)">
+      <div class="between"><b>מחצית 2 · פוטנציאל עתידי — מה שיישא פרי עד Q9</b><span class="sc" style="font-size:20px">${sp.potentialHalf.toFixed(0)}<span style="font-size:11px">/100</span></span></div>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>מרכיב</th><th>ערך</th><th>משקל</th><th>מקור</th></tr></thead><tbody>
+        ${row('דרגה טכנולוגית', pct(P.techScore)+'/100', '45%', 'דוח + יעדים',
+          `ממוצע היחס ליעד: שבב X${pt.techX} מול יעד ${g.techXTarget} · מחשב Y${pt.techY} מול יעד ${g.techYTarget}. <b>המנוף הכי כבד במחצית הזו</b>, ודרגה עולה לכל היותר ב-1 לרבעון — לכן מו״פ מאוחר לא מספיק להבשיל.`)}
+        ${row('נתח שוק', P.share!=null?(P.share*100).toFixed(1)+'%':'— (חסר MR17&28)', '30%', 'MR17 & MR28',
+          P.share!=null?'נתח היחידות שלך מתוך השוק הנצפה.':'<b>בלי מחקר יחידות אין נתח שוק, והמשקל מתחלק בין שאר המרכיבים</b> — כלומר חוסר המידע עצמו מעוות את הציון.')}
+        ${row('בריאות פיננסית', P.health!=null?pct(P.health)+'/100':'—', '25%', 'מאזן',
+          `ממוצע של הון עצמי/סך נכסים ו-1 מינוס חוב/הון עצמי. חוב ${fmt(f.loans||0)} מול הון ${fmt(f.totalEquity||0)}.`)}
+      </tbody></table></div>
+    </div>
+
+    ${sp.breaches?`<div class="tag r" style="display:block;line-height:1.7;white-space:normal;margin-bottom:10px">${IC('warn')} <b>קנס ${Math.min(18,sp.breaches*4)} נקודות</b> על ${sp.breaches} שבירות רצפת מזומן בהקרנה (4 נקודות לשבירה, עד 18). זה יורד מהציון <b>אחרי</b> חישוב הממוצע — הדרך הזולה ביותר להעלות ציון היא פשוט לא לשבור רצפה.</div>`:`<div class="tag g" style="display:block;margin-bottom:10px">${IC('check')} אין קנס — ההקרנה שומרת על רצפת המזומן בכל הרבעונים.</div>`}
+
+    <div class="small muted" style="line-height:1.8">${IC('info')} <b>איזו מחצית להזיז?</b>
+      ${sp.pastHalf<sp.potentialHalf
+        ? `<b style="color:var(--accent2)">העבר (${sp.pastHalf.toFixed(0)}) הוא החלש שלך.</b> הוא מוזז ע״י מכירה ברווחיות — מחיר על מלאי, גבייה, ושליטה בהוצאות. השקעה נוספת במו״פ תשפר מחצית שכבר חזקה (${sp.potentialHalf.toFixed(0)}) ותיתן פחות.`
+        : `<b style="color:var(--purple)">העתיד (${sp.potentialHalf.toFixed(0)}) הוא החלש שלך.</b> הוא מוזז ע״י מו״פ (45%), נתח שוק (30%) ובריאות מאזנית (25%) — ובכולם ההשפעה מושהית, אז ככל שנותרו פחות רבעונים כך פחות מספיק להבשיל.`}
+      <br>שיפור של 10 נקודות במחצית = <b>5 נקודות בציון</b>.</div>`,
+    `<button class="btn" onclick="closeModal();go('goals')">${IC('target')} ערוך יעדים</button>
+     <button class="btn primary" onclick="closeModal();go('plan')">${IC('clipboard')} להחלטות</button>`);
+};
 function renderNorthStar(){
   const box=$('#northstar'); if(!box) return;
   const base=S.activeQuarter, Q=S.quarters[base];
@@ -866,12 +916,15 @@ function renderNorthStar(){
   const alerts=computeAlerts(base);
   const top=alerts.find(a=>a.level==='red')||alerts.find(a=>a.level==='amber')||alerts[0];
   const tlvl=top?(top.level==='red'?'red':(top.level==='amber'?'amber':'ok')):'ok';
-  const half=(v,pot)=>`<div class="ns-h ${pot?'pot':''}"><span>${pot?'עתיד':'עבר'}</span><div class="bar"><i style="width:${Math.max(0,Math.min(100,v)).toFixed(0)}%"></i></div><b class="num" style="width:26px">${v.toFixed(0)}</b></div>`;
+  // The halves used to render as two bare numbers with the labels floating beside them, so
+  // "13" and "81" read as unrelated figures rather than the two 0-100 halves that average
+  // into the score. Each now states its scale and what it is made of.
+  const half=(v,pot)=>`<div class="ns-h ${pot?'pot':''}" title="${pot?'50% פוטנציאל עתידי: דרגה טכנולוגית (45%) · נתח שוק (30%) · בריאות פיננסית (25%)':'50% ביצועי עבר: רווח מצטבר מדורג מול המתחרים (60%) · יעילות ROE/ROI/ROS (40%)'}"><span>${pot?'עתיד':'עבר'}</span><div class="bar"><i style="width:${Math.max(0,Math.min(100,v)).toFixed(0)}%"></i></div><b class="num" style="width:44px">${v.toFixed(0)}<span style="font-size:9px;color:var(--muted2)">/100</span></b></div>`;
   box.innerHTML=`<div class="ns-wrap">
-    <div class="ns-score">
+    <div class="ns-score" style="cursor:pointer" onclick="openScoreBreakdown()" title="לחץ לפירוט מלא של הציון">
       <div class="ns-num">${sp.value.toFixed(0)}<span>/100</span></div>
       <div class="ns-halves">${half(sp.pastHalf,false)}${half(sp.potentialHalf,true)}</div>
-      <div class="ns-lbl">ציון Q9<br>חברה ${OUR_CO} · ${base}</div>
+      <div class="ns-lbl">ציון Q9 · חברה ${OUR_CO}<br><span style="color:var(--accent2)">ממוצע שתי המחציות ⓘ</span></div>
     </div>
     <div class="ns-div"></div>
     <div class="ns-kpi"><span class="k">מזומן מול רצפה</span><b class="num" style="color:${dist>=0?'var(--green)':'var(--red)'}">${dist>=0?'+':''}${fmt(Math.round(dist))} SF</b></div>

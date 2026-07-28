@@ -22,6 +22,9 @@ mocked. Only the AI provider is stubbed (no network), because the app is bring-y
 | `decisions` | The action list covers every decision family (advertising, financing, production, sales, R&D), sending marks the card without navigating away, and the AI review layer returns a full list whose every modification and addition the engine validated — a mandatory action cannot be dropped, nothing is lost by omission, and rejections are shown with the rule they broke. |
 | `player-path` | **Walks the journey a team actually takes**, in order, and asserts each step hands something usable to the next — including mobile. This is the suite that catches what unit tests miss. |
 
+| `sweep-pages` | Broad 42-check sweep: every page at desktop and mobile widths, empty state, backup/restore, ingestion, and the AI settings flow. |
+| `sweep-regression` | Baseline regression: no JavaScript errors and no horizontal overflow anywhere, on a seeded three-quarter position. |
+
 ## Why `player-path` exists
 
 Two real bugs shipped past 108 green unit checks and were found within ten minutes of

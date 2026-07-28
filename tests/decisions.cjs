@@ -139,6 +139,38 @@ ck('you can revert to the engine list', ui.revertBtn);
 await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
 ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
 
+/* ---- score breakdown: two numbers on a strip must be able to explain themselves ---- */
+await page.evaluate(()=>go('dashboard')); await page.waitForTimeout(400);
+const sc=await page.evaluate(()=>{
+  const strip=document.querySelector('.ns-score');
+  const halves=[...document.querySelectorAll('.ns-h')];
+  openScoreBreakdown();
+  const t=document.body.innerText;
+  return { stripClickable:!!(strip&&strip.getAttribute('onclick')),
+    stripSaysItIsAnAverage:/ממוצע שתי המחציות/.test(strip?strip.innerText:''),
+    halvesShowScale:/\/100/.test(halves.map(h=>h.innerText).join(' ')),
+    halvesExplainThemselves:halves.every(h=>h.title&&h.title.length>30),
+    modalShowsArithmetic:/÷ 2/.test(t),
+    modalListsPastInputs:/רווחיות מצטברת/.test(t)&&/יעילות/.test(t),
+    modalListsFutureInputs:/דרגה טכנולוגית/.test(t)&&/נתח שוק/.test(t)&&/בריאות פיננסית/.test(t),
+    modalShowsWeights:/60%/.test(t)&&/40%/.test(t)&&/45%/.test(t)&&/30%/.test(t)&&/25%/.test(t),
+    modalExplainsPenalty:/קנס/.test(t),
+    modalNamesWeakerHalf:/החלש שלך/.test(t),
+    modalQuantifiesLeverage:/חצי נקודה בציון|5 נקודות בציון/.test(t) };
+});
+ck('the score strip is clickable for its derivation', sc.stripClickable);
+ck('the strip states that the score is an average of the halves', sc.stripSaysItIsAnAverage);
+ck('each half shows it is scored out of 100', sc.halvesShowScale);
+ck('each half explains its own composition on hover', sc.halvesExplainThemselves);
+ck('the breakdown shows the actual arithmetic', sc.modalShowsArithmetic);
+ck('it lists every input of the past half', sc.modalListsPastInputs);
+ck('it lists every input of the future half', sc.modalListsFutureInputs);
+ck('it shows the weight of each input', sc.modalShowsWeights);
+ck('it explains the floor-breach penalty', sc.modalExplainsPenalty);
+ck('it names which half is the weaker one to move', sc.modalNamesWeakerHalf);
+ck('it quantifies how much moving a half is worth', sc.modalQuantifiesLeverage);
+await page.evaluate(()=>closeModal());
+
 const jsErr=errors.filter(e=>!/Failed to load resource|net::ERR_/.test(e));
 ck('no JavaScript errors', jsErr.length===0, jsErr.slice(0,2).join(' | '));
 const failed=report('DECISIONS');
