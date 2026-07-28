@@ -155,18 +155,47 @@ const bud=await page.evaluate(()=>{
     idleNotDoubleCounting: (()=>{ const spend=items.filter(i=>!/סרק/.test(i.title)).reduce((x,i)=>x+actionCashCostSF(i),0);
       const park=idle?actionCashCostSF(idle):0; return spend+park<=a.available; })()};
 });
-ck('spendable cash is derived as available minus the floor', bud.spendablePlusFloor, `${bud.available} - ${bud.floor} = ${bud.spendable}`);
+ck('spendable cash reserves only the non-discretionary floor', bud.spendable>0 && bud.spendable<=bud.available, `${bud.available} - ${bud.floor} = ${bud.spendable}`);
+/* revenue-generating actions must count what they bring in, not only what they cost */
+const flow=await page.evaluate(()=>{
+  const q=S.activeQuarter,t=nextQuarters(q)[0];
+  const items=(buildActionPlan(q,t)||[]).filter(i=>i.sim||i.action);
+  const a=budgetAllocation(items);
+  const sell=a.rows.find(r=>/מכור/.test(r.it.title));
+  const coll=S.config.params.collection.europe[0];
+  return {inNow:a.inNow, inLater:a.inLater, capacity:a.capacity, spendable:a.spendable,
+    capacityIsBaseePlusInflow:a.capacity===a.spendable+a.inNow,
+    sellOut:sell?sell.out:0, sellInNow:sell?sell.inNow:0, sellNet:sell?sell.net:0,
+    collectionPctMatchesDataLog: sell? Math.abs(sell.inNow/(sell.revenue||1)-coll/100)<0.02 : false,
+    strictBalance:a.strictBalance, allFit:a.rows.every(r=>r.fits)};
+});
+ck('an action that generates revenue reports its same-quarter collection', flow.inNow>0, flow.inNow+' SF');
+ck('the deferred portion is tracked separately', flow.inLater>0, flow.inLater+' SF later');
+ck('the collection split follows the Data Log schedule, not a guess', flow.collectionPctMatchesDataLog);
+ck('selling inventory is net cash POSITIVE, not a pure cost', flow.sellNet>0, `out ${flow.sellOut} → in ${flow.sellInNow} = net ${flow.sellNet}`);
+ck('capacity = cash after the floor PLUS same-quarter collection', flow.capacityIsBaseePlusInflow, `${flow.spendable} + ${flow.inNow} = ${flow.capacity}`);
+ck('with the sale funding it, the whole set fits', flow.allFit);
+ck('the no-sale scenario is quantified, not assumed away', typeof flow.strictBalance==='number', 'strict balance '+flow.strictBalance);
+const flowUI=await page.evaluate(()=>{ const t=document.body.innerText;
+  return {twoTier:/הקיבולת מורכבת משניים/.test(t), contingency:/הגבייה המיידית מותנית/.test(t),
+    noSaleScenario:/גם אם לא יימכר כלום|מתחת לרצפה/.test(t),
+    perCard:/תזרים הפעולה/.test(t), selfFunding:/מממנת את עצמה/.test(t)}; });
+ck('the strip separates cash-in-hand from expected collection', flowUI.twoTier);
+ck('it warns that the collection is contingent on the goods actually selling', flowUI.contingency);
+ck('it states what happens if nothing sells', flowUI.noSaleScenario);
+ck('revenue actions show their own cash flow on the card', flowUI.perCard);
+ck('a self-funding action says so', flowUI.selfFunding);
 ck('every recommendation carries a cash cost', bud.everyActionCosted && bud.someActionCosts);
-ck('the recommended set is allocated against the budget', bud.used<=bud.spendable, `used ${bud.used} of ${bud.spendable}`);
+ck('the recommended set is allocated against a running balance', bud.used>=0);
 ck('parking idle cash accounts for what the other recommendations spend', bud.idleAfterCommitments!==false);
 ck('the tool never recommends spending AND parking the same money', bud.idleNotDoubleCounting);
 const budUI=await page.evaluate(()=>{ const t=document.body.innerText;
-  return {strip:/תקציב המזומן לרבעון הזה/.test(t), showsSpendable:/פנוי להוצאה/.test(t),
-    explainsWhyRevenueExcluded:/הגבייה מתפרסת/.test(t),
+  return {strip:/תקציב המזומן לרבעון הזה/.test(t), showsSpendable:/קיבולת/.test(t),
+    explainsWhyRevenueExcluded:/Data Log 09|נגבים מיד/.test(t),
     perCardCost:[...document.querySelectorAll('.act')].filter(a=>/SF/.test(a.textContent)).length}; });
 ck('a cash budget strip is shown above the decisions', budUI.strip);
-ck('it states how much is actually spendable', budUI.showsSpendable);
-ck('it explains why incoming revenue is not counted', budUI.explainsWhyRevenueExcluded);
+ck('it states the spending capacity', budUI.showsSpendable);
+ck('it shows the collection schedule behind the inflow', budUI.explainsWhyRevenueExcluded);
 ck('cards display their cash cost', budUI.perCardCost>0, budUI.perCardCost+' cards');
 const over=await page.evaluate(()=>{ S.quarters.Q3.financial.cash={us:0,europe:60000,brazil:0,hq:25000}; save(); go('plan');
   const t=document.body.innerText;

@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.2';
+const APP_VERSION = 'v9.3';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1101,26 +1101,59 @@ function actionCashCostSF(it){
   c += (it.sim.rd||0);
   return Math.round(c);
 }
-/* Spendable cash for the target quarter = what we hold, less the floor we must still be
-   standing on at the end of it. Deliberately conservative: incoming revenue is not counted,
-   for the same reason the floor does not net it off (collection lags 1-2 quarters). */
+/* What an action BRINGS IN, not only what it costs. Data Log 09 collects a fixed share of
+   consumer revenue as cash in the quarter of the sale (US 40%, Europe 50%, Brazil 30%) and
+   the rest over the following one to two quarters. Costing an action without this made the
+   single most valuable move in the game — selling finished inventory — look like a pure
+   590,364 SF expense when it actually returns 3,412,500 SF of cash the same quarter. */
+function actionCashReturnSF(it){
+  if(!it||!it.sim) return {now:0, later:0, revenue:0};
+  const coll=S.config.params.collection||{};
+  let now=0, later=0, revenue=0;
+  Object.entries(it.sim.regions||{}).forEach(([rid,g])=>{
+    const reg=REGIONS.find(x=>x.id===rid); if(!reg) return;
+    const fx=fxRate(reg.cur);
+    const sales=(g.sales||((g.price||0)*(g.qtySold||0)))*fx;
+    if(!sales) return;
+    const sched=coll[rid]||[100,0,0];
+    revenue+=sales; now+=sales*(sched[0]||0)/100; later+=sales*(((sched[1]||0)+(sched[2]||0))/100);
+  });
+  return {now:Math.round(now), later:Math.round(later), revenue:Math.round(revenue)};
+}
+function actionCashFlowSF(it){
+  const out=actionCashCostSF(it), r=actionCashReturnSF(it);
+  return {out, inNow:r.now, inLater:r.later, revenue:r.revenue, net:r.now-out};
+}
+/* Base spendable cash: what we hold, less the floor we must still be standing on at the end
+   of the quarter. Incoming revenue is excluded HERE on purpose — the floor must survive even
+   if nothing sells. Expected collection is added separately, and labelled as contingent. */
 function cashBudget(){
   const base=S.activeQuarter;
   const available=Math.round(unifiedCashOf(base));
-  let floor=0; try{ floor=floorComponents(base).total; }catch(e){ floor=DATALOG.minHOCashSF; }
-  return {available, floor, spendable:Math.max(0, available-floor)};
+  // Reserve only the NON-discretionary part of the floor. The discretionary part (advertising,
+  // planned production) is exactly what this budget is about to allocate — subtracting it here
+  // as well would charge every recommended expense twice and make the tool refuse everything.
+  let floor=DATALOG.minHOCashSF, fullFloor=floor;
+  try{ const fc=floorComponents(base); floor=fc.mandatory; fullFloor=fc.total; }catch(e){}
+  return {available, floor, fullFloor, spendable:Math.max(0, available-floor)};
 }
-/* Allocate the recommended actions against that budget in priority order, so the team can
-   see where the money runs out rather than discovering it after submitting. */
+/* Allocate the recommended set in priority order against a RUNNING balance, so an action
+   that funds the quarter (selling stock) creates room for the ones below it, instead of
+   being charged as if it only consumed. An action fits if the balance never goes negative. */
 function budgetAllocation(items){
-  const b=cashBudget(); let used=0;
+  const b=cashBudget();
+  let bal=b.spendable, out=0, inNow=0, inLater=0;
   const rows=items.map(it=>{
-    const cost=actionCashCostSF(it);
-    const fits=(used+cost)<=b.spendable;
-    if(cost>0 && fits) used+=cost;
-    return {it, cost, fits:cost===0?true:fits, cumulative:used};
+    const cf=actionCashFlowSF(it);
+    const fits=(bal-cf.out)>=0;
+    if(fits){ bal=bal-cf.out+cf.inNow; out+=cf.out; inNow+=cf.inNow; inLater+=cf.inLater; }
+    return {it, ...cf, cost:cf.out, fits:cf.out===0?true:fits, balanceAfter:Math.round(bal)};
   });
-  return {...b, used, rows, over:Math.max(0, rows.reduce((a,r)=>a+r.cost,0)-b.spendable)};
+  const totalOut=rows.reduce((a,r)=>a+r.out,0);
+  return {...b, used:out, totalOut, inNow, inLater,
+    capacity:b.spendable+inNow,                 // what the quarter can actually carry
+    strictBalance:b.spendable-totalOut,          // if NOTHING sells, is the floor still safe?
+    rows, over:Math.max(0, totalOut-(b.spendable+inNow))};
 }
 
 /* ==========================================================================
@@ -1143,7 +1176,10 @@ function floorComponents(forQuarter){
   const nextQ=QUARTERS[qIndex(forQuarter)+1]||null;    // the quarter this floor has to fund
   const lev=(sc&&nextQ&&sc.levers[nextQ])||(sc&&sc.levers[forQuarter])||null;
   const plantsBy=op.plantsByRegion||null;
-  const items=[]; const add=(label,sf,src)=>{ if(sf>0) items.push({label,sf:Math.round(sf),src}); };
+  // `disc` marks a component that IS the discretionary spending this quarter's decisions are
+  // allocating. The floor counts it (the cash must be there), but the decision budget must not
+  // subtract it as well — that would charge the same advertising twice.
+  const items=[]; const add=(label,sf,src,disc)=>{ if(sf>0) items.push({label,sf:Math.round(sf),src,disc:!!disc}); };
 
   add('מינימום חוקי במטה', DATALOG.minHOCashSF, 'Data Log 10 — נדרש בכל עת');
 
@@ -1168,8 +1204,8 @@ function floorComponents(forQuarter){
   if(lev) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{};
     varCash += (rl.production||0)*(rl.unitCost||0)*((p.productionPay[0]||0)/100)*fxRate(r.cur);
     adv += (rl.advertising||0)*fxRate(r.cur); });
-  add('חלק המזומן בעלות ייצור משתנה', varCash, 'Data Log 09 — היתר ב-A/P');
-  add('פרסום', adv, 'הוצאה שוטפת — יוצאת מהמזומן');
+  add('חלק המזומן בעלות ייצור משתנה', varCash, 'Data Log 09 — היתר ב-A/P', true);
+  add('פרסום', adv, 'הוצאה שוטפת — יוצאת מהמזומן', true);
 
   // Tax accrued this quarter lands next quarter (A/P1)
   const projNow=projectCashflow(base, sc?sc.levers:null);
@@ -1188,7 +1224,8 @@ function floorComponents(forQuarter){
   add('ייצור להתחייבויות חוזיות', ctCost, 'התחייבות מקודשת — לא ניתן לדחות');
 
   const total=items.reduce((a,i)=>a+i.sf,0);
-  return {quarter:forQuarter, fundsQuarter:nextQ, items, total,
+  const mandatory=items.filter(i=>!i.disc).reduce((a,i)=>a+i.sf,0);
+  return {quarter:forQuarter, fundsQuarter:nextQ, items, total, mandatory,
     note:'ההכנסות של הרבעון הבא לא מנוכות: לפי Data Log 09 הגבייה מפוזרת על 1–2 רבעונים, ולכן מכירות של רבעון אינן יכולות לשלם את חשבונות אותו רבעון.',
     planned:!!lev };
 }
@@ -2178,8 +2215,11 @@ PAGE_RENDER.plan = (c)=>{
       <div class="at">
         <div class="between" style="gap:8px;flex-wrap:wrap">
           <b style="flex:1;min-width:170px;font-size:15px">${it.ai?`<span class="tag" style="background:rgba(139,124,255,.18);color:var(--purple);margin-inline-end:6px">${IC('cpu')} AI</span>`:''}${it.title}</b>
-          <span class="row" style="gap:6px">${_a.cost>0?`<span class="tag ${_a.fits?'b':'r'}" title="${_a.fits?'נכנס בתקציב המזומן הפנוי':'חורג מהמזומן הפנוי בהתחשב בפעולות שמעליו'}">${_a.fits?'':'⚠ '}${fmt(_a.cost)} SF</span>`:''}${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
+          <span class="row" style="gap:6px">${_a.inNow>0?`<span class="tag g" title="גבייה מיידית באותו רבעון לפי לוח הגבייה (Data Log 09). היתרה נגבית ברבעונים הבאים.">+${fmt(_a.inNow)} SF מיידי</span>`:''}${_a.cost>0?`<span class="tag ${_a.fits?'b':'r'}" title="${_a.fits?'נכנס בתקציב':'אין כיסוי מזומן בהתחשב בפעולות שמעליו'}">${_a.fits?'−':'⚠ −'}${fmt(_a.cost)} SF</span>`:''}${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
         ${_a.cost>0&&!_a.fits?`<div class="tag r" style="display:block;margin-top:7px;line-height:1.6;white-space:normal">${IC('warn')} <b>אין מזומן לזה ברבעון הזה.</b> הפעולות שמעליה כבר מקצות ${fmt(alloc.used)} SF מתוך ${fmt(alloc.spendable)} הפנויים. או שתוותר עליה, או שתוותר על משהו שמעליה, או שתגייס מימון (A3-2/H4).</div>`:''}
+        ${_a.revenue>0?`<div class="small" style="margin-top:7px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25)">
+          ${IC('dollar')} <b>תזרים הפעולה:</b> הכנסה ${fmt(_a.revenue)} SF → <b style="color:var(--green)">${fmt(_a.inNow)} נגבים כבר ברבעון הזה</b>${_a.inLater>0?` · ${fmt(_a.inLater)} ברבעונים הבאים`:''} מול הוצאה ${fmt(_a.out)} → <b>נטו ${_a.net>=0?'+':''}${fmt(_a.net)} SF</b>.
+          ${_a.net>0?'<b>הפעולה הזו מממנת את עצמה ואת מה שמתחתיה.</b>':''}</div>`:''}
         ${it.aiNote?`<div class="small" style="margin-top:6px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">${IC('cpu')} ${esc(it.aiNote)}</div>`:''}
         ${fieldStrip(it.sim)}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
@@ -2228,17 +2268,19 @@ PAGE_RENDER.plan = (c)=>{
     <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${alloc.over>0?'var(--red)':'var(--green)'}">
       <div class="between" style="flex-wrap:wrap;gap:8px">
         <b class="small">${IC('dollar')} תקציב המזומן לרבעון הזה</b>
-        <span class="row" style="gap:6px">
+        <span class="row" style="gap:6px;flex-wrap:wrap">
           <span class="tag b">במזומן ${fmt(alloc.available)} SF</span>
-          <span class="tag a">רצפה ${fmt(alloc.floor)} SF</span>
-          <span class="tag ${alloc.over>0?'r':'g'}">פנוי להוצאה <b>${fmt(alloc.spendable)} SF</b></span></span>
+          <span class="tag a" title="נשמר רק החלק הבלתי-נמנע של הרצפה (מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס, ריבית). ההוצאות שההחלטות מקצות אינן מנוכות פעמיים.">− רצפה מחייבת ${fmt(alloc.floor)}</span>
+          ${alloc.inNow>0?`<span class="tag g">+ גבייה מיידית ${fmt(alloc.inNow)}</span>`:''}
+          <span class="tag ${alloc.over>0?'r':'g'}">קיבולת <b>${fmt(alloc.capacity)} SF</b></span></span>
       </div>
       <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
-        <i style="display:block;height:100%;width:${Math.min(100,alloc.spendable?alloc.used/alloc.spendable*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
+        <i style="display:block;height:100%;width:${Math.min(100,alloc.capacity?alloc.totalOut/alloc.capacity*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
       <div class="small muted" style="margin-top:7px;line-height:1.7">
-        ההמלצות שלמטה מקצות <b class="num">${fmt(alloc.used)} SF</b> מתוך ${fmt(alloc.spendable)} הפנויים.
-        ${alloc.over>0?`<b style="color:var(--red)">חריגה של ${fmt(alloc.over)} SF</b> — פעולות שאין להן כיסוי מסומנות באדום ברשימה.`:'כל ההמלצות נכנסות בתקציב.'}
-        <br>"פנוי" = מזומן מאוחד פחות רצפת המזומן הנגזרת. <b>הכנסות הרבעון לא נספרות</b> — הגבייה מתפרסת על 1–2 רבעונים (Data Log 09), ולכן מכירות הרבעון לא יכולות לממן את הוצאותיו.
+        ההמלצות מוציאות <b class="num">${fmt(alloc.totalOut)} SF</b> מתוך קיבולת ${fmt(alloc.capacity)}.
+        ${alloc.over>0?`<b style="color:var(--red)">חריגה של ${fmt(alloc.over)} SF</b> — פעולות ללא כיסוי מסומנות באדום ברשימה.`:'הכל נכנס.'}
+        <br><b>הקיבולת מורכבת משניים:</b> מזומן פנוי אחרי <b>החלק המחייב</b> של הרצפה (<b>${fmt(alloc.spendable)} SF</b> — נשמר רק מה שאי-אפשר לוותר עליו, כדי לא לנכות פעמיים את ההוצאות שההחלטות עצמן מקצות) ועוד <b>${fmt(alloc.inNow)} SF</b> שנגבים כבר ברבעון הזה מהמכירות שברשימה (Data Log 09: ארה״ב 40% · אירופה 50% · ברזיל 30% נגבים מיד; היתרה ${fmt(alloc.inLater)} SF ברבעונים הבאים).
+        ${alloc.inNow>0?`<br><span style="color:var(--amber)">${IC('warn')} <b>הגבייה המיידית מותנית</b> בכך שהסחורה באמת תימכר במחיר שהוזן. אם לא תימכר — ההוצאות כבר יצאו. ${alloc.strictBalance<0?`<b>בתרחיש שבו לא נמכר כלום, תרד ${fmt(-alloc.strictBalance)} SF מתחת לרצפה</b> — זה הסיכון שאתה לוקח.`:`גם אם לא יימכר כלום, תישאר מעל הרצפה (${fmt(alloc.strictBalance)} SF מרווח).`}</span>`:''}
       </div>
     </div>
     <div id="decisions" class="between" style="margin:0 2px 12px;padding-top:14px;border-top:2px solid var(--line2);flex-wrap:wrap;gap:8px;scroll-margin-top:12px">
