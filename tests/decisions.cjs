@@ -139,6 +139,77 @@ ck('you can revert to the engine list', ui.revertBtn);
 await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
 ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
 
+/* ---- CASH BUDGET: recommendations must be measured against money that exists ---- */
+const bud=await page.evaluate(()=>{
+  S.quarters.Q3.financial.cash={us:120000,europe:640000,brazil:95000,hq:213000};
+  S.quarters.Q3.financial.loans=1136879; save(); go('plan');
+  const q=S.activeQuarter,t=nextQuarters(q)[0];
+  const items=(buildActionPlan(q,t)||[]).filter(i=>i.sim||i.action);
+  const a=budgetAllocation(items);
+  const idle=(buildActionPlan(q,t)||[]).find(x=>/סרק/.test(x.title));
+  return {available:a.available, floor:a.floor, spendable:a.spendable, used:a.used, over:a.over,
+    spendablePlusFloor:a.spendable+a.floor===a.available,
+    everyActionCosted:a.rows.every(r=>typeof r.cost==='number'),
+    someActionCosts:a.rows.some(r=>r.cost>0),
+    idleAfterCommitments: idle? /אחרי<\/b> כל מה שההמלצות|ואחרי/.test(idle.detail) : null,
+    idleNotDoubleCounting: (()=>{ const spend=items.filter(i=>!/סרק/.test(i.title)).reduce((x,i)=>x+actionCashCostSF(i),0);
+      const park=idle?actionCashCostSF(idle):0; return spend+park<=a.available; })()};
+});
+ck('spendable cash is derived as available minus the floor', bud.spendablePlusFloor, `${bud.available} - ${bud.floor} = ${bud.spendable}`);
+ck('every recommendation carries a cash cost', bud.everyActionCosted && bud.someActionCosts);
+ck('the recommended set is allocated against the budget', bud.used<=bud.spendable, `used ${bud.used} of ${bud.spendable}`);
+ck('parking idle cash accounts for what the other recommendations spend', bud.idleAfterCommitments!==false);
+ck('the tool never recommends spending AND parking the same money', bud.idleNotDoubleCounting);
+const budUI=await page.evaluate(()=>{ const t=document.body.innerText;
+  return {strip:/תקציב המזומן לרבעון הזה/.test(t), showsSpendable:/פנוי להוצאה/.test(t),
+    explainsWhyRevenueExcluded:/הגבייה מתפרסת/.test(t),
+    perCardCost:[...document.querySelectorAll('.act')].filter(a=>/SF/.test(a.textContent)).length}; });
+ck('a cash budget strip is shown above the decisions', budUI.strip);
+ck('it states how much is actually spendable', budUI.showsSpendable);
+ck('it explains why incoming revenue is not counted', budUI.explainsWhyRevenueExcluded);
+ck('cards display their cash cost', budUI.perCardCost>0, budUI.perCardCost+' cards');
+const over=await page.evaluate(()=>{ S.quarters.Q3.financial.cash={us:0,europe:60000,brazil:0,hq:25000}; save(); go('plan');
+  const t=document.body.innerText;
+  return {overWarning:/חריגה של/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(t)}; });
+ck('an over-budget set is flagged', over.overWarning);
+ck('actions with no cash cover are marked individually', over.unaffordableMarked);
+
+/* ---- MARKET RESEARCH: three arrive free, three may be bought ---- */
+const mr=await page.evaluate(()=>{
+  S.quarters.Q3.financial.cash={us:120000,europe:640000,brazil:95000,hq:213000};
+  S.quarters.Q3.marketIntel={competitors:{},sales:[],sources:[],generic:[],compPrices:[]};
+  updateLearning(); save();
+  const q=S.activeQuarter,t=nextQuarters(q)[0];
+  const items=buildActionPlan(q,t)||[];
+  const buyCard=items.find(i=>/^קנה מחקרי שוק/.test(i.title||''));
+  const missCard=items.find(i=>/חינמיים חסרים/.test(i.title||''));
+  return { freeTrio:MR_FREE.join(','),
+    catalogFree:MR_STUDIES.filter(m=>m.free).map(m=>m.code).join(','),
+    buyTitle:buyCard?buyCard.title:'(none)',
+    buyCardNeverListsAFreeStudy: buyCard? !MR_FREE.some(f=>buyCard.title.includes(f)) : true,
+    missingFreeIsAnIngestionCard: !!missCard && /לא H1-2/.test(missCard.form||''),
+    missingFreeSaysDoNotBuy: !!missCard && /אל תקנה/.test(missCard.title||''),
+    slots:mrPaidSlots(t) };
+});
+ck('the free trio is 3 / 17 / 28 per the guide', mr.freeTrio==='MR3,MR17,MR28');
+ck('the catalog marks exactly those three as free', mr.catalogFree==='MR3,MR17,MR28');
+ck('the BUY card never lists a free study', mr.buyCardNeverListsAFreeStudy, mr.buyTitle);
+ck('a missing free study is treated as an ingestion problem, not a purchase', mr.missingFreeIsAnIngestionCard);
+ck('and it says explicitly not to buy it', mr.missingFreeSaysDoNotBuy);
+ck('paid slots are capped at three', mr.slots.max===3);
+const cat=await page.evaluate(()=>{ openMRCatalog(); const t=document.body.innerText;
+  return {opened:/קטלוג מחקרי השוק/.test(t), quotesTheGuide:/3, 17 ו-28/.test(t),
+    warnsNotToOrderFree:/אל תזמין אותם/.test(t), showsRemainingSlots:/מקומות פנויים/.test(t),
+    flagsItem29Ambiguity:/פריט 29/.test(t), explainsEstimateItems:/אומדן/.test(t),
+    listsEveryStudy:document.querySelectorAll('table tbody tr').length}; });
+ck('the catalog opens with every study numbered', cat.opened && cat.listsEveryStudy>=27, cat.listsEveryStudy+' rows');
+ck('it quotes the guide on which three are free', cat.quotesTheGuide);
+ck('it warns not to spend a paid slot on a free study', cat.warnsNotToOrderFree);
+ck('it shows how many paid slots remain', cat.showsRemainingSlots);
+ck('it flags the item-29 ambiguity between the two guide sections', cat.flagsItem29Ambiguity);
+ck('it explains the probabilistic "estimate" items', cat.explainsEstimateItems);
+await page.evaluate(()=>closeModal());
+
 /* ---- score breakdown: two numbers on a strip must be able to explain themselves ---- */
 await page.evaluate(()=>go('dashboard')); await page.waitForTimeout(400);
 const sc=await page.evaluate(()=>{

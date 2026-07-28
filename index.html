@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.1';
+const APP_VERSION = 'v9.2';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1074,6 +1074,56 @@ window.setPlantSplit=(rid,product,val)=>{
 };
 
 /* ==========================================================================
+   CASH BUDGET — what the recommendations are allowed to cost.
+   The action list used to be built without ever asking whether the company can pay
+   for it. Measured on a realistic Q3 position: available 1,340,500 SF, derived floor
+   555,632, and the recommended set totalled 1,868,048 — more than the cash that
+   exists. Worse, the idle-cash action offered to park 682,184 in securities while the
+   same list was spending 445,500 on advertising: the tool was recommending that the
+   same money be both spent and deposited.
+
+   Every action now carries its cash cost, the set is allocated against a real budget in
+   priority order, and anything that does not fit is marked instead of silently offered.
+   ========================================================================== */
+function actionCashCostSF(it){
+  if(!it||!it.sim) return 0;
+  const p=S.config.params; let c=0;
+  Object.entries(it.sim.regions||{}).forEach(([rid,g])=>{
+    const reg=REGIONS.find(x=>x.id===rid); if(!reg) return;
+    const fx=fxRate(reg.cur);
+    // only the cash share of production is paid now; the rest sits in A/P (Data Log 09)
+    c += ((g.production||0)*(g.unitCost||0))*((p.productionPay&&p.productionPay[0]||100)/100)*fx;
+    c += (g.advertising||0)*fx;
+    c += (g.invest||0)*fx;
+    c += (g.newFac||0)*(p.factoryCost||0);
+    c += (g.offices||0)*(p.officeCost||0);
+  });
+  c += (it.sim.rd||0);
+  return Math.round(c);
+}
+/* Spendable cash for the target quarter = what we hold, less the floor we must still be
+   standing on at the end of it. Deliberately conservative: incoming revenue is not counted,
+   for the same reason the floor does not net it off (collection lags 1-2 quarters). */
+function cashBudget(){
+  const base=S.activeQuarter;
+  const available=Math.round(unifiedCashOf(base));
+  let floor=0; try{ floor=floorComponents(base).total; }catch(e){ floor=DATALOG.minHOCashSF; }
+  return {available, floor, spendable:Math.max(0, available-floor)};
+}
+/* Allocate the recommended actions against that budget in priority order, so the team can
+   see where the money runs out rather than discovering it after submitting. */
+function budgetAllocation(items){
+  const b=cashBudget(); let used=0;
+  const rows=items.map(it=>{
+    const cost=actionCashCostSF(it);
+    const fits=(used+cost)<=b.spendable;
+    if(cost>0 && fits) used+=cost;
+    return {it, cost, fits:cost===0?true:fits, cumulative:used};
+  });
+  return {...b, used, rows, over:Math.max(0, rows.reduce((a,r)=>a+r.cost,0)-b.spendable)};
+}
+
+/* ==========================================================================
    CASH FLOOR — derived, not guessed.
    The floor used to be a blank field defaulting to 0, with an unsourced 250,000
    fallback. A floor that means something answers one question: how much cash must
@@ -1364,15 +1414,30 @@ function detectTrends(entered){
   if(Math.abs(dShare)>0.02) out.push({type:'ourshare',msg:`נתח השוק שלנו ${dShare>0?'עלה':'ירד'} ב-${(Math.abs(dShare)*100).toFixed(1)} נק׳ מהרבעון הקודם`});
   return out;
 }
+/* MR3, MR17 and MR28 arrive free and automatically every quarter in standard runs
+   (Guide §VI), which is exactly why only THREE paid slots exist. Recommending their
+   purchase burns a slot on data you already have — so a gap in one of them is never a
+   buying decision, it is an ingestion problem. */
+const MR_FREE=['MR3','MR17','MR28'];
 function infoGaps(entered){
   const gaps=[]; const last=entered[entered.length-1]; const mi=last?S.quarters[last].marketIntel||{}:{};
-  if(!(mi.sales||[]).length){
-    if((mi.compPrices||[]).length) gaps.push({mr:'MR17 (יחידות)', why:'יש מחירי מתחרים (עוגן מכויל) אך חסרות יחידות — לכיול גודל שוק ונתח דרוש MR17'});
-    else gaps.push({mr:'MR17 & MR28', why:'אין נתוני יחידות/מחירים מתחרים — קריטי לכיול הביקוש ולנתח שוק'});
-  }
-  if(!Object.keys(mi.competitors||{}).length) gaps.push({mr:'MR74', why:'אין מאזן/רו״ה מתחרים — נדרש לדירוג ולזיהוי מגמות'});
-  if((S.learning.elast.priceObs||0)===0) gaps.push({mr:'מחקר מחירי מתחרים', why:'אין תצפיות מחיר להערכת גמישות — הביקוש עדיין על פריורים, לא מכויל'});
+  if(!(mi.sales||[]).length)
+    gaps.push({mr:'MR17', free:true, why:'MR17 מגיע <b>חינם ואוטומטית</b> בכל רבעון — אם הנתונים חסרים, הדוח לא נקלט או לא נפרס. אל תקנה אותו: קלוט מחדש את הדוח (לשונית 1).'});
+  if(!(mi.compPrices||[]).length)
+    gaps.push({mr:'MR28', free:true, why:'MR28 (מחירי צרכן) מגיע <b>חינם ואוטומטית</b> — חוסר בו הוא כשל קליטה, לא החלטת רכש.'});
+  if(!Object.keys(mi.competitors||{}).length)
+    gaps.push({mr:'MR74', why:'אין מאזן/רו״ה מתחרים — נדרש לדירוג מול המתחרים (60% ממחצית העבר) ולזיהוי מגמות. <b>זה מחקר בתשלום ושווה את הסלוט.</b>'});
+  if((S.learning.elast.priceObs||0)===0 && (mi.compPrices||[]).length)
+    gaps.push({mr:'MR2', why:'יש מחירים אך אין מספיק תצפיות לכיול גמישות — MR2 (מכירות + נתחי שוק לפי חברה) מוסיף את ממד היחידות שדרוש לכיול.'});
   return gaps;
+}
+/* How many PAID slots are still free this quarter, given what the plan already orders. */
+function mrPaidSlots(targetQ){
+  const sc=S.scenarios[0]; const max=3;
+  let ordered=[];
+  if(sc&&sc.levers[targetQ]) (sc.levers[targetQ].actions||[]).forEach(a=>{ if(Array.isArray(a.mrList)) ordered=ordered.concat(a.mrList); });
+  const paid=[...new Set(ordered)].filter(c=>!MR_FREE.includes(c));
+  return {max, used:paid.length, left:Math.max(0,max-paid.length), ordered:paid};
 }
 function predictDemand(region,product,opt){
   const L=S.learning, k=_lkey(region,product), a=L.anchors[k], size=L.market[k];
@@ -2090,12 +2155,16 @@ PAGE_RENDER.plan = (c)=>{
   // padding the numbered list and diluting it; they now sit with the situation, above.
   const decisionIdx=[], insightIdx=[];
   items.forEach((it,i)=>{ ((it.sim||it.action)?decisionIdx:insightIdx).push(i); });
+  // Allocate the recommended set against real spendable cash, in the order shown.
+  const alloc=budgetAllocation(decisionIdx.map(i=>items[i]));
+  const allocOf=new Map(); alloc.rows.forEach((r,k)=>allocOf.set(decisionIdx[k],r));
   const insightList = insightIdx.map(i=>{ const it=items[i]; const bd=badge(it.level);
     return `<div class="row" style="gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line)">
       <span class="tag ${bd.c}" style="flex:0 0 auto">${bd.t}</span>
       <div style="flex:1"><b class="small">${it.title}</b>${it.detail?`<details class="fverd"><summary class="small">הרחבה ⌄</summary><div class="small muted" style="line-height:1.75;padding:6px 2px 2px">${it.detail}</div></details>`:''}</div></div>`; }).join('');
   const actionList = decisionIdx.map((i,pos)=>{ const it=items[i]; const bd=badge(it.level); const blk=it.blocked;
     const _k=sentKeyFor(it), sent=isSent(targetQ,_k);
+    const _a=allocOf.get(i)||{cost:0,fits:true};
     const hasOpts = !!(it.options && it.options.length);
     const optDrill = hasOpts ? `<details class="fverd" id="opt${i}" style="margin-top:8px"><summary>${IC('sliders')} ${it.options.length} אופציות אחרות ⌄</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>אופציה</th>${it.optionCols.map(cc=>`<th>${cc}</th>`).join('')}<th></th></tr></thead>
@@ -2109,7 +2178,8 @@ PAGE_RENDER.plan = (c)=>{
       <div class="at">
         <div class="between" style="gap:8px;flex-wrap:wrap">
           <b style="flex:1;min-width:170px;font-size:15px">${it.ai?`<span class="tag" style="background:rgba(139,124,255,.18);color:var(--purple);margin-inline-end:6px">${IC('cpu')} AI</span>`:''}${it.title}</b>
-          <span class="row" style="gap:6px">${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
+          <span class="row" style="gap:6px">${_a.cost>0?`<span class="tag ${_a.fits?'b':'r'}" title="${_a.fits?'נכנס בתקציב המזומן הפנוי':'חורג מהמזומן הפנוי בהתחשב בפעולות שמעליו'}">${_a.fits?'':'⚠ '}${fmt(_a.cost)} SF</span>`:''}${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
+        ${_a.cost>0&&!_a.fits?`<div class="tag r" style="display:block;margin-top:7px;line-height:1.6;white-space:normal">${IC('warn')} <b>אין מזומן לזה ברבעון הזה.</b> הפעולות שמעליה כבר מקצות ${fmt(alloc.used)} SF מתוך ${fmt(alloc.spendable)} הפנויים. או שתוותר עליה, או שתוותר על משהו שמעליה, או שתגייס מימון (A3-2/H4).</div>`:''}
         ${it.aiNote?`<div class="small" style="margin-top:6px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">${IC('cpu')} ${esc(it.aiNote)}</div>`:''}
         ${fieldStrip(it.sim)}
         ${blk?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.6">⛔ ${blk}</div>`:''}
@@ -2155,6 +2225,22 @@ PAGE_RENDER.plan = (c)=>{
       <div class="secbody">${renderAdvisorCard(q,targetQ)}</div></details>
 
     <!-- ===== PART 2 · THE DECISIONS. Nothing above this line repeats below it. ===== -->
+    <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${alloc.over>0?'var(--red)':'var(--green)'}">
+      <div class="between" style="flex-wrap:wrap;gap:8px">
+        <b class="small">${IC('dollar')} תקציב המזומן לרבעון הזה</b>
+        <span class="row" style="gap:6px">
+          <span class="tag b">במזומן ${fmt(alloc.available)} SF</span>
+          <span class="tag a">רצפה ${fmt(alloc.floor)} SF</span>
+          <span class="tag ${alloc.over>0?'r':'g'}">פנוי להוצאה <b>${fmt(alloc.spendable)} SF</b></span></span>
+      </div>
+      <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
+        <i style="display:block;height:100%;width:${Math.min(100,alloc.spendable?alloc.used/alloc.spendable*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
+      <div class="small muted" style="margin-top:7px;line-height:1.7">
+        ההמלצות שלמטה מקצות <b class="num">${fmt(alloc.used)} SF</b> מתוך ${fmt(alloc.spendable)} הפנויים.
+        ${alloc.over>0?`<b style="color:var(--red)">חריגה של ${fmt(alloc.over)} SF</b> — פעולות שאין להן כיסוי מסומנות באדום ברשימה.`:'כל ההמלצות נכנסות בתקציב.'}
+        <br>"פנוי" = מזומן מאוחד פחות רצפת המזומן הנגזרת. <b>הכנסות הרבעון לא נספרות</b> — הגבייה מתפרסת על 1–2 רבעונים (Data Log 09), ולכן מכירות הרבעון לא יכולות לממן את הוצאותיו.
+      </div>
+    </div>
     <div id="decisions" class="between" style="margin:0 2px 12px;padding-top:14px;border-top:2px solid var(--line2);flex-wrap:wrap;gap:8px;scroll-margin-top:12px">
       <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
       <span class="row" style="gap:6px">${sentCount?`<span class="tag g">✓ ${sentCount}/${decisionCount} הועברו</span>`:''}${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
@@ -2575,10 +2661,29 @@ function buildActionPlan(q,targetQ){
   }
   // Market research to buy (H1-2) — close the most expensive information gap
   const gaps=(S.learning&&S.learning.gaps)||[];
-  if(gaps.length) out.push({cat:'strat',level:'info',conf:'data',title:`קנה מחקרי שוק ב-${targetQ}: ${gaps.map(x=>x.mr).join(' + ')}`,form:'H1-2 (Market Research — עד 3 בתשלום לרבעון)',
-    detail:gaps.map(x=>`<b>${x.mr}</b> — ${x.why}`).join('<br>'),
-    dep:`תוצאות המחקר הן קלט חובה להמלצות הרבעון הבא — בלעדיהן מנוע הביקוש נשאר לא מכויל.`,
-    sim:{q:targetQ,actions:[{form:'H1-2',note:gaps.map(x=>x.mr).join(', ')}]}});
+  // Separate the two completely different problems: a missing FREE study is an ingestion
+  // failure, and a missing PAID study is a purchasing decision against only three slots.
+  const gapsFree=gaps.filter(x=>x.free), gapsPaid=gaps.filter(x=>!x.free);
+  const slots=mrPaidSlots(targetQ);
+  if(gapsFree.length) out.push({cat:'strat',level:'amber',conf:'rule',
+    title:`נתוני מחקר חינמיים חסרים — ${gapsFree.map(x=>x.mr).join(', ')} (אל תקנה!)`,
+    form:'קליטה מחדש של הדוח — לא H1-2',
+    detail:`<b>MR3, MR17 ו-MR28 מגיעים חינם ואוטומטית בכל רבעון</b> (מדריך §VI) — בדיוק בגלל זה יש רק <b>3 מקומות בתשלום</b>. `
+      +`אם הם חסרים אצלך, זו תקלת קליטה ולא החלטת רכש:<br>`
+      +gapsFree.map(x=>`<b>${x.mr}</b> — ${x.why}`).join('<br>')
+      +`<br><b>קניית מחקר חינמי שורפת מקום בתשלום על מידע שכבר יש לך.</b>`,
+    dep:'הדוח הרבעוני מכיל אותם ⟵ קליטה בלשונית 1 ⟵ מנוע הביקוש מתכייל.',
+    action:"go('ingest')", actionLabel:'לקליטה מחדש'});
+  if(gapsPaid.length) out.push({cat:'strat',level:'info',conf:'data',
+    title:`קנה מחקרי שוק ב-${targetQ}: ${gapsPaid.slice(0,slots.left||3).map(x=>x.mr).join(' + ')}`,
+    form:`H1-2 (Market Research) — ${slots.left} מתוך ${slots.max} מקומות בתשלום פנויים`,
+    detail:`<b>3 מחקרים מגיעים חינם ואוטומטית</b> (MR3 מכירות תעשייה · MR17 דרגות שנמכרו · MR28 מחירי צרכן), ומעליהם מותר להזמין <b>עד 3 בתשלום לרבעון</b>. `
+      +`אלה המשתלמים ביותר במצב הנוכחי:<br>`
+      +gapsPaid.map(x=>`<b>${x.mr}</b> — ${x.why}`).join('<br>')
+      +(slots.used?`<br><span class="small muted">כבר הוזמנו בתוכנית: ${slots.ordered.join(', ')}</span>`:''),
+    dep:`תוצאות המחקר הן קלט להמלצות הרבעון הבא — בלעדיהן מנוע הביקוש נשאר לא מכויל.`,
+    action:"openMRCatalog()", actionLabel:'הקטלוג המלא',
+    sim:{q:targetQ,actions:[{form:'H1-2',note:gapsPaid.slice(0,slots.left||3).map(x=>x.mr).join(', ')}]}});
   // Sales offices (A1-3) — needed where we plan to sell
   const pcsNow=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
   if(pcsNow>0 && (op.offices||0)===0){
@@ -2691,16 +2796,22 @@ function buildActionPlan(q,targetQ){
   // (about 19% annualised). Only offers what is genuinely spare after the derived floor.
   (()=>{
     const floorNext=(function(){ try{ return floorComponents(q).total; }catch(e){ return 0; } })();
+    // Cash is only idle after the floor AND after everything already recommended above will
+    // consume. Without this the tool offered to deposit money it had just told you to spend.
+    const committed=out.reduce((a,it)=>a+actionCashCostSF(it),0);
+    const reserved=floorNext+committed;
+    const totalCash=REGIONS.reduce((a,r)=>a+((f.cash[r.id]||0)*fxRate(r.cur)),0);
+    if(totalCash<=reserved) return;                              // nothing genuinely spare
+    const spareFrac=Math.max(0,(totalCash-reserved)/Math.max(1,totalCash));
     const rows=[];
     REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
       const cash=f.cash[r.id]||0; if(cash<=0) return;
       const rate=(DATALOG.interest.govSecurities[r.id]||0);
-      const share=floorNext/3;                                  // rough per-region share of the floor
-      const idle=Math.round(cash-share);
+      const idle=Math.round(cash*spareFrac);                     // only this region's share of the true surplus
       if(idle<50000||rate<=0) return;
       rows.push({r,idle,rate,gain:Math.round(idle*rate/100)});
     });
-    const hq=f.cash.hq||0, hqIdle=Math.round(hq-DATALOG.minHOCashSF*5);
+    const hq=f.cash.hq||0, hqIdle=Math.round(hq*spareFrac-DATALOG.minHOCashSF);
     const hqRate=DATALOG.interest.hoSecurities.sf||0;
     if(!rows.length && hqIdle<50000) return;
     const totalGain=rows.reduce((a,x)=>a+x.gain,0)+(hqIdle>=50000?Math.round(hqIdle*hqRate/100):0);
@@ -2712,7 +2823,7 @@ function buildActionPlan(q,targetQ){
         +`ארה״ב ${DATALOG.interest.govSecurities.us}% · אירופה ${DATALOG.interest.govSecurities.europe}% · <b>ברזיל ${DATALOG.interest.govSecurities.brazil}%</b> · מטה ${hqRate}%.<br>`
         +(rows.length?rows.map(x=>`<b>${x.r.name}</b>: פנוי ~${fmt(x.idle)} ${x.r.cur} → ${x.rate}% = <b>${fmt(x.gain)} ${x.r.cur}/רבעון</b>`).join(' · ')+'<br>':'')
         +(hqIdle>=50000?`<b>מטה</b>: פנוי ~${fmt(hqIdle)} SF → ${hqRate}% = <b>${fmt(Math.round(hqIdle*hqRate/100))} SF/רבעון</b><br>`:'')
-        +`<b>שים לב:</b> החידוש דורש החלטה מפורשת בכל רבעון (Data Log 07), והסכום חושב <b>אחרי</b> רצפת המזומן הנגזרת — אל תפקיד כסף שתצטרך.`,
+        +`<b>שים לב:</b> החידוש דורש החלטה מפורשת בכל רבעון (Data Log 07). הסכום חושב <b>אחרי</b> רצפת המזומן הנגזרת (${fmt(Math.round(floorNext))} SF) <b>ואחרי</b> כל מה שההמלצות שמעליו כבר מוציאות (${fmt(Math.round(committed))} SF) — זהו העודף האמיתי בלבד.`,
       dep:'רצפת מזומן מכוסה ⟵ עודף אמיתי ⟵ הפקדה. חידוש נדרש כל רבעון מחדש.',
       sim: rows.length?{q:targetQ,regions:Object.fromEntries(rows.map(x=>[x.r.id,{invest:x.idle}]))}:null});
   })();
@@ -3669,7 +3780,7 @@ const MR_STUDIES=[
   {code:'MR80',short:'עסקאות B2B', grp:'מודיעין מתחרים', label:'עסקאות מכירה בין-חברתיות פרטניות (מוכר/קונה/דרגה)'},
   {code:'MR81',short:'ארגון-מכר', grp:'מודיעין מתחרים', label:'תוכנית ארגון-מכירות אופטימלי (אם זמין)'},
   // מו״פ ודרגות
-  {code:'MR29',short:'דרגות מלאי', grp:'מו״פ ודרגות', free:true, label:'דרגות מלאי סגירה רבעון קודם — חברה/מוצר/דגם/אזור'},
+  {code:'MR29',short:'דרגות מלאי', grp:'מו״פ ודרגות', maybeFree:true, label:'דרגות מלאי סגירה רבעון קודם — חברה/מוצר/דגם/אזור'},
   {code:'MR30',short:'דרגות הבא', grp:'מו״פ ודרגות', label:'דרגות שיוצרו לרבעון הבא לפי חברה'},
   {code:'MR14',short:'מו״פ תעשייה', grp:'מו״פ ודרגות', label:'הוצאת מו״פ תעשייתית כוללת (ממוצע 3 רבעונים)'},
   {code:'MR21',short:'סיכוי פטנט', grp:'מו״פ ודרגות', label:'הערכת הסתברות פטנט (טווח)'},
@@ -3683,6 +3794,37 @@ const MR_STUDIES=[
   {code:'MR26',short:'ROI משרד', grp:'פיננסי וסביבה', label:'% עלייה מקסימלי במכירות ממשרד מכירות נוסף'},
   {code:'MR27',short:'רו״ח כ-%', grp:'פיננסי וסביבה', label:'סעיפי דו״ח רו״ח שלך כאחוז מהמכירות'},
 ];
+/* The catalog, stated plainly: which three arrive free, how many you may buy, and what
+   each number actually gives you. */
+window.openMRCatalog=()=>{
+  const targetQ=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const slots=mrPaidSlots(targetQ);
+  const gaps=(S.learning&&S.learning.gaps)||[];
+  const wanted=new Set(gaps.filter(g=>!g.free).map(g=>g.mr));
+  const rowsOf=(list)=>list.map(m=>`<tr${wanted.has(m.code)?' style="background:rgba(52,211,153,.08)"':''}>
+    <td class="num"><b>${m.code.replace('MR','')}</b></td>
+    <td style="text-align:start"><b>${esc(m.short)}</b>${wanted.has(m.code)?' <span class="tag g">מומלץ עכשיו</span>':''}${slots.ordered.includes(m.code)?' <span class="tag b">כבר הוזמן</span>':''}</td>
+    <td style="text-align:start;white-space:normal;line-height:1.6">${esc(m.label)}</td>
+    <td>${m.free?'<span class="tag g">חינם</span>':(m.maybeFree?'<span class="tag a">חינם בחלק מהריצות</span>':'<span class="tag b">בתשלום</span>')}</td></tr>`).join('');
+  const free=MR_STUDIES.filter(m=>m.free), paid=MR_STUDIES.filter(m=>!m.free);
+  openModal('קטלוג מחקרי השוק — H1-2',`
+    <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid var(--green)">
+      <b>${IC('check')} 3 מחקרים שמתקבלים חינם ואוטומטית בכל רבעון</b>
+      <div class="small muted" style="margin:6px 0 0;line-height:1.75">לפי המדריך (§VI): <b>"בריצות סטנדרטיות פריטים 3, 17 ו-28 חינמיים בכל רבעון והחברות מקבלות אותם אוטומטית. זה מאפשר להזמין שלושה פריטי MR נוספים."</b>
+      <br><b>אל תזמין אותם ב-H1-2</b> — זה שורף מקום בתשלום על מידע שכבר קיבלת. אם הם חסרים במסך, זו תקלת קליטה של הדוח.</div>
+      <div style="overflow-x:auto;margin-top:9px"><table class="tbl"><thead><tr><th>#</th><th>שם</th><th>מה זה נותן</th><th></th></tr></thead><tbody>${rowsOf(free)}</tbody></table></div>
+    </div>
+    <div class="between" style="margin:0 2px 8px;flex-wrap:wrap;gap:8px">
+      <b>${IC('search')} הקטלוג בתשלום — עד ${slots.max} לרבעון</b>
+      <span class="tag ${slots.left?'g':'a'}">${slots.left} מתוך ${slots.max} מקומות פנויים${slots.used?` · הוזמנו: ${slots.ordered.join(', ')}`:''}</span>
+    </div>
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>שם</th><th>מה זה נותן</th><th></th></tr></thead><tbody>${rowsOf(paid)}</tbody></table></div>
+    <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')}
+      <b>הערה על פריט 29:</b> §4.10.5 מונה אותו ברשימת ברירת המחדל החינמית של ה-CIA, אך §VI קובע ש<b>בריצות סטנדרטיות</b> השלישייה החינמית היא 3/17/28. סומן "חינם בחלק מהריצות" — כדאי לאמת מול המרצה.<br>
+      <b>פריטים מסומנים "אומדן"</b> (18, 21, 31–39, 61–69) מדווחים כטווח הסתברותי; התשובה האמיתית תמיד בתוך הטווח. אם הטווח רחב מדי — אפשר להזמין את אותו פריט שוב.<br>
+      <b>פריט 1</b> הוא ה-Gazette של ה-CIA ומגיע כחלק נפרד מהפלט.</div>`,
+    `<button class="btn primary" onclick="closeModal();go('sim')">${IC('sliders')} להזנת H1-2 בסימולטור</button>`);
+};
 const MR_GROUPS=['מכירות ומחירים','מודיעין מתחרים','מו״פ ודרגות','פיננסי וסביבה'];
 function mrListOf(act){ if(Array.isArray(act.mrList)) return act.mrList.slice(0,3);
   const codes=[], t=act.note||''; ['MR17','MR28','MR74'].forEach(c=>{ if(t.includes(c))codes.push(c); });
