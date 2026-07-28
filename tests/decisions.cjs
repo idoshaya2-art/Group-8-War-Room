@@ -413,6 +413,44 @@ ck('it names which half is the weaker one to move', sc.modalNamesWeakerHalf);
 ck('it quantifies how much moving a half is worth', sc.modalQuantifiesLeverage);
 await page.evaluate(()=>closeModal());
 
+/* ---- WRITTEN PLAN: hand back the original, and an updated copy in the same layout ---- */
+await page.evaluate(()=>{ S.quarters.Q3.operational.techX=2;
+  setPlantSplit('europe','X',0); setPlantSplit('europe','Y',2); save(); go('export'); });
+await page.waitForTimeout(600);
+const pl=await page.evaluate(()=>{
+  const d=planDeltas(), orig=planDocHTML('original'), upd=planDocHTML('updated');
+  return {blocks:PLAN_DOC.length, tables:PLAN_DOC.filter(b=>b.t==='tbl').length,
+    deltaRows:d.length, changed:d.filter(x=>x.changed).length,
+    everyDeltaHasBothSides:d.every(x=>x.topic&&x.planned!=null&&x.now!=null),
+    catchesContractGap:d.some(x=>/התחייבות/.test(x.topic)&&x.changed),
+    catchesGradeGap:d.some(x=>/דרגת שבב/.test(x.topic)&&x.changed),
+    catchesPlantSplit:d.some(x=>/מפעלים/.test(x.topic)&&x.changed),
+    catchesDebtRedLine:d.some(x=>/חוב/.test(x.topic)),
+    origHasNoChangeSection:!/מה השתנה/.test(orig),
+    updHasChangeSection:/מה השתנה/.test(upd),
+    updKeepsOriginalIntact:orig.split('<table>').length===upd.split('<table>').length-1,
+    bothRTL:/direction:rtl/.test(orig)&&/direction:rtl/.test(upd),
+    updNamesVersion:/גרסה 5\.1/.test(upd),
+    updStampsQuarter:upd.includes(S.activeQuarter),
+    origLinkPresent:!!document.querySelector('a[href$=".docx"][download]'),
+    previewRendered:/פערים בין התוכנית|תואמת את המצב/.test(document.body.innerText),
+    downloadButtons:[...document.querySelectorAll('button')].filter(b=>/המקורי|מעודכן/.test(b.textContent)).length};
+});
+ck('the written plan is embedded whole', pl.blocks===63 && pl.tables===21, `${pl.blocks} blocks, ${pl.tables} tables`);
+ck('the original download reproduces it with no changes section', pl.origHasNoChangeSection);
+ck('the updated copy adds a changes section', pl.updHasChangeSection);
+ck('and keeps the original plan intact beneath it', pl.updKeepsOriginalIntact);
+ck('both documents are right-to-left', pl.bothRTL);
+ck('the updated copy is versioned 5.1 and stamped with the base quarter', pl.updNamesVersion && pl.updStampsQuarter);
+ck('every delta states both the planned and the actual value', pl.everyDeltaHasBothSides, pl.deltaRows+' rows');
+ck('it catches the contract gap', pl.catchesContractGap);
+ck('it catches the chip grade shortfall', pl.catchesGradeGap);
+ck('it catches the undeclared/zero chip plant split', pl.catchesPlantSplit);
+ck('it checks the zero-debt red line of the plan', pl.catchesDebtRedLine);
+ck('the untouched original .docx is downloadable', pl.origLinkPresent);
+ck('both generated documents have their own button', pl.downloadButtons>=2, pl.downloadButtons+' buttons');
+ck('the deltas are previewed on the page before downloading', pl.previewRendered);
+
 const jsErr=errors.filter(e=>!/Failed to load resource|net::ERR_/.test(e));
 ck('no JavaScript errors', jsErr.length===0, jsErr.slice(0,2).join(' | '));
 const failed=report('DECISIONS');
