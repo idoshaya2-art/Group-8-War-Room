@@ -139,6 +139,55 @@ ck('you can revert to the engine list', ui.revertBtn);
 await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
 ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
 
+/* ---- DEMAND: no recommendation may exceed what the reports show the market absorbs ---- */
+const dem=await page.evaluate(()=>{
+  const q=S.activeQuarter,t=nextQuarters(q)[0];
+  const mi=S.quarters[q].marketIntel||{};
+  const eu=(mi.sales||[]).filter(s=>s.region==='europe'&&s.product==='Y');
+  const totalEU=eu.reduce((a,s)=>a+s.units,0), ourEU=eu.filter(s=>s.company===OUR_CO).reduce((a,s)=>a+s.units,0);
+  const plan=pcPlanFor(q), opts=pcSellOptions(q);
+  const card=(buildActionPlan(q,t)||[]).find(i=>/מכור/.test(i.title));
+  const stock=(S.quarters[q].operational.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+i.qty,0);
+  return {
+    observedMarket:totalEU, ourObserved:ourEU, stock,
+    planUnits:plan[0]?plan[0].units:0, planLeftover:plan[0]?plan[0].leftover:0,
+    planCarryCost:plan[0]?plan[0].carryCost:0,
+    planCeilingSrc:plan[0]?plan[0].ceiling.src:'',
+    planBelowStock:plan[0]?plan[0].units<stock:false,
+    planBelowMarket:plan[0]?plan[0].units<totalEU:false,
+    optionUnits:opts[0]?opts[0].opts.map(o=>o.units):[],
+    optionsAgreeWithPlan:opts[0]?opts[0].opts.every(o=>o.units<=stock):false,
+    cheaperSellsMore:(()=>{const o=opts[0]&&opts[0].opts;return o?o[0].units>o[2].units:false;})(),
+    priceResponsive:(()=>{const a=demandCeiling('europe','Y',111).units,b=demandCeiling('europe','Y',150).units;return a>b;})(),
+    anchorPriceRecovered:(S.learning.anchors['europe|Y']||{}).price>0,
+    anchorPriceSrc:(S.learning.anchors['europe|Y']||{}).priceSrc||'',
+    cardTitle:card?card.title:'',
+    cardMentionsLeftover:card?/יישארו במלאי/.test(card.detail||''):false,
+    cardSuggestsExport:card?/יצוא/.test(card.detail||''):false,
+    overreachOnEngineList:demandOverreach(buildActionPlan(q,t)).length,
+    overreachDetectsAViolation:demandOverreach([{title:'x',sim:{regions:{europe:{price:130,qtySold:99999}}}}]).length===1
+  };
+});
+ck('the sell plan is capped by demand, not by warehouse stock', dem.planBelowStock, `${dem.planUnits} of ${dem.stock} in stock`);
+ck('and it does not exceed the entire observed market', dem.planBelowMarket, `${dem.planUnits} vs market ${dem.observedMarket}`);
+ck('the ceiling cites its authority', /מנוע ביקוש|Data Log/.test(dem.planCeilingSrc), dem.planCeilingSrc);
+ck('the unsold remainder is quantified', dem.planLeftover>0, dem.planLeftover+' units left');
+ck('and its carrying cost is stated', dem.planCarryCost>0, dem.planCarryCost+' per quarter');
+ck('the headline says how many of the stock will actually sell', /מתוך/.test(dem.cardTitle), dem.cardTitle);
+ck('the card explains the remainder', dem.cardMentionsLeftover);
+ck('and points at export as the outlet for it', dem.cardSuggestsExport);
+ck('the options table uses the same authority as the headline', dem.optionsAgreeWithPlan, dem.optionUnits.join('/'));
+ck('a lower price sells more units — the elasticity lever is live', dem.cheaperSellsMore, dem.optionUnits.join(' vs '));
+ck('the demand ceiling responds to price at all', dem.priceResponsive);
+ck('a missing own-price falls back to the MR28 market median', dem.anchorPriceRecovered, dem.anchorPriceSrc);
+ck('the engine list contains no demand overreach', dem.overreachOnEngineList===0);
+ck('the overreach guard actually catches a violation', dem.overreachDetectsAViolation);
+const demUI=await page.evaluate(()=>{ go('export'); return null; });
+await page.waitForTimeout(400);
+ck('the submission checklist checks for demand overreach',
+   await page.evaluate(()=>/חורגת מהביקוש|אין המלצה שחורגת/.test(document.body.innerText)));
+await page.evaluate(()=>go('plan')); await page.waitForTimeout(300);
+
 /* ---- CASH BUDGET: recommendations must be measured against money that exists ---- */
 const bud=await page.evaluate(()=>{
   S.quarters.Q3.financial.cash={us:120000,europe:640000,brazil:95000,hq:213000};
@@ -197,11 +246,18 @@ ck('a cash budget strip is shown above the decisions', budUI.strip);
 ck('it states the spending capacity', budUI.showsSpendable);
 ck('it shows the collection schedule behind the inflow', budUI.explainsWhyRevenueExcluded);
 ck('cards display their cash cost', budUI.perCardCost>0, budUI.perCardCost+' cards');
-const over=await page.evaluate(()=>{ S.quarters.Q3.financial.cash={us:0,europe:60000,brazil:0,hq:25000}; save(); go('plan');
+const over=await page.evaluate(()=>{
+  // genuinely over budget: almost no cash AND nothing to sell, so no inflow can rescue it
+  S.quarters.Q3.financial.cash={us:0,europe:60000,brazil:0,hq:25000};
+  window.__inv=S.quarters.Q3.operational.inventory;
+  S.quarters.Q3.operational.inventory=[]; save(); go('plan');
   const t=document.body.innerText;
   return {overWarning:/חריגה של/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(t)}; });
 ck('an over-budget set is flagged', over.overWarning);
 ck('actions with no cash cover are marked individually', over.unaffordableMarked);
+await page.evaluate(()=>{ S.quarters.Q3.operational.inventory=window.__inv;
+  S.quarters.Q3.financial.cash={us:120000,europe:640000,brazil:95000,hq:213000}; save(); go('plan'); });
+await page.waitForTimeout(300);
 
 /* ---- MARKET RESEARCH: three arrive free, three may be bought ---- */
 const mr=await page.evaluate(()=>{

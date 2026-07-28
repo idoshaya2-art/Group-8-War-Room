@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.3';
+const APP_VERSION = 'v9.4';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1424,7 +1424,13 @@ function updateLearning(){
     Object.entries(byKey).forEach(([k,v])=>{ if(v.tot<=0) return;
       L.market[k]= L.market[k]!=null ? 0.5*L.market[k]+0.5*v.tot : v.tot; // EMA of market size
       const [region,product]=k.split('|');
-      (perKey[k]=perKey[k]||[]).push({q, share:v.our/v.tot, price:ourPriceFor(Q,product),
+      // Our own price is often absent (unpriced inventory is precisely what action #1 is about),
+      // which left the anchor price null and made the whole demand model price-blind: the same
+      // ceiling came back for 111, 130 and 150. MR28 gives the market price we competed at, so
+      // when our own is missing we anchor on that and label the substitution.
+      let px=ourPriceFor(Q,product), pxSrc='מחיר שלנו מהמלאי';
+      if(px==null){ const mp=mrMarketPrice(region,product); if(mp&&mp.median>0){ px=mp.median; pxSrc='חציון שוק מ-MR28 (מחירנו לא הוזן)'; } }
+      (perKey[k]=perKey[k]||[]).push({q, share:v.our/v.tot, price:px, priceSrc:pxSrc,
         tech:product==='X'?Q.operational.techX:Q.operational.techY, units:v.our, total:v.tot});
     });
   });
@@ -2456,10 +2462,49 @@ function pcPlanFor(q){
     else if(dlPrice>0){ price=dlPrice; src='מחיר פתיחה מהמשחק (Data Log)'; }
     else if(i.cost>0){ price=Math.round(i.cost*2); src='עלות ×2'; }
     else { price=300; src='הנחת פתיחה — עדכן לפי עלות בפועל'; }
-    const ar=recommendAdSpend(rid,'Y',i.qty,price,i.cost||0);
-    out.push({rid, reg, units:i.qty, price, src, revenue:i.qty*price, adv:ar.spend, advWhy:ar.why, cost:i.cost||0});
+    // A quarter's sales are bounded by DEMAND, not by what sits in the warehouse. This used to
+    // plan the entire stock — 35,000 units in Europe against a 22,100-unit observed market and
+    // a demand model predicting 4,900. The headline action, the AI context and the cash inflow
+    // all inherited that figure while the options table right beside it capped correctly.
+    const ceiling=demandCeiling(rid,'Y',price);
+    const units=Math.max(0, Math.min(i.qty, ceiling.units));
+    const leftover=Math.max(0, i.qty-units);
+    const carry=(DATALOG.carryingCostPerUnit.Y||{})[rid]||0;
+    const ar=recommendAdSpend(rid,'Y',units,price,i.cost||0);
+    out.push({rid, reg, units, stock:i.qty, leftover, ceiling,
+      carryCost:Math.round(leftover*carry), gw:goodwillLoss(rid,'Y'),
+      price, src, revenue:units*price, adv:ar.spend, advWhy:ar.why, cost:i.cost||0});
   });
   return out;
+}
+/* How many units this market can actually absorb from us in one quarter, and on what
+   authority. Calibrated demand first, then the Data Log market potential, so no
+   recommendation can quietly exceed what the reports themselves show. */
+function demandCeiling(rid, product, price){
+  const cap=marketCapUnits(product,rid);
+  const pd=(S.learning&&S.learning.market&&S.learning.market[rid+'|'+product]!=null)
+    ? predictDemand(rid,product,{price}) : null;
+  if(pd && pd.units>0){
+    // the learned point estimate is what we sold; the honest ceiling is its upper band,
+    // still capped by the Data Log potential for one company in one quarter
+    const upper=Math.min(cap, Math.max(pd.units, pd.high||pd.units));
+    return {units:upper, src:`מנוע ביקוש מכויל (${S.learning.obs} רבעונים) — נמכר בפועל ${fmt(pd.units)}, גבול עליון ${fmt(upper)}`, calibrated:true, observed:pd.units, cap};
+  }
+  return {units:cap, src:`פוטנציאל שוק מ-Data Log (~${fmt(cap)} יח׳/חברה/רבעון)`, calibrated:false, cap};
+}
+/* Cross-check: no recommended sales quantity may exceed what the market can absorb.
+   A systematic invariant rather than a per-card fix, so a new action cannot reintroduce it. */
+function demandOverreach(items){
+  const bad=[];
+  (items||[]).forEach(it=>{ if(!it.sim) return;
+    Object.entries(it.sim.regions||{}).forEach(([rid,g])=>{
+      const qty=g.qtySold||((g.price>0&&g.sales)?Math.round(g.sales/g.price):0);
+      if(!qty) return;
+      const c=demandCeiling(rid,(g.product==='X'?'X':'Y'),g.price||0);
+      if(qty>c.units*1.02) bad.push({title:it.title, region:rid, qty, ceiling:c.units, src:c.src});
+    });
+  });
+  return bad;
 }
 /* Three pricing options per region of finished PCs: volume / balanced / premium.
    Price is exact (anchor or cost-based); units come from the calibrated demand model
@@ -2485,8 +2530,12 @@ function pcSellOptions(q){
     ];
     const opts=specs.map(o=>{
       const price=Math.round(base*o.mult); let units=null, band=null, conf=null, volSrc;
-      if(calibrated){ const pd=predictDemand(rid,'Y',{price}); if(pd){ units=Math.min(stock,pd.units); band=[Math.min(stock,pd.low),Math.min(stock,pd.high)]; conf=pd.confidence; volSrc='מנוע ביקוש מכויל'; } }
-      if(units==null){ units=Math.min(stock, Math.round(mktCap*o.potFrac)); volSrc='פוטנציאל שוק (Data Log)'; } // capped by real market potential, not % of stock
+      // Single authority for absorbable volume — the same function the headline action uses,
+      // so the card and its options can never disagree again.
+      const dc=demandCeiling(rid,'Y',price);
+      units=Math.min(stock, dc.units); volSrc=dc.src;
+      if(dc.calibrated){ const pd=predictDemand(rid,'Y',{price});
+        if(pd){ band=[Math.min(stock,pd.low),Math.min(stock,pd.high)]; conf=pd.confidence; } }
       // Advertising by marginal return (Guide §5.4), not by a flat % of revenue.
       const ar=recommendAdSpend(rid,'Y',units,price,cost);
       const revenue=units*price, adv=ar.spend, grossMargin=(price-cost)*units;
@@ -2619,9 +2668,11 @@ function buildActionPlan(q,targetQ){
                  :est('0','מתחת לסף האפקטיביות — פרסום כאן לא מחזיר את עצמו')],
         sim:{q:targetQ,regions:{[g0.rid]:{sales:o.revenue,advertising:o.adv,product:'Y',unitCost:g0.cost,margin:null,advPct:null}}} })); }
     out.push({cat:'mkt',level:(fg.anyUnpriced||!selling)?'red':'amber',conf:plan.some(p=>/הנחת/.test(p.src))?'est':'data',
-      title:`מכור ${fmt(fg.pcUnits)} מחשבים מוגמרים במלאי${fg.anyUnpriced?' — ללא מחיר, לא נמכרים!':''}`,
+      title:`מכור ${fmt(plan.reduce((a,p)=>a+p.units,0)||fg.pcUnits)} מתוך ${fmt(fg.pcUnits)} מחשבים במלאי${fg.anyUnpriced?' — ללא מחיר, לא נמכרים!':''}`,
       form:'A1-2 (PC Prices & Advertising)',
-      detail:`<b>יש ${fmt(fg.pcUnits)} מחשבים מוכנים במלאי</b> (שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}). ${fg.anyUnpriced?'חלקם/כולם ללא מחיר מוזן — "אין מחיר = אין מכירה". ':''}זו הפעולה בעלת התשואה הגבוהה ביותר: המרת מלאי מוגמר למזומן מזינה ישירות את מחצית העבר (רווח) ומממנת את מחצית העתיד.${g0?` מחיר בסיס ${fmt(g0.base)} ${g0.reg.cur} (${g0.priceSrc}). בחר אופציה:`:''}`,
+      detail:`<b>יש ${fmt(fg.pcUnits)} מחשבים מוכנים במלאי</b> (שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}).`
+        +(plan.some(p=>p.leftover>0)?`<div class="tag a" style="display:block;margin:8px 0;line-height:1.7;white-space:normal">${IC('warn')} <b>לא כל המלאי נמכר ברבעון אחד.</b> ${plan.filter(p=>p.leftover>0).map(p=>`ב${p.reg.name} השוק סופג <b>${fmt(p.units)}</b> יח׳ במחיר ${fmt(p.price)} (${esc(p.ceiling.src)}) — <b>${fmt(p.leftover)} יישארו במלאי</b> ועלות האחזקה עליהם ${fmt(p.carryCost)} ${p.reg.cur}/רבעון`).join(' · ')}. <b>העודף הוא בדיוק המקרה ליצוא</b> לשוק עם ביקוש פנוי (שילוח + משרד מכירות), או להורדת מחיר שמגדילה את הכמות הנספגת.</div>`:'')
+        +` ${fg.anyUnpriced?'חלקם/כולם ללא מחיר מוזן — "אין מחיר = אין מכירה". ':''}זו הפעולה בעלת התשואה הגבוהה ביותר: המרת מלאי מוגמר למזומן מזינה ישירות את מחצית העבר (רווח) ומממנת את מחצית העתיד.${g0?` מחיר בסיס ${fmt(g0.base)} ${g0.reg.cur} (${g0.priceSrc}). בחר אופציה:`:''}`,
       dep:`מפעל ✓ · שבבים ✓ · מחשבים ✓ ⟵ נותר רק להזין מחיר+פרסום (A1-2). ${fg.anyUnpriced?'המחיר החסר הוא מה שחוסם את המכירה כרגע.':''}`,
       optionCols:sellCols, options:sellOpts, sim:{q:targetQ,regions:simRegions}});
   }
@@ -2810,10 +2861,13 @@ function buildActionPlan(q,targetQ){
     const rows=[]; const simRegions={};
     REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
       const stock=(op.inventory||[]).filter(i=>i.product==='Y'&&(i.region||'')===r.id).reduce((a,i)=>a+(i.qty||0),0);
-      const cap=marketCapUnits('Y',r.id);
-      const units=Math.min(stock||0, cap);
-      if(!units) return;
+      if(!stock) return;
       const pa=priceAnchors(r.id,'Y'); const price=pa.base||0;
+      // Size the budget on the volume that will ACTUALLY sell, from the same demand authority
+      // the sell action uses — not on the theoretical market potential. Advertising sized on
+      // 21,600 units while the sell plan moves 6,248 is a budget for sales that will not happen.
+      const units=Math.min(stock, demandCeiling(r.id,'Y',price).units);
+      if(!units) return;
       const cost=(op.inventory||[]).filter(i=>i.product==='Y'&&(i.region||'')===r.id&&i.cost>0).map(i=>i.cost)[0]||0;
       const ar=recommendAdSpend(r.id,'Y',units,price,cost);
       rows.push({r,units,price,ar});
@@ -4189,6 +4243,7 @@ function renderChecklist(box,targetQ,sc){
   const cg=chipGuard(sc,targetQ), val=scenarioValidation(sc,targetQ), caps=capacityCheck(sc,targetQ);
   const phantoms=phantomSales(sc,targetQ), ptrans=phantomTransfers(sc,targetQ);
   const gl=gradeLimitGuard(), ol=officeLegality(sc,targetQ);
+  const dov=demandOverreach(buildActionPlan(S.activeQuarter,targetQ));
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
     {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
@@ -4203,6 +4258,7 @@ function renderChecklist(box,targetQ,sc){
     {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
     {t:`עד 2 דרגות למוצר באזור (§4.9)${gl.length?` · ${gl[0].regionName}/${gl[0].product} כבר ב-${gl[0].count}`:''}`,ok:!gl.some(g=>g.over)},
     {t:`הרכב משרדי מכירות חוקי (Data Log 04)${ol.length?` · ${ol[0].region} ${ol[0].n}`:''}`,ok:ol.length===0},
+    {t:`אין המלצה שחורגת מהביקוש הנצפה${dov.length?` · ${fmt(dov[0].qty)} מול תקרה ${fmt(dov[0].ceiling)}`:''}`,ok:dov.length===0},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
     ${phantoms.length?`<div class="tag a" style="margin-top:10px">${IC('warn')} מכירת-יתר: מתוכננת מכירה של <b>${fmt(phantoms[0].sold)}</b> יח׳ סה״כ אך ההיצע (מלאי מוגמר + ייצור) הוא <b>${fmt(phantoms[0].supply)}</b> — פער ${fmt(phantoms[0].gap)}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת.</div>`:''}
@@ -4210,6 +4266,7 @@ function renderChecklist(box,targetQ,sc){
     ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
       (cg.gap>0?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם. <b>ההגשה חסומה.</b></div>`:'')}
     ${gl.length?`<div class="tag ${gl.some(g=>g.over)?'r':'a'}" style="margin-top:8px">${IC('warn')} <b>מגבלת שתי דרגות (§4.9):</b> ${gl.map(g=>`${g.regionName}/${g.product==='Y'?'מחשב':'שבב'} מחזיק ${g.count} דרגות (${g.grades.join(', ')})`).join(' · ')}. הכנסת דרגה שלישית לאזור <b>תוריד אוטומטית את הדרגה האמצעית לרמת הנמוכה</b> — מחיקת שווי של מלאי טוב. מסלולי יציאה: ${RULES.grades.exits.join(' · ')}.</div>`:''}
+    ${dov.length?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>המלצה חורגת מהביקוש:</b> ${dov.map(d=>`"${esc(d.title.slice(0,44))}" — ${fmt(d.qty)} יח׳ ב${(REGIONS.find(r=>r.id===d.region)||{}).name||d.region} מול תקרה ${fmt(d.ceiling)} (${esc(d.src)})`).join(' · ')}. כמות מעבר לתקרה פשוט לא תימכר — היא תישאר במלאי ותצבור עלות אחזקה.</div>`:''}
     ${ol.length?`<div class="tag r" style="margin-top:8px">${IC('warn')} <b>הרכב משרדים לא חוקי:</b> ${ol.map(o=>`${o.region}: ${o.n} — ${o.why}`).join(' · ')}.</div>`:''}
     ${caps.length?`<div class="tag a" style="margin-top:8px">${IC('warn')} חריגת קיבולת: ${caps.map(c=>`${c.name} ${c.product} ${fmt(c.prod)} יח׳ > ${fmt(c.cap)}/מפעל → נדרשים ${c.plants} מפעלים`).join(' · ')}.</div>`:''}
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;

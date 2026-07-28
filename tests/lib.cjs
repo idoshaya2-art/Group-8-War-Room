@@ -30,7 +30,9 @@ const SEED=`(()=>{
     sales:[{company:8,region:'europe',product:'Y',units:4900},{company:2,region:'europe',product:'Y',units:9800},
            {company:5,region:'europe',product:'Y',units:7400},{company:2,region:'us',product:'Y',units:12000}],
     sources:[],generic:[],
-    compPrices:[{region:'europe',product:'Y',company:2,price:139},{region:'europe',product:'Y',company:5,price:132}]};
+    // compPrices use the parser's product names ('Computer'/'Chip'), not the 'Y'/'X' codes the
+    // sales rows use — the fixture must match what ingestion really produces.
+    compPrices:[{region:'europe',product:'Computer',company:2,price:139},{region:'europe',product:'Computer',company:5,price:132}]};
   updateLearning(); save();
 })()`;
 
