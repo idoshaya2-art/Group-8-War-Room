@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v9.7';
+const APP_VERSION = 'v10.0 · audit batches 1-3';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -621,6 +621,16 @@ function emptyQuarter(){
     marketIntel:{ competitors:{}, sales:[], sources:[], generic:[] },
   };
 }
+const DEFAULT_CONTRACTS=[ // הסכם מכירה ורכישה חתום מול חברה 10 — הערכים מהמסמך עצמו, לא מהערכה
+        {id:'x3q5',counterparty:'חברה 10',product:'X',grade:3,qty:30000,deliveryQuarter:'Q5',
+         region:'europe', price:41, currency:'EUR', collection:[50,30,20], penaltyPct:15, freightOnSeller:true,
+         fallbackGrade:2, fallbackAllowed:true,
+         note:'סעיף 5: אם אין אפשרות לספק את הרמה המקורית — יש לספק כמות מספקת של רמה נמוכה מתאימה. אספקה באירופה, הובלה על המוכר. אי-אספקה: קנס מחיר הרכישה +15%.'},
+        {id:'x3q6',counterparty:'חברה 10',product:'X',grade:3,qty:30000,deliveryQuarter:'Q6',
+         region:'europe', price:41, currency:'EUR', collection:[50,30,20], penaltyPct:15, freightOnSeller:true,
+         fallbackGrade:2, fallbackAllowed:true,
+         fallbackBlockedNote:'הבהרה בחוזה: ב-Q6, אם חברה 10 תוכיח יכולת ייצור של מחשבי Y4 — לא תינתן אפשרות לספק רמה נמוכה. בדקו זאת ב-MR30/MR17 לפני שסומכים על סעיף 5.',
+         note:'סעיף 5 חל, אך מותנה: ראו ההבהרה ל-Q6. אספקה באירופה, הובלה על המוכר. אי-אספקה: קנס מחיר הרכישה +15%.'} ];
 function defaultState(){
   const q={}; QUARTERS.forEach(k=> q[k]=emptyQuarter());
   return {
@@ -635,9 +645,7 @@ function defaultState(){
       // Which plants make chips and which make computers. The report does not say, so it
       // must be declared once; null means "not declared" and the engine refuses to guess.
       plantSplit:{ us:{X:null,Y:null}, europe:{X:null,Y:null}, brazil:{X:null,Y:null} },
-      contracts:[ // binding X3 supply commitment (Scenario 1)
-        {id:'x3q5',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q5',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'},
-        {id:'x3q6',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q6',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'} ],
+      contracts:DEFAULT_CONTRACTS.map(c=>({...c})),
       params:{ // sourced from DATALOG (Data Log v1) — see the DATALOG constant for provenance
         collection:{ us:[...DATALOG.collection.us], europe:[...DATALOG.collection.europe], brazil:[...DATALOG.collection.brazil], hq:[100,0,0] },
         tax:{...DATALOG.tax},
@@ -700,11 +708,22 @@ function migrateIntel(){ // coerce legacy array marketIntel into the structured 
       if(G.noExternalLoans===undefined) G.noExternalLoans=true;
       if(!G.techXTarget) G.techXTarget=3; if(!G.techYTarget) G.techYTarget=1;
       if(!Array.isArray(S.config.contracts)||!S.config.contracts.some(c=>c.id==='x3q5')){
-        S.config.contracts=[...(S.config.contracts||[]),
-          {id:'x3q5',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q5',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'},
-          {id:'x3q6',counterparty:'התחייבות אספקה X3',product:'X',grade:3,qty:30000,deliveryQuarter:'Q6',note:'התחייבות מקודשת — בזמן, בכמות, ללא קנס'}];
+        S.config.contracts=[...(S.config.contracts||[]), ...DEFAULT_CONTRACTS];
       }
       S.meta.strategyV=1;
+    }
+    // FIX #40 (P0): earlier builds stored the commitment with grade 3 only and the note
+    // "ללא קנס" — both wrong against the signed agreement. Re-seed the real terms once
+    // (price/currency/collection/penalty/clause-5 fallback) without touching other edits.
+    if(S.config.goals && S.meta.contractV!==2){
+      const byId={}; (S.config.contracts||[]).forEach(c=>byId[c.id]=c);
+      DEFAULT_CONTRACTS.forEach(d=>{ const cur=byId[d.id];
+        if(!cur){ S.config.contracts=[...(S.config.contracts||[]),{...d}]; return; }
+        ['price','currency','collection','penaltyPct','freightOnSeller','fallbackGrade',
+         'fallbackAllowed','fallbackBlockedNote','region','counterparty','note']
+          .forEach(k=>{ if(cur[k]===undefined||k==='note'||k==='counterparty') cur[k]=d[k]; });
+      });
+      S.meta.contractV=2;
     }
   }
   // fix the stale fictitious OpenAI default model that earlier builds shipped
@@ -974,6 +993,30 @@ function finishedGoods(q){
   return {pc,chip,pcUnits,chipUnits,unpricedPc,plan,potentialRevenue,hasFinished:pcUnits>0,anyUnpriced:unpricedPc.length>0};
 }
 
+/* FIX #30 (P1) — Data Log 04 selling cost per unit sold. The table was in DATALOG and used
+   nowhere, so every margin, every advertising optimum and every cash line ignored 33–40 LC on
+   a 130 EUR computer: a quarter of the price. The rate depends on whether the area sells chips
+   only, computers only, or both (selling both is cheaper per unit). */
+function sellingCostLC(regionId, product, sellsBoth){
+  const T=DATALOG.sellingCostPerUnit;
+  const key = product==='X' ? (sellsBoth?'xyX':'xOnly') : (sellsBoth?'xyY':'yOnly');
+  return (T[key]||{})[regionId]||0;
+}
+/* FIX #31 (P1) — Data Log 03 depreciation (chips 8%/Q, computers 5%/Q). Also declared and
+   never used, which overstated asset value and therefore the financial-health component of
+   the potential half of the score. Charged as a non-cash P&L expense per declared plant. */
+function depreciationLC(regionId, product, plantCount){
+  const cost=(DATALOG.plantAcqCost[product]||{})[regionId]||0;
+  const rate=(DATALOG.depreciation[product]||0)/100;
+  return Math.round(cost*rate*(plantCount||0));
+}
+function depreciationSF(){
+  let sf=0;
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    ['X','Y'].forEach(pr=>{ const n=plantsForProduct(r.id,pr); if(n>0) sf+=depreciationLC(r.id,pr,n)*fxRate(r.cur); });
+  });
+  return Math.round(sf);
+}
 function projectCashflow(baseQuarter, leversByQuarter){
   const p=S.config.params;
   let bal={}; REGIONS.forEach(r=> bal[r.id]=S.quarters[baseQuarter].financial.cash[r.id]||0);
@@ -988,11 +1031,23 @@ function projectCashflow(baseQuarter, leversByQuarter){
     const nextTaxDue={}, nextLoss={};
     REGIONS.forEach(r=>{
       const rl=(lev.regions&&lev.regions[r.id])||{};
-      const sales=rl.sales||0, prodCost=(rl.production||0)*(rl.unitCost||0), adv=rl.advertising||0,
-            invest=rl.invest||0, transferIn=rl.transferIn||0, transferOut=rl.transferOut||0, rd=(lev.rd||0)/REGIONS.length;
+      // FIX #74: every line in the area contributes to revenue, cost, advertising and units sold
+      const _ls=activeLines(lev,r.id);
+      const sales=_ls.reduce((a,l)=>a+l.sales,0) || (rl.sales||0);
+      const prodCost=_ls.reduce((a,l)=>a+l.production*l.unitCost,0) || ((rl.production||0)*(rl.unitCost||0));
+      const adv=_ls.reduce((a,l)=>a+l.advertising,0) || (rl.advertising||0);
+      const invest=rl.invest||0, transferIn=rl.transferIn||0, transferOut=rl.transferOut||0,
+            // FIX #27 (P1): R&D is form H1-1 — a Liechtenstein (HQ) expense in SF. It was being
+            // split /4 here and /3 in projectedNetAdd, so cash and P&L told two different stories
+            // and 75% of the drain was charged to areas that never pay it.
+            rd=(r.id==='hq')?(lev.rd||0):0;
       const facCost=(rl.newFac||0)*(p.factoryCost||0), offCost=(rl.offices||0)*(p.officeCost||0); // WS-4: A2-1 build + A1-3 operating
+      // FIX #30: selling cost is charged per UNIT SOLD (Data Log 04), and it is large.
+      const sellsBoth=sellsBothIn(lev,r.id);
+      const unitsSold=_ls.reduce((a,l)=>a+(l.qtySold||0),0);
+      const sellCost=_ls.reduce((a,l)=>a+(l.qtySold||0)*sellingCostLC(r.id,l.product,sellsBoth),0);
       // regional differential tax on operating profit (facCost is capex, excluded)
-      const pretax=sales - prodCost - adv - rd - offCost;
+      const pretax=sales - prodCost - adv - rd - offCost - sellCost;
       // a carried loss shields this quarter's profit before tax is computed
       const taxable=Math.max(0, pretax - (lossCarry[r.id]||0));
       const tax=taxable*((p.tax[r.id]||0)/100); taxSF += tax*fxRate(r.cur);
@@ -1003,21 +1058,43 @@ function projectCashflow(baseQuarter, leversByQuarter){
       // transferOut debits the source region and pays the real exchange commission (Data Log 07) — so a Brazil→HQ
       // move no longer creates money, it nets to ~zero minus the fee.
       const commRate=(DATALOG.exchangeCommission[r.id]||0)/100;
-      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost
+      bal[r.id] -= (prodCost*(p.productionPay[0]/100)) + adv + invest + rd + facCost + offCost + sellCost
                    + (taxDue[r.id]||0)   // last quarter's tax bill lands now, not this quarter's
                    - transferIn + transferOut*(1+commRate);
     });
     REGIONS.forEach(r=>{ taxDue[r.id]=nextTaxDue[r.id]||0; lossCarry[r.id]=nextLoss[r.id]||0; });
     pipeline.filter(x=>x.q===q).forEach(x=> bal[x.region]+=x.amount);
+    // FIX #25 (P1): every rate in Data Log 07 is per QUARTER. The old `/4` treated the HO
+    // loan rate as annual and understated interest fourfold.
     const loans=S.quarters[baseQuarter].financial.loans||0;
-    bal.hq -= loans*(p.interest.bank/100)/4;
+    bal.hq -= loans*(p.interest.bank/100);
     // Data Log 07: positive local balances earn interest each quarter. Small, but it is the
     // difference between idle cash being dead and merely slow.
     REGIONS.forEach(r=>{ if(bal[r.id]>0) bal[r.id] += bal[r.id]*((DATALOG.interest.posBalance.lc[r.id]||0)/100); });
+    // FIX #24 (P1): a region in deficit is NOT free. Data Log 07 charges a negative-balance /
+    // supplier-credit rate that steps up above a per-area switchover. Without this the engine
+    // showed a region sitting at -2M for five quarters at zero cost.
+    const negCost={};
+    REGIONS.forEach(r=>{ if(bal[r.id]<0){
+      const owed=-bal[r.id];
+      const sw=(DATALOG.interest.supplierCredit.switchover[r.id]||Infinity);
+      const rate=(owed>sw ? DATALOG.interest.negBalance.above[r.id] : DATALOG.interest.negBalance.below[r.id])||0;
+      const chg=owed*(rate/100); negCost[r.id]={owed:Math.round(owed),rate,charge:Math.round(chg)};
+      bal[r.id] -= chg;
+    }});
     const cashByRegion={...bal};
     let unified=0; REGIONS.forEach(r=> unified += cashByRegion[r.id]*fxRate(r.cur));
     const floor=S.config.goals.floors[q]||0;
-    out.push({q,cashByRegion,unified,floor,breach:unified<floor,distance:unified-floor,tax:Math.round(taxSF)});
+    // FIX #22 (P1): consolidated cash is not liquidity. A region in deficit is a breach even
+    // when the SF total looks healthy — cash is currency-segmented and not freely fungible.
+    const negRegions=REGIONS.filter(r=>cashByRegion[r.id]<0).map(r=>r.id);
+    const regionFloors=(S.config.goals.regionFloors)||{};
+    const belowRegionFloor=REGIONS.filter(r=>(regionFloors[r.id]||0)>0 && cashByRegion[r.id]<regionFloors[r.id]).map(r=>r.id);
+    out.push({q,cashByRegion,unified,floor,
+      breach:(unified<floor)||negRegions.length>0||belowRegionFloor.length>0,
+      breachUnified:unified<floor, negRegions, belowRegionFloor, negCost,
+      negCostSF:Math.round(REGIONS.reduce((a,r)=>a+((negCost[r.id]&&negCost[r.id].charge)||0)*fxRate(r.cur),0)),
+      distance:unified-floor,tax:Math.round(taxSF)});
   }
   return out;
 }
@@ -1283,6 +1360,26 @@ function contractPlan(){
     const wrongGrade=(op.inventory||[]).filter(i=>i.product===prod && (i.grade!=null?i.grade:0)<grade)
       .reduce((a,i)=>a+(i.qty||0),0);
     const gap=Math.max(0,need-stock);
+    // FIX #40 (P0) — CLAUSE 5. The signed agreement says: "במידה ולמוכר אין אפשרות לספק את
+    // הרמה המקורית בחוזה, עליו לספק כמות מספקת של רמה נמוכה מתאימה." The engine used to
+    // recognise ONLY the contract grade, so it reported a permanent 30,000-unit gap and the
+    // strategist rejected the team's own approved plan (deliver X2 under clause 5) as illegal.
+    // fallbackGrade = the lowest grade the buyer must accept; fallbackBlockedNote records the
+    // Q6 carve-out (blocked only if company 10 demonstrates Y4 production).
+    const fbGrade=(c.fallbackGrade!=null)?c.fallbackGrade:null;
+    const fbAllowed=(c.fallbackAllowed!==false) && fbGrade!=null;
+    const fbEligible=fbAllowed?(op.inventory||[]).filter(i=>i.product===prod && (i.grade!=null?i.grade:0)>=fbGrade):[];
+    const fbStock=fbEligible.reduce((a,i)=>a+(i.qty||0),0);
+    const fbGap=fbAllowed?Math.max(0,need-fbStock):null;
+    // the binding gap is the one we actually have to close to avoid the penalty
+    const bindingGap=fbAllowed?Math.min(gap,fbGap):gap;
+    // penalty exposure if we deliver nothing: purchase price + penaltyPct (clause 4)
+    const pen=(c.penaltyPct!=null?c.penaltyPct:0);
+    const contractValueLC=(c.price||0)*need;
+    const penaltyLC=contractValueLC*(1+pen/100);
+    const cur=c.currency||'EUR';
+    const penaltySF=Math.round(penaltyLC*fxRate(cur));
+    const contractValueSF=Math.round(contractValueLC*fxRate(cur));
     // Data Log 08: produced in Qt → in inventory at end of Qt → deliverable in Qt+1.
     const productionQuarter=QUARTERS[qIndex(c.deliveryQuarter)-1]||c.deliveryQuarter;
     const quartersLeft=qIndex(productionQuarter)-qIndex(base);
@@ -1298,6 +1395,10 @@ function contractPlan(){
     const unitCost=Math.round(((DATALOG.initialConsumerPrice[prod]||{}).europe||0)*
       ((DATALOG.varMfgCostPctOfRetail[prod]||[0.2,0.2])[1]));
     return { ...c, need, grade, prod, stock, wrongGrade, gap, productionQuarter, quartersLeft,
+      fbGrade, fbAllowed, fbStock, fbGap, bindingGap, fbBlockedNote:c.fallbackBlockedNote||null,
+      penaltyPct:pen, currency:cur, unitPrice:c.price||null,
+      contractValueLC, contractValueSF, penaltySF,
+      collection:Array.isArray(c.collection)?c.collection:null,
       tech, techOK, capPerQuarter, capKnown,
       capOK: !capKnown ? null : (gap<=capPerQuarter*Math.max(1,quartersLeft)),
       // base is the last COMPLETED quarter, so the quarter being decided right now is base+1.
@@ -1395,7 +1496,9 @@ function whoHasGrade(prod, grade){
 /* Total committed units per production quarter — what any plan MUST make, on top of
    whatever it wants to sell on the open market. */
 function contractRequirements(){
-  const byQ={}; contractPlan().forEach(c=>{ if(c.gap<=0) return;
+  // FIX #40: the binding gap is the one that actually triggers the penalty — clause 5 lets a
+  // lower suitable grade satisfy the contract, so a plan is not illegal for shipping X2.
+  const byQ={}; contractPlan().forEach(c=>{ if((c.bindingGap!=null?c.bindingGap:c.gap)<=0) return;
     const k=c.productionQuarter; (byQ[k]=byQ[k]||[]).push(c); });
   return byQ;
 }
@@ -1427,9 +1530,20 @@ function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's fu
   nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; let net=0;
     REGIONS.forEach(r=>{ if(r.id==='hq') return; const rl=(lev.regions&&lev.regions[r.id])||{};
       const offCost=(rl.offices||0)*(p.officeCost||0); // A1-3 offices are opex, hit profit
-      const pretax=(rl.sales||0)-((rl.production||0)*(rl.unitCost||0))-(rl.advertising||0)-(rd/3)-offCost;
+      // FIX #27 (P1): R&D is NOT an area cost — it is booked once at HQ below, exactly as the
+      // cash engine now books it. It used to be charged /3 here and /4 there.
+      const _ls=activeLines(lev,r.id), _both=sellsBothIn(lev,r.id);
+      const sellCost=_ls.reduce((a,l)=>a+(l.qtySold||0)*sellingCostLC(r.id,l.product,_both),0);
+      const _sales=_ls.reduce((a,l)=>a+l.sales,0)||(rl.sales||0);
+      const _pcost=_ls.reduce((a,l)=>a+l.production*l.unitCost,0)||((rl.production||0)*(rl.unitCost||0));
+      const _adv=_ls.reduce((a,l)=>a+l.advertising,0)||(rl.advertising||0);
+      const pretax=_sales-_pcost-_adv-offCost-sellCost;
       net += pretax - (pretax>0?pretax*((p.tax[r.id]||0)/100):0); });
-    net -= loans*((p.interest&&p.interest.bank||0)/100)/4; add+=net; });
+    net -= rd;                                                    // H1-1 · Liechtenstein, in SF
+    // FIX #31: non-cash, but it is real profit and real asset value (Data Log 03).
+    try{ net -= depreciationSF(); }catch(e){}
+    // FIX #25 (P1): Data Log 07 rates are quarterly; the /4 treated them as annual.
+    net -= loans*((p.interest&&p.interest.bank||0)/100); add+=net; });
   return add;
 }
 /* Wave 2 · R&D maturation — project the tech grade at Q9 from a scenario's forward R&D.
@@ -1437,18 +1551,95 @@ function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's fu
    bounded ESTIMATE (labelled as such in the UI): a quarter funds one grade-up for the product
    furthest below its target, only if that quarter's R&D clears the grade-up budget (~2× the legal
    minimum — the minimum keeps you legal, real advancement costs more). With no levers → base tech. */
-const RD_GRADE_BUDGET={ X:(DATALOG.rdMinPerQuarter.X||40000)*2, Y:(DATALOG.rdMinPerQuarter.Y||70000)*2 };
+/* FIX #14–16 (P1) — R&D is PROBABILISTIC, not a purchase.
+   The old model held a single invented threshold (twice the legal minimum, i.e. 80,000 SF for
+   a chip grade) and then granted the grade with certainty. Group 8's own record puts a grade
+   nearer 300,000–500,000 SF, so every forward plan over-promised technology — and technology
+   is 45% of the potential half of the final score.
+   The curve below is a saturating probability anchored on three points that the guide and our
+   own history both support: at the legal minimum the chance is small but non-zero; it rises
+   steeply through the 200–500K band; it never reaches certainty. `scale` is re-fitted from the
+   team's actual spend-to-grade history whenever there is any, so the estimate improves each
+   quarter instead of staying a guess. Everything here is an ESTIMATE and is labelled as one. */
+const RD_MIN={ X:DATALOG.rdMinPerQuarter.X||40000, Y:DATALOG.rdMinPerQuarter.Y||70000 };
+const RD_PRIOR_SCALE={ X:300000, Y:400000 };   // SF above the minimum for ~63% of the max chance
+const RD_PMAX=0.85;                            // no amount of money buys certainty
+
+/* Fit `scale` from entered quarters: how much did we actually spend, and did the grade move?
+   Returns {scaleX, scaleY, obs, src} — with the prior untouched when there is nothing to learn. */
+function rdCalibration(){
+  const ent=QUARTERS.filter(q=>S.quarters[q].entered);
+  let spendHit={X:[],Y:[]}, spendMiss={X:[],Y:[]};
+  for(let i=1;i<ent.length;i++){
+    const prev=S.quarters[ent[i-1]].operational, cur=S.quarters[ent[i]].operational;
+    const spent=prev.rd||0; if(spent<=0) continue;
+    // the report gives one R&D figure; attribute it to whichever grade actually moved
+    const dX=(cur.techX||0)-(prev.techX||0), dY=(cur.techY||0)-(prev.techY||0);
+    if(dX>0) spendHit.X.push(spent); else spendMiss.X.push(spent);
+    if(dY>0) spendHit.Y.push(spent); else spendMiss.Y.push(spent);
+  }
+  const fit=(prod)=>{
+    const hits=spendHit[prod], misses=spendMiss[prod];
+    if(!hits.length && !misses.length) return {scale:RD_PRIOR_SCALE[prod], obs:0};
+    // cheapest success is an upper bound on what a grade costs; dearest failure is a lower one
+    const cheapestWin=hits.length?Math.min(...hits):null;
+    const dearestLoss=misses.length?Math.max(...misses):null;
+    let scale=RD_PRIOR_SCALE[prod];
+    if(cheapestWin!=null) scale=Math.max(RD_MIN[prod], (cheapestWin-RD_MIN[prod])/1.0);
+    if(dearestLoss!=null) scale=Math.max(scale, (dearestLoss-RD_MIN[prod])*1.2);
+    return {scale:Math.max(50000,Math.round(scale)), obs:hits.length+misses.length,
+      cheapestWin, dearestLoss};
+  };
+  const fx=fit('X'), fy=fit('Y');
+  return {X:fx, Y:fy, obs:fx.obs+fy.obs,
+    src: (fx.obs+fy.obs)>0 ? 'מכויל מרבעונים שנקלטו' : 'אומדן פתיחה — טרם כויל מתוצאות'};
+}
+
+/* Probability that `spend` SF this quarter advances ONE grade of `prod`. Estimate. */
+function rdSuccessProb(prod, spend, cal){
+  const min=RD_MIN[prod]||40000;
+  if(!(spend>0)) return 0;
+  if(spend<min) return 0;                       // below the legal minimum the entry is invalid
+  const c=(cal||rdCalibration())[prod]||{scale:RD_PRIOR_SCALE[prod]};
+  const over=Math.max(0,spend-min);
+  return RD_PMAX*(1-Math.exp(-over/Math.max(1,c.scale)));
+}
+/* How much to budget for a target probability — the number the team actually needs. */
+function rdSpendForProb(prod, target, cal){
+  const min=RD_MIN[prod]||40000;
+  const t=Math.min(RD_PMAX*0.99, Math.max(0.01,target||0.6));
+  const c=(cal||rdCalibration())[prod]||{scale:RD_PRIOR_SCALE[prod]};
+  return Math.round(min + c.scale*Math.log(RD_PMAX/(RD_PMAX-t)));
+}
+
 function projectedTechAt(base, levers){
   const op=S.quarters[base].operational; let tx=op.techX||0, ty=op.techY||0;
-  if(!levers) return {techX:tx, techY:ty, gainX:0, gainY:0};
+  const cal=rdCalibration();
+  if(!levers) return {techX:tx, techY:ty, gainX:0, gainY:0, expX:tx, expY:ty, probs:[], cal};
   const g=S.config.goals, tgX=g.techXTarget||9, tgY=g.techYTarget||9;
-  nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; if(rd<=0) return;
+  // Expected grade: each funded quarter adds its SUCCESS PROBABILITY, not a whole grade.
+  // The integer track (tx/ty) still moves on the most likely path so downstream code that
+  // wants a grade number keeps working; expX/expY carry the honest expectation.
+  let expX=tx, expY=ty; const probs=[];
+  nextQuarters(base).forEach(q=>{
+    const lev=levers[q]; if(!lev) return;
+    const rdX=(lev.rdX!=null?lev.rdX:null), rdY=(lev.rdY!=null?lev.rdY:null);
+    const total=lev.rd||0;
     const needX=tgX-tx, needY=tgY-ty;
-    const canX=rd>=RD_GRADE_BUDGET.X && needX>0, canY=rd>=RD_GRADE_BUDGET.Y && needY>0;
-    if(canY && (needY>=needX || !canX)) ty=Math.min(9,ty+1);   // one grade-up/quarter, bigger gap first
-    else if(canX) tx=Math.min(9,tx+1);
+    // when the plan does not split, aim the money where the gap is
+    let sx=rdX, sy=rdY;
+    if(sx==null&&sy==null){
+      if(needY>0 && (needY>=needX)) { sy=total; sx=0; }
+      else { sx=total; sy=0; }
+    }
+    const pX=needX>0?rdSuccessProb('X',sx||0,cal):0;
+    const pY=needY>0?rdSuccessProb('Y',sy||0,cal):0;
+    if(pX>0){ expX=Math.min(tgX,expX+pX); if(pX>=0.5) tx=Math.min(9,tx+1); }
+    if(pY>0){ expY=Math.min(tgY,expY+pY); if(pY>=0.5) ty=Math.min(9,ty+1); }
+    if(pX>0||pY>0) probs.push({q, spendX:sx||0, spendY:sy||0, pX, pY});
   });
-  return {techX:tx, techY:ty, gainX:tx-(op.techX||0), gainY:ty-(op.techY||0)};
+  return {techX:tx, techY:ty, gainX:tx-(op.techX||0), gainY:ty-(op.techY||0),
+    expX:Math.round(expX*100)/100, expY:Math.round(expY*100)/100, probs, cal};
 }
 function scoreProxy(leversByQuarter){
   const base=S.activeQuarter, g=S.config.goals, op=S.quarters[base].operational, f=S.quarters[base].financial;
@@ -1540,11 +1731,17 @@ function detectTrends(entered){
   if(Math.abs(dShare)>0.02) out.push({type:'ourshare',msg:`נתח השוק שלנו ${dShare>0?'עלה':'ירד'} ב-${(Math.abs(dShare)*100).toFixed(1)} נק׳ מהרבעון הקודם`});
   return out;
 }
-/* MR3, MR17 and MR28 arrive free and automatically every quarter in standard runs
-   (Guide §VI), which is exactly why only THREE paid slots exist. Recommending their
-   purchase burns a slot on data you already have — so a gap in one of them is never a
-   buying decision, it is an ingestion problem. */
-const MR_FREE=['MR3','MR17','MR28'];
+/* MR17, MR28 and MR74 arrive free and automatically every quarter (חוברת עזר — עמודת
+   "עלות אלפי SF": שורות 17, 28 ו-74 = "חינם"), which is exactly why only THREE paid slots
+   exist. Recommending their purchase burns a slot on data you already have — so a gap in
+   one of them is never a buying decision, it is an ingestion problem.
+   FIX #64 (P1): the list previously read ['MR3','MR17','MR28'] and the MR74 hint below
+   called MR74 a paid study. Both are inverted against the booklet: MR3 ("סה״כ מכירות")
+   costs 10,000 SF, and MR74 ("דו״חות כספיים מטבע 4") is free. Net effect of the bug was a
+   wasted paid slot plus a free competitor-ranking report that was never collected — and
+   that report feeds 60% of the past-performance half of the final score. */
+const MR_FREE=['MR17','MR28','MR74'];
+const MR_FREE_SRC='חוברת עזר — מחקרי שווקים, עמודת עלות: 17 · 28 · 74 = חינם';
 function infoGaps(entered){
   const gaps=[]; const last=entered[entered.length-1]; const mi=last?S.quarters[last].marketIntel||{}:{};
   if(!(mi.sales||[]).length)
@@ -1552,7 +1749,7 @@ function infoGaps(entered){
   if(!(mi.compPrices||[]).length)
     gaps.push({mr:'MR28', free:true, why:'MR28 (מחירי צרכן) מגיע <b>חינם ואוטומטית</b> — חוסר בו הוא כשל קליטה, לא החלטת רכש.'});
   if(!Object.keys(mi.competitors||{}).length)
-    gaps.push({mr:'MR74', why:'אין מאזן/רו״ה מתחרים — נדרש לדירוג מול המתחרים (60% ממחצית העבר) ולזיהוי מגמות. <b>זה מחקר בתשלום ושווה את הסלוט.</b>'});
+    gaps.push({mr:'MR74', free:true, why:'אין מאזן/רו״ה מתחרים — נדרש לדירוג מול המתחרים (60% ממחצית העבר) ולזיהוי מגמות. <b>MR74 הוא מחקר חינם</b> (חוברת עזר) — אל תבזבז עליו סלוט בתשלום; חוסר בו הוא כשל קליטה.'});
   if((S.learning.elast.priceObs||0)===0 && (mi.compPrices||[]).length)
     gaps.push({mr:'MR2', why:'יש מחירים אך אין מספיק תצפיות לכיול גמישות — MR2 (מכירות + נתחי שוק לפי חברה) מוסיף את ממד היחידות שדרוש לכיול.'});
   return gaps;
@@ -3723,7 +3920,7 @@ window.editScenario=(id)=>{
         body=`<div class="small muted" style="margin-bottom:8px">בחר עד <b>3</b> מחקרי שוק לרכישה הרבעון · נבחרו <b>${sel.length}/3</b></div>
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${sel.length?sel.map(code=>{ const m=MR_STUDIES.find(x=>x.code===code); return `<span class="tag b" style="display:inline-flex;gap:6px;align-items:center;padding:5px 9px">${code}${m?' · '+m.short:''} <span style="cursor:pointer;font-weight:700" onclick="removeMR('${sc.id}','${q}','${act.aid}','${code}')">✕</span></span>`; }).join(''):'<span class="small muted">טרם נבחרו מחקרים</span>'}</div>
         ${sel.length<3?`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-          <select class="f" style="max-width:340px" onchange="if(this.value){addMR('${sc.id}','${q}','${act.aid}',this.value);}"><option value="">➕ הוסף מחקר מהקטלוג…</option>${MR_GROUPS.map(g=>{ const inG=avail.filter(m=>m.grp===g); return inG.length?`<optgroup label="${g}">${inG.map(m=>`<option value="${m.code}">${m.code}${m.free?' ◦חינם':''} · ${m.label}</option>`).join('')}</optgroup>`:''; }).join('')}</select>
+          <select class="f" style="max-width:340px" onchange="if(this.value){addMR('${sc.id}','${q}','${act.aid}',this.value);}"><option value="">➕ הוסף מחקר מהקטלוג…</option>${MR_GROUPS.map(g=>{ const inG=avail.filter(m=>m.grp===g); return inG.length?`<optgroup label="${g}">${inG.map(m=>`<option value="${m.code}">${m.code} · ${m.cost===0?'חינם':(m.cost==null?'עלות לא מאומתת':m.cost+'K SF')} · ${m.label}</option>`).join('')}</optgroup>`:''; }).join('')}</select>
           <input class="f" style="max-width:130px" id="mrcustom_${act.aid}" placeholder="מס׳ MR אחר"><button class="btn sm" onclick="addCustomMR('${sc.id}','${q}','${act.aid}')">הוסף מס׳</button>
         </div>`:'<div class="small muted">הגעת ל-3 מחקרים (המקסימום לרבעון). הסר אחד כדי להחליף.</div>'}
         <div class="small muted" style="margin-top:8px">${IC('info')} נרשם לגיליון ההזנה (H1-2) — <b>לא משפיע ישירות על תחזית הציון</b>, אך תוצאותיו מכיילות את מנוע הביקוש ברבעון הבא. הקטלוג במשחק ממוספר; לכל מחקר אחר הזן מספר מותאם.</div>`;
@@ -3785,7 +3982,7 @@ function renderImpactBoard(sc){
       <div class="small muted" style="margin-bottom:8px">${IC('scale')} ציון Q9 = 50% ביצועי עבר (רווח מצטבר, ROE/ROI/ROS מול מתחרים) + 50% פוטנציאל עתידי (טק, נתח שוק, בריאות פיננסית)</div>
       <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:150px">מחצית ביצועי עבר (50%)</span>${bar(sp.pastHalf,'linear-gradient(90deg,var(--accent),var(--accent2))')}<b class="num" style="width:40px">${sp.pastHalf.toFixed(0)}</b></div>
       <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><span class="small" style="width:150px">מחצית פוטנציאל (50%)</span>${bar(sp.potentialHalf,'linear-gradient(90deg,var(--purple),#c084fc)')}<b class="num" style="width:40px">${sp.potentialHalf.toFixed(0)}</b></div>
-      <div class="small muted" style="margin:2px 0 8px 0;padding-inline-start:2px">${IC('cpu')} דרגת טק מוקרנת מהמו״פ: <b>X${bop.techX}→${pt.techX} · Y${bop.techY}→${pt.techY}</b>${techGain>0?` <span class="tag g">+${techGain} דרגות</span>`:' <span class="tag a">אין קידום — הגדל מו״פ</span>'} <span class="small">(אומדן: דרגה עולה כשמו״פ ברבעון ≥ ${fmt(RD_GRADE_BUDGET.X)}/${fmt(RD_GRADE_BUDGET.Y)} SF ל-X/Y)</span></div>
+      <div class="small muted" style="margin:2px 0 8px 0;padding-inline-start:2px">${IC('cpu')} דרגת טק מוקרנת מהמו״פ: <b>X${bop.techX}→${pt.techX} · Y${bop.techY}→${pt.techY}</b>${techGain>0?` <span class="tag g">+${techGain} דרגות</span>`:' <span class="tag a">אין קידום — הגדל מו״פ</span>'} <span class="small">${est(`תוחלת X${pt.expX} · Y${pt.expY}`,'דרגה מתקדמת בהסתברות, לא בוודאות')} — ${esc(pt.cal.src)}${pt.probs&&pt.probs.length?` · סיכוי הרבעון הקרוב: X ${(pt.probs[0].pX*100).toFixed(0)}% · Y ${(pt.probs[0].pY*100).toFixed(0)}%`:''}. לסיכוי 60% נדרש כ-${fmt(rdSpendForProb('X',0.6))} SF ל-X ו-${fmt(rdSpendForProb('Y',0.6))} SF ל-Y.</span></div>
       <div class="row" style="gap:10px;align-items:center"><span class="small" style="width:130px"><b>ציון כולל</b></span>${bar(sp.value,'linear-gradient(90deg,var(--green),var(--accent))')}<b class="num" style="width:40px">${sp.value.toFixed(0)}</b></div>
     </div>
     <div class="card pad" style="margin-top:10px">
@@ -3800,6 +3997,13 @@ function renderImpactBoard(sc){
 }
 function _patchInput(region,k,val){ const el=document.getElementById('f_'+region+'_'+k); if(el&&document.activeElement!==el) el.value=val; }
 window.renameScenario=(id,v)=>{ const sc=S.scenarios.find(s=>s.id===id); sc.name=v; save(true); };
+/* FIX #74: field edits go to the line the ACTION owns, not blindly to the region object. */
+window.setLeverOn=(id,q,aid,k,val)=>{ const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
+  const lv=sc.levers[q]; const act=(lv.actions||[]).find(a=>a.aid===aid); if(!act)return;
+  const ln=lineOfAction(lv,act); if(!ln)return; const num=parseFloat(val)||0;
+  ln[k]=num;
+  if(k==='price'||k==='qtySold'){ if(ln.qtySold==null) ln.qtySold=0; ln.sales=Math.round((ln.price||0)*(ln.qtySold||0)); ln.margin=null; }
+  save(true); renderImpactBoard(sc); };
 window.setLever=(id,q,k,region,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const num=parseFloat(val)||0;
   if(region){ const rl=sc.levers[q].regions[region]=sc.levers[q].regions[region]||{}; rl[k]=num;
     if((k==='production'||k==='unitCost') && rl.margin && rl.unitCost>0){ rl.sales=Math.round((rl.production||0)*rl.unitCost*rl.margin); _patchInput(region,'sales',rl.sales); if(rl.advPct!=null){ rl.advertising=Math.round(rl.sales*rl.advPct/100); _patchInput(region,'advertising',rl.advertising); } }
@@ -3929,63 +4133,104 @@ function clearActionFields(lv,act){ const sf=simForm(act.form); if(!sf)return;
   else if(sf.kind==='transfer') rl.transferIn=0;
   else if(sf.kind==='invest') rl.invest=0;
 }
+/* FIX #74 — routing a field edit to the right production line.
+   Line 0 is the region object itself (kept for backward compatibility with every saved
+   scenario); a second product in the same area lives in rl.lines[0]. That is precisely the
+   case the tool could not express: 48,000 chips AND 18,000 computers in Europe. */
+function lineFor(lv, region, product){
+  const rl=lv.regions[region]; if(!rl) return null;
+  const want=(product==='X'?'X':'Y');
+  const primaryEmpty=!(rl.production>0||rl.sales>0||rl.qtySold>0||rl.price>0);
+  if(primaryEmpty || rl.product===want){ rl.product=want; return rl; }
+  rl.lines=Array.isArray(rl.lines)?rl.lines:[];
+  let ln=rl.lines.find(l=>l.product===want);
+  if(!ln){ ln={product:want,grade:null,model:'Standard',production:0,unitCost:0,price:0,qtySold:0,sales:0,advertising:0}; rl.lines.push(ln); }
+  return ln;
+}
+/* Which line an action edits, from its form's product. */
+function lineOfAction(lv, act){
+  const sf=simForm(act.form);
+  if(!act.region||!sf||!sf.product) return lv.regions[act.region]||null;
+  return lineFor(lv, act.region, sf.product);
+}
 window.addSimAction=(id,q,form)=>{ if(!form)return; const sc=S.scenarios.find(s=>s.id===id); const lv=sc.levers[q]; lv.actions=lv.actions||[];
   const sf=simForm(form); const region=sf.scope==='region'?'us':undefined;
-  const dupe=lv.actions.some(a=>{ const asf=simForm(a.form); if(a.region!==region) return false;
-    if((sf.kind==='produce'&&asf.kind==='produce')||(sf.kind==='price'&&asf.kind==='price')) return true; return a.form===form; });
-  if(dupe){ toast('פעולה כזו כבר קיימת באזור הזה — ערוך אותה או בחר אזור אחר','a'); return; }
+  // FIX #74: two produce (or two price) actions in one area are legal when they are for
+  // DIFFERENT products — a chip line and a PC line coexist. Only an identical form is a dupe.
+  const dupe=lv.actions.some(a=>{ if(a.region!==region) return false; return a.form===form; });
+  if(dupe){ toast('הפעולה הזו כבר קיימת באזור הזה — ערוך אותה או בחר אזור אחר','a'); return; }
   const act={aid:Math.random().toString(36).slice(2,8),form,region};
-  if(sf.product&&region) lv.regions[region].product=sf.product;
+  if(sf.product&&region) lineFor(lv,region,sf.product);
   lv.actions.push(act); save(); refreshSimEditor(); };
 window.removeSimAction=(id,q,aid)=>{ const sc=S.scenarios.find(s=>s.id===id); const lv=sc.levers[q]; const act=(lv.actions||[]).find(a=>a.aid===aid);
   if(act){ clearActionFields(lv,act); lv.actions=lv.actions.filter(a=>a.aid!==aid); save(); refreshSimEditor(); } };
 window.setSimActionRegion=(id,q,aid,region)=>{ const sc=S.scenarios.find(s=>s.id===id); const lv=sc.levers[q]; const act=(lv.actions||[]).find(a=>a.aid===aid); if(!act)return;
   const sf=simForm(act.form);
-  const dupe=lv.actions.some(a=>{ if(a===act||a.region!==region)return false; const asf=simForm(a.form);
-    if((sf.kind==='produce'&&asf.kind==='produce')||(sf.kind==='price'&&asf.kind==='price'))return true; return a.form===act.form; });
+  const dupe=lv.actions.some(a=>{ if(a===act||a.region!==region)return false; return a.form===act.form; });
   if(dupe){ toast('כבר קיימת פעולה כזו באזור שנבחר','a'); refreshSimEditor(); return; }
-  clearActionFields(lv,act); act.region=region; if(sf.product) lv.regions[region].product=sf.product; save(); refreshSimEditor(); };
+  clearActionFields(lv,act); act.region=region; if(sf.product) lineFor(lv,region,sf.product); save(); refreshSimEditor(); };
 window.setSimNote=(id,q,aid,k,val)=>{ const sc=S.scenarios.find(s=>s.id===id); const act=(sc.levers[q].actions||[]).find(a=>a.aid===aid);
   if(act){ act[k]=(k==='amount')?(parseFloat(val)||0):val; save(true); } };
 /* Market-research (H1-2) — the studies the platform parses & uses. The game catalog is numbered
    (up to 3 per quarter); other studies can be added by number via the custom field, so we never
    invent MR numbers we don't actually recognize. */
-/* Full Standard Market Research catalog from the INTOPIA Data Log / Guide (back of Form H1, §III.9E).
-   grp = optgroup; free = provided free in standard runs. Per-grade families (31–39 test-marketing,
-   51–69 cost estimates) are represented by their first item — use the custom field for a specific grade. */
+/* Full Standard Market Research catalog. `cost` = thousands SF, taken from חוברת עזר
+   ("מחקרי שווקים – הסברים", עמודת "עלות אלפי SF"). cost:0 = free · cost:null = the study
+   appears in the Guide but NOT in the booklet table, so its price is unverified.
+   FIX #65 (P1): the catalog previously carried no cost data at all, which made the
+   three-paid-slot decision unrankable — a 1,000 SF study and a 60,000 SF study looked
+   identical. Per-grade families (31–39 / 41–49 test-marketing, 51–59 / 61–69 cost
+   estimates) are represented by their first item; use the custom field for a given grade. */
 const MR_STUDIES=[
   // מכירות ומחירים
-  {code:'MR3', short:'מכירות תעשייה', grp:'מכירות ומחירים', free:true,  label:'מכירות צרכן תעשייתיות כוללות — מוצר/דגם/אזור'},
-  {code:'MR17',short:'דרגות נמכרו', grp:'מכירות ומחירים', free:true,  label:'דרגות שנמכרו לפי חברה (יחידות קמעונאיות) — נתח שוק'},
-  {code:'MR28',short:'מחירי צרכן', grp:'מכירות ומחירים', free:true,  label:'מחירי צרכן שפורסמו לפי חברה — עוגן מחיר'},
-  {code:'MR2', short:'מכירות+נתח', grp:'מכירות ומחירים', label:'מכירות יחידות + נתחי שוק לפי חברה/מוצר/דגם/אזור'},
-  {code:'MR76',short:'יצוא', grp:'מכירות ומחירים', label:'יצוא כולל ביחידות לפי מוצר/אזור + מחיר ממוצע'},
-  {code:'MR77',short:'יבוא', grp:'מכירות ומחירים', label:'יבוא כולל ביחידות לפי מוצר/אזור + מחיר ממוצע'},
+  {code:'MR17',short:'דרגות נמכרו', grp:'מכירות ומחירים', cost:0, label:'לכל חברה — אילו דרגות מכרה לצרכנים סופיים, בכל ענף ובכל אזור (נתח שוק)'},
+  {code:'MR28',short:'מחירי צרכן', grp:'מכירות ומחירים', cost:0, label:'המחירים שקבעו החברות בשוק, לפי אזור ומוצר — עוגן המחיר'},
+  {code:'MR3', short:'סה״כ מכירות', grp:'מכירות ומחירים', cost:10, label:'סה״כ מכירות לשוק באלפי יחידות'},
+  {code:'MR2', short:'מכירות לצרכנים', grp:'מכירות ומחירים', cost:60, label:'פירוט לפי קבוצה של מכירות שני המוצרים לשוק, באלפי יחידות'},
+  {code:'MR76',short:'כמויות מיוצאות', grp:'מכירות ומחירים', cost:2, label:'סה״כ כמויות ומחירים ממוצעים לפי אזור ומוצר — שיוצאו מהאזור'},
+  {code:'MR77',short:'כמויות מיובאות', grp:'מכירות ומחירים', cost:2, label:'סה״כ כמויות ומחירים ממוצעים לפי אזור ומוצר — שיובאו לאזור'},
   // מודיעין מתחרים
-  {code:'MR74',short:'דוחות כספי', grp:'מודיעין מתחרים', label:'דוחות כספיים מאוחדים של כל החברות (SF) — דירוג'},
-  {code:'MR78',short:'יחסים-שלנו', grp:'מודיעין מתחרים', label:'יחסי ביצוע/פעילות שלך + ממוצעי תעשייה + נתח שוק'},
-  {code:'MR79',short:'יחסים-כולם', grp:'מודיעין מתחרים', label:'יחסי ביצוע/פעילות כל החברות + ממוצעים'},
-  {code:'MR11',short:'מוכרים דגם', grp:'מודיעין מתחרים', label:'מספר חברות שמוכרות Standard/Deluxe לפי מוצר/אזור'},
-  {code:'MR23',short:'מלאי גבוה', grp:'מודיעין מתחרים', label:'חברות עם מלאי גבוה — לחץ צפוי להורדת מחיר'},
-  {code:'MR25',short:'משרדים', grp:'מודיעין מתחרים', label:'מספר משרדי מכירות לפי חברה/אזור'},
-  {code:'MR40',short:'מפעלים', grp:'מודיעין מתחרים', label:'מספר מפעלים שנבנו/בבנייה לפי חברה/מוצר/אזור'},
-  {code:'MR80',short:'עסקאות B2B', grp:'מודיעין מתחרים', label:'עסקאות מכירה בין-חברתיות פרטניות (מוכר/קונה/דרגה)'},
-  {code:'MR81',short:'ארגון-מכר', grp:'מודיעין מתחרים', label:'תוכנית ארגון-מכירות אופטימלי (אם זמין)'},
-  // מו״פ ודרגות
-  {code:'MR29',short:'דרגות מלאי', grp:'מו״פ ודרגות', maybeFree:true, label:'דרגות מלאי סגירה רבעון קודם — חברה/מוצר/דגם/אזור'},
-  {code:'MR30',short:'דרגות הבא', grp:'מו״פ ודרגות', label:'דרגות שיוצרו לרבעון הבא לפי חברה'},
-  {code:'MR14',short:'מו״פ תעשייה', grp:'מו״פ ודרגות', label:'הוצאת מו״פ תעשייתית כוללת (ממוצע 3 רבעונים)'},
-  {code:'MR21',short:'סיכוי פטנט', grp:'מו״פ ודרגות', label:'הערכת הסתברות פטנט (טווח)'},
-  {code:'MR24',short:'קיבולת', grp:'מו״פ ודרגות', label:'הערכת קיבולת מפעל אופטימלית (טווח)'},
-  {code:'MR31',short:'סַלֵּבִּיליוּת', grp:'מו״פ ודרגות', label:'שיווק-בדיקה: סַלֵּבִּיליוּת דרגה מול בסיס (31–39, לפי דרגה)'},
-  {code:'MR51',short:'עלות דרגה', grp:'מו״פ ודרגות', label:'הערכת עלות ייצור לפי דרגה (51–69, לפי דרגה)'},
+  {code:'MR74',short:'דו״חות כספיים מטבע 4', grp:'מודיעין מתחרים', cost:0, label:'דו״חות כספיים מאוחדים של כל החברות במטבע 4 — בסיס הדירוג מול המתחרים'},
+  {code:'MR40',short:'מספר מפעלים', grp:'מודיעין מתחרים', cost:1, label:'מס׳ מפעלים שיש לכל חברה בכל אזור לכל מוצר'},
+  {code:'MR11',short:'מס׳ חברות מוכרות', grp:'מודיעין מתחרים', cost:1, label:'מס׳ חברות שמכרו לצרכנים סופיים, לפי אזור ומוצר'},
+  {code:'MR10',short:'מפעלים מייצרים', grp:'מודיעין מתחרים', cost:2, label:'סה״כ מס׳ מפעלים שייצרו ברבעון, לפי אזור ומוצר'},
+  {code:'MR25',short:'משרדי מכירות', grp:'מודיעין מתחרים', cost:2, label:'מספר משרדי מכירות שיש לכל חברה בכל אזור'},
+  {code:'MR29',short:'מלאי לפי רמות', grp:'מודיעין מתחרים', cost:2, label:'לכל חברה — אילו רמות יש לה במלאי בכל אזור ובכל מוצר'},
+  {code:'MR4', short:'חברות מפרסמות', grp:'מודיעין מתחרים', cost:2, label:'מספר החברות שפרסמו באחד מהשווקים ברבעון'},
+  {code:'MR30',short:'רמה לרבעון הבא', grp:'מודיעין מתחרים', cost:5, label:'לכל חברה — אילו רמות ייצרה למכירה לרבעון הבא, לפי אזור ומוצר'},
+  {code:'MR19',short:'מלאי סופי', grp:'מודיעין מתחרים', cost:5, label:'סה״כ מלאי סופי ביחידות לפי ענף ואזור'},
+  {code:'MR5', short:'פרסום בתעשייה', grp:'מודיעין מתחרים', cost:10, label:'סה״כ פרסום בכל תעשייה בערכים כספיים'},
+  {code:'MR71',short:'דו״חות מטבע 1', grp:'מודיעין מתחרים', cost:10, label:'דו״חות כספיים מאוחדים של כל החברות במטבע 1'},
+  {code:'MR72',short:'דו״חות מטבע 2', grp:'מודיעין מתחרים', cost:10, label:'דו״חות כספיים מאוחדים של כל החברות במטבע 2'},
+  {code:'MR73',short:'דו״חות מטבע 3', grp:'מודיעין מתחרים', cost:10, label:'דו״חות כספיים מאוחדים של כל החברות במטבע 3'},
+  {code:'MR6', short:'פרסום לפי חברה', grp:'מודיעין מתחרים', cost:24, label:'סה״כ פרסום של כל חברה עבור כל מוצר'},
+  {code:'MR23',short:'מלאי סופי בחברות', grp:'מודיעין מתחרים', cost:40, label:'מס׳ יחידות מלאי שיש לכל חברה בסוף הרבעון, לפי אזור ומוצר (STD/DEL)'},
+  {code:'MR79',short:'אינדיקטורים לחברה', grp:'מודיעין מתחרים', cost:40, label:'יחסים פיננסיים, נתח שוק ורמה טכנולוגית של כל חברה'},
+  {code:'MR80',short:'מכירות בין חברות', grp:'מודיעין מתחרים', cost:40, label:'איזו חברה, מאיזה אזור, לחברה אחרת ולאן — איזה מוצר ובאיזו רמה'},
+  {code:'MR81',short:'אופטימיזציית משרדים', grp:'מודיעין מתחרים', cost:60, label:'דף לכל אזור: עבור כמות שבבים/מחשבים שתימכר — כמה משרדי מכירות כדאי להקים'},
+  // מו״פ, ייצור ודרגות
+  {code:'MR7', short:'שיפור שיטות', grp:'מו״פ, ייצור ודרגות', cost:1, label:'מס׳ חברות שהשקיעו בשיפור שיטות בכל אזור ובכל מוצר'},
+  {code:'MR12',short:'חברות במו״פ', grp:'מו״פ, ייצור ודרגות', cost:1, label:'מס׳ חברות שהשקיעו במו״פ, לפי מוצר'},
+  {code:'MR8', short:'שיפור שיטות בתעשייה', grp:'מו״פ, ייצור ודרגות', cost:2, label:'סה״כ שיפור שיטות בתעשייה לפי אזור ומוצר'},
+  {code:'MR9', short:'ממוצע שיפור שיטות', grp:'מו״פ, ייצור ודרגות', cost:5, label:'ממוצע 3 רבעונים אחרונים בהשקעה בשיפור שיטות, לפי אזור ומוצר'},
+  {code:'MR14',short:'השקעה ממוצעת במו״פ', grp:'מו״פ, ייצור ודרגות', cost:10, label:'השקעה ממוצעת לחברה במו״פ לפי מוצר, בשלושת הרבעונים האחרונים'},
+  {code:'MR51',short:'עלות ייצור לפי דרגה', grp:'מו״פ, ייצור ודרגות', cost:10, label:'טווח האומד בכמה תעלה עלות הייצור ביחס לרמה 0, בכל אזור (51–59 שבב · 61–69 מחשב)'},
+  {code:'MR13',short:'סה״כ מו״פ', grp:'מו״פ, ייצור ודרגות', cost:24, label:'סה״כ השקעה במו״פ לפי מוצר'},
+  {code:'MR18',short:'התיישנות מפעלים', grp:'מו״פ, ייצור ודרגות', cost:24, label:'אומדן התיישנות המפעלים באזור'},
+  {code:'MR24',short:'היקף ייצור אופטימלי', grp:'מו״פ, ייצור ודרגות', cost:24, label:'טווח ערכים האומד מהו היקף הייצור האופטימלי ליחידה, לפי אזור וענף'},
+  {code:'MR31',short:'בדיקת שוק לדרגה', grp:'מו״פ, ייצור ודרגות', cost:24, label:'אומדן עליית המחיר ביחס לרמה 0 בכל אזור (31–39 שבב · 41–49 מחשב)'},
   // פיננסי וסביבה
-  {code:'MR1', short:'Gazette', grp:'פיננסי וסביבה', label:'עיתון CIA — אקלים עסקי, תחזיות, רכילות תעשייה'},
-  {code:'MR9', short:'שיפור-שיטות', grp:'פיננסי וסביבה', label:'הוצאת שיפור-שיטות תעשייתית (ממוצע 3 רבעונים)'},
-  {code:'MR20',short:'סף דיבידנד', grp:'פיננסי וסביבה', label:'סף דיבידנד מינימלי מצופה מבעלי מניות'},
-  {code:'MR26',short:'ROI משרד', grp:'פיננסי וסביבה', label:'% עלייה מקסימלי במכירות ממשרד מכירות נוסף'},
-  {code:'MR27',short:'רו״ח כ-%', grp:'פיננסי וסביבה', label:'סעיפי דו״ח רו״ח שלך כאחוז מהמכירות'},
+  {code:'MR15',short:'מחקרי שוק', grp:'פיננסי וסביבה', cost:1, label:'מספר חברות שמשקיעות במחקרי שוק ברבעון'},
+  {code:'MR16',short:'השקעה במחקרים', grp:'פיננסי וסביבה', cost:1, label:'סה״כ השקעה במשחק במחקרי שוק'},
+  {code:'MR27',short:'יחסים פיננסיים לחברה', grp:'פיננסי וסביבה', cost:10, label:'יחסים פיננסיים של החברה'},
+  // מופיעים במדריך ואינם בטבלת חוברת העזר — עלות לא מאומתת
+  {code:'MR1', short:'Gazette', grp:'לא מאומת בחוברת', cost:null, label:'עיתון CIA — אקלים עסקי, תחזיות, רכילות תעשייה'},
+  {code:'MR20',short:'סף דיבידנד', grp:'לא מאומת בחוברת', cost:null, label:'סף דיבידנד מינימלי מצופה מבעלי מניות'},
+  {code:'MR21',short:'סיכוי פטנט', grp:'לא מאומת בחוברת', cost:null, label:'הערכת הסתברות פטנט (טווח)'},
+  {code:'MR26',short:'ROI משרד', grp:'לא מאומת בחוברת', cost:null, label:'% עלייה מקסימלי במכירות ממשרד מכירות נוסף'},
+  {code:'MR78',short:'יחסים — שלנו', grp:'לא מאומת בחוברת', cost:null, label:'יחסי ביצוע/פעילות שלך + ממוצעי תעשייה + נתח שוק'},
 ];
+const MR_COST=c=>{ const m=MR_STUDIES.find(x=>x.code===c); return m?m.cost:null; };
 /* The catalog, stated plainly: which three arrive free, how many you may buy, and what
    each number actually gives you. */
 window.openMRCatalog=()=>{
@@ -3993,28 +4238,44 @@ window.openMRCatalog=()=>{
   const slots=mrPaidSlots(targetQ);
   const gaps=(S.learning&&S.learning.gaps)||[];
   const wanted=new Set(gaps.filter(g=>!g.free).map(g=>g.mr));
+  const costTag=m=> m.cost===0 ? '<span class="tag g">חינם</span>'
+    : (m.cost==null ? '<span class="tag a">לא מאומת</span>'
+    : `<b class="num">${fmt(m.cost)}K</b>`);
   const rowsOf=(list)=>list.map(m=>`<tr${wanted.has(m.code)?' style="background:rgba(52,211,153,.08)"':''}>
     <td class="num"><b>${m.code.replace('MR','')}</b></td>
     <td style="text-align:start"><b>${esc(m.short)}</b>${wanted.has(m.code)?' <span class="tag g">מומלץ עכשיו</span>':''}${slots.ordered.includes(m.code)?' <span class="tag b">כבר הוזמן</span>':''}</td>
     <td style="text-align:start;white-space:normal;line-height:1.6">${esc(m.label)}</td>
-    <td>${m.free?'<span class="tag g">חינם</span>':(m.maybeFree?'<span class="tag a">חינם בחלק מהריצות</span>':'<span class="tag b">בתשלום</span>')}</td></tr>`).join('');
-  const free=MR_STUDIES.filter(m=>m.free), paid=MR_STUDIES.filter(m=>!m.free);
+    <td style="white-space:nowrap">${costTag(m)}</td></tr>`).join('');
+  const free=MR_STUDIES.filter(m=>m.cost===0);
+  // cheapest first — with only three slots and a real budget, price is half the decision
+  const paid=MR_STUDIES.filter(m=>m.cost!==0).sort((a,b)=>(a.cost==null?1e9:a.cost)-(b.cost==null?1e9:b.cost));
+  const orderedCost=slots.ordered.reduce((a,c)=>{ const v=MR_COST(c); return a+(v==null?0:v); },0);
+  const anyUnknown=slots.ordered.some(c=>MR_COST(c)==null);
   openModal('קטלוג מחקרי השוק — H1-2',`
     <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid var(--green)">
-      <b>${IC('check')} 3 מחקרים שמתקבלים חינם ואוטומטית בכל רבעון</b>
-      <div class="small muted" style="margin:6px 0 0;line-height:1.75">לפי המדריך (§VI): <b>"בריצות סטנדרטיות פריטים 3, 17 ו-28 חינמיים בכל רבעון והחברות מקבלות אותם אוטומטית. זה מאפשר להזמין שלושה פריטי MR נוספים."</b>
+      <b>${IC('check')} 3 מחקרים שמתקבלים חינם ואוטומטית בכל רבעון: 17 · 28 · 74</b>
+      <div class="small muted" style="margin:6px 0 0;line-height:1.75">מקור: <b>${esc(MR_FREE_SRC)}</b>, וכן תדריך הפתיחה של הקורס.
       <br><b>אל תזמין אותם ב-H1-2</b> — זה שורף מקום בתשלום על מידע שכבר קיבלת. אם הם חסרים במסך, זו תקלת קליטה של הדוח.</div>
-      <div style="overflow-x:auto;margin-top:9px"><table class="tbl"><thead><tr><th>#</th><th>שם</th><th>מה זה נותן</th><th></th></tr></thead><tbody>${rowsOf(free)}</tbody></table></div>
+      <div style="overflow-x:auto;margin-top:9px"><table class="tbl"><thead><tr><th>#</th><th>שם</th><th>מה זה נותן</th><th>עלות</th></tr></thead><tbody>${rowsOf(free)}</tbody></table></div>
+    </div>
+    <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid var(--amber)">
+      <b>${IC('warn')} סתירת מקורות — פריט 3 מול פריט 74</b>
+      <div class="small muted" style="margin:6px 0 0;line-height:1.75">
+        <b>חוברת העזר</b> (עמודת העלות) קובעת: 17 · 28 · <b>74</b> חינם, ופריט <b>3 עולה 10,000 SF</b>.
+        <b>מדריך INTOPIA §VI</b> קובע: 3 · 17 · 28 חינם.<br>
+        הכלי הולך לפי <b>חוברת העזר</b>, שגוברת בהיררכיית המקורות ומגובה בתדריך הפתיחה. אם המרצה יקבע אחרת — עדכנו את <code>MR_FREE</code>.
+        <b>המחיר של הטעות בכל אחד מהכיוונים: סלוט בתשלום אחד לרבעון.</b></div>
     </div>
     <div class="between" style="margin:0 2px 8px;flex-wrap:wrap;gap:8px">
-      <b>${IC('search')} הקטלוג בתשלום — עד ${slots.max} לרבעון</b>
-      <span class="tag ${slots.left?'g':'a'}">${slots.left} מתוך ${slots.max} מקומות פנויים${slots.used?` · הוזמנו: ${slots.ordered.join(', ')}`:''}</span>
+      <b>${IC('search')} הקטלוג בתשלום — עד ${slots.max} לרבעון (הזול ביותר ראשון)</b>
+      <span class="tag ${slots.left?'g':'a'}">${slots.left} מתוך ${slots.max} מקומות פנויים${slots.used?` · הוזמנו: ${slots.ordered.join(', ')} · עלות ${fmt(orderedCost)}K SF${anyUnknown?' + פריט שעלותו לא מאומתת':''}`:''}</span>
     </div>
-    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>שם</th><th>מה זה נותן</th><th></th></tr></thead><tbody>${rowsOf(paid)}</tbody></table></div>
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>שם</th><th>מה זה נותן</th><th>אלפי SF</th></tr></thead><tbody>${rowsOf(paid)}</tbody></table></div>
     <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')}
-      <b>הערה על פריט 29:</b> §4.10.5 מונה אותו ברשימת ברירת המחדל החינמית של ה-CIA, אך §VI קובע ש<b>בריצות סטנדרטיות</b> השלישייה החינמית היא 3/17/28. סומן "חינם בחלק מהריצות" — כדאי לאמת מול המרצה.<br>
-      <b>פריטים מסומנים "אומדן"</b> (18, 21, 31–39, 61–69) מדווחים כטווח הסתברותי; התשובה האמיתית תמיד בתוך הטווח. אם הטווח רחב מדי — אפשר להזמין את אותו פריט שוב.<br>
-      <b>פריט 1</b> הוא ה-Gazette של ה-CIA ומגיע כחלק נפרד מהפלט.</div>`,
+      <b>העלויות</b> נלקחו מטבלת "מחקרי שווקים – הסברים" בחוברת העזר. פריטים המסומנים <b>"לא מאומת"</b> מופיעים במדריך ואינם בטבלה — אל תתכננו סביבם תקציב.<br>
+      <b>משפחות לפי דרגה:</b> 31–39 (בדיקת שוק שבב) ו-41–49 (מחשב) — 24K כל אחד · 51–59 ו-61–69 (עלות ייצור) — 10K כל אחד. בחרו את הדרגה הרלוונטית בשדה החופשי.<br>
+      <b>פריטים מסומנים "אומדן"</b> (18, 24, 31–39, 41–49, 51–69) מדווחים כטווח; התשובה האמיתית תמיד בתוך הטווח. טווח רחב מדי — אפשר להזמין שוב.<br>
+      <b>שני המחקרים שסוגרים את הפערים הגדולים במנוע:</b> <b>MR24</b> (24K — היקף ייצור אופטימלי, הופך את תקרת הביקוש ממשוער לידוע) ו-<b>MR81</b> (60K — כמה משרדי מכירות כדאי להקים).</div>`,
     `<button class="btn primary" onclick="closeModal();go('sim')">${IC('sliders')} להזנת H1-2 בסימולטור</button>`);
 };
 /* ==========================================================================
@@ -4133,7 +4394,7 @@ window.downloadPlanDoc=(mode)=>{
   document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500);
   toast(mode==='updated'?'הורד מסמך מעודכן עם טבלת השינויים ✓':'הורדה התוכנית המקורית ✓','g');
 };
-const MR_GROUPS=['מכירות ומחירים','מודיעין מתחרים','מו״פ ודרגות','פיננסי וסביבה'];
+const MR_GROUPS=['מכירות ומחירים','מודיעין מתחרים','מו״פ, ייצור ודרגות','פיננסי וסביבה','לא מאומת בחוברת'];
 function mrListOf(act){ if(Array.isArray(act.mrList)) return act.mrList.slice(0,3);
   const codes=[], t=act.note||''; ['MR17','MR28','MR74'].forEach(c=>{ if(t.includes(c))codes.push(c); });
   if(t.includes('מחירי מתחרים')&&!codes.includes('MR28')) codes.push('MR28');
@@ -4359,53 +4620,265 @@ function renderExportActions(box,targetQ,sc){ if(!box)return;
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">${addMenu}<button class="btn sm" onclick="go('sim')">${IC('sliders')} עריכה מלאה בסימולטור →</button></div>
     </div>`;
 }
+/* FIX #73 (P0) — the input sheet used to emit 7 of the 19 decision forms, so the single most
+   binding action in the game (delivering the signed chip contract on H6) could not be entered
+   from the tool at all, and the market-research and securities decisions vanished between the
+   recommendation screen and the sheet the team types from.
+   Rows are emitted in the real entry order: A1 → A2 → A3 → A4 → H → W. Forms the game requires
+   but the plan has no value for are listed separately as "לא תוכנן" rather than silently
+   dropped, because a missing field is a lost quarter (P-01/P-05). */
 function buildInputRows(targetQ,sc){
-  const rows=[]; const lev=sc&&sc.levers[targetQ]; if(!lev) return rows;
+  const rows=[]; const lev=sc&&sc.levers[targetQ];
+  const P=S.config.params;
+  const add=(form,action,value,note,flag)=>rows.push({form,action,value,note:note||'',flag:flag||''});
+  if(!lev) return rows;
+
+  /* ---------- A · area forms ---------- */
   REGIONS.forEach(r=>{
     if(r.id==='hq') return; // A-forms are area-level (USA/Europe/Brazil); HQ handled below
-    const rl=lev.regions[r.id]||{}; const isX=rl.product==='X'; const model=rl.model||'Standard';
-    const price=(rl.production>0&&rl.sales>0)?Math.round(rl.sales/rl.production):(rl.margin&&rl.unitCost?Math.round(rl.unitCost*rl.margin):0);
-    if(rl.production>0) rows.push({form:isX?'A2-3':'A2-4',action:`ייצור ${r.name} — ${isX?'X·Chip':'Y·PC'} ${model}`,value:rl.production,note:rl.unitCost?`עלות/יח׳ ${fmt(rl.unitCost)} ${r.cur}`:''});
-    if(rl.sales>0||rl.advertising>0) rows.push({form:isX?'A1-1':'A1-2',action:`תמחור+פרסום ${r.name} — ${isX?'Chip':'PC'} ${model}`,value:price,note:`מחיר/יח׳ · פרסום ${fmt(rl.advertising||0)} · מכירות ${fmt(rl.sales||0)} ${r.cur}`});
-    if((rl.newFac||0)>0) rows.push({form:'A2-1',action:`הקמת מפעלים — ${r.name}`,value:rl.newFac,note:`עלות ≈${fmt((rl.newFac||0)*(S.config.params.factoryCost||0))} SF · זמין רבעון קדימה`});
-    if((rl.offices||0)>0) rows.push({form:'A1-3',action:`משרדי מכירות — ${r.name}`,value:rl.offices,note:`יעד ${rl.offices} משרדים · עלות ≈${fmt((rl.offices||0)*(S.config.params.officeCost||0))} SF/רבעון`});
-    if(rl.transferIn>0) rows.push({form:'A3-1',action:`Money Transfer — To Home Office? / אל ${r.name}`,value:rl.transferIn,note:`${r.cur} · כיוון מהמטה`});
-    if(rl.invest>0) rows.push({form:'A3-2',action:`השקעה/הלוואה מקומית — ${r.name}`,value:rl.invest,note:r.cur});
+    const rl=lev.regions[r.id]||{};
+    // FIX #74: emit a full row-set PER LINE. One area can run a chip line and a PC line, or
+    // two grades of the same product as Standard + Deluxe — each needs its own form entry.
+    const lines=activeLines(lev,r.id);
+    lines.forEach(l=>{
+      const isX=l.product==='X'; const model=l.model||'Standard';
+      // FIX #72 (P0): the price typed into A1-1/A1-2 is the PRICE lever, not revenue/output.
+      const price=Math.round(linePrice(l));
+      const tag=`${r.name} — ${isX?'Chip':'PC'} ${model}${l.grade!=null?` דרגה ${l.product}${l.grade}`:''}`;
+      if(l.sales>0||l.advertising>0||price>0||l.qtySold>0)
+        add(isX?'A1-1':'A1-2',`תמחור+פרסום ${tag}`,price,
+          `מחיר/יח׳ ${r.cur} · כמות ${fmt(l.qtySold||0)} יח׳ · פרסום ${fmt(l.advertising||0)} ${r.cur} · מכירות ${fmt(l.sales||0)} ${r.cur}`,
+          price>0?'':'חובה');
+      if(l.production>0)
+        add(isX?'A2-3':'A2-4',`ייצור ${tag}`,l.production,
+          l.unitCost?`עלות/יח׳ ${fmt(l.unitCost)} ${r.cur} · נכנס למלאי בסוף ${targetQ}, נמכר מ-${QUARTERS[qIndex(targetQ)+1]||'הבא'}`:'',
+          l.unitCost>0?'':'חסרה עלות');
+    });
+    // assortment is an area-level fact, stated once
+    ['X','Y'].forEach(prd=>{ const ai=assortmentInfo(lev,r.id,prd);
+      if(ai.models>1) add(prd==='X'?'A1-1':'A1-2',`מגוון ${r.name} — ${prd==='X'?'Chip':'PC'}`,ai.models,
+        `${ai.note} · אומדן`,''); });
+    if((rl.offices||0)>0)
+      add('A1-3',`משרדי מכירות — ${r.name}`,rl.offices,`יעד ${rl.offices} משרדים · נכנס לתוקף בסוף הרבעון`);
+    if((rl.newFac||0)>0)
+      add('A2-1',`הקמת מפעלים — ${r.name} (${(lines[0]||{}).product==='X'?'Chip':'PC'})`,rl.newFac,
+        `עלות ≈${fmt((rl.newFac||0)*((DATALOG.plantAcqCost[(lines[0]||{}).product==='X'?'X':'Y']||{})[r.id]||0))} ${r.cur} · משולם במלואו ברבעון הבנייה · מייצר מ-${QUARTERS[qIndex(targetQ)+1]||'הרבעון הבא'}`);
+    if(rl.transferIn>0)
+      add('A3-1',`Money Transfer — מהמטה אל ${r.name}`,rl.transferIn,`${r.cur} · From/To Home Office = To Area`);
+    if(rl.transferOut>0)
+      add('A3-1',`Money Transfer — מ${r.name} אל המטה`,rl.transferOut,
+        `${r.cur} · עמלת המרה ${(DATALOG.exchangeCommission[r.id]||0)}% ≈ ${fmt(Math.round(rl.transferOut*(DATALOG.exchangeCommission[r.id]||0)/100))} ${r.cur}`);
+    if(rl.invest>0)
+      add('A3-2',`השקעה/הלוואה מקומית — ${r.name}`,rl.invest,`${r.cur} · סמן Borrow או Invest`);
+    if(rl.convertAll) add('A3-3',`המרת כל המט״ח באזור — ${r.name}`,1,'כן — ממיר את כל היתרות הזרות למקומי');
+    if(rl.chipsToPC>0)
+      add('A4',`העברת שבבים למפעלי המחשבים — ${r.name}`,rl.chipsToPC,'מחיר העברה פנימי + יח׳ לשמירה לצרכן + עדיפות עיבוד');
   });
-  if((lev.rd||0)>0) rows.push({form:'H1-1',action:'מו״פ (Liechtenstein) — Chip/X + PC/Y',value:lev.rd,note:'פצל בין X ל-Y לפי יעדי הדרגה'});
-  if(!rows.length) rows.push({form:'—',action:'לא הוזנו מהלכים בתרחיש לרבעון זה',value:0,note:'הזן מנופים בסימולטור'});
-  return rows;
+
+  /* ---------- H · Liechtenstein ---------- */
+  // R&D: split when the plan carries a split, one line otherwise.
+  const rdX=lev.rdX||0, rdY=lev.rdY||0;
+  if(rdX>0||rdY>0){
+    if(rdX>0) add('H1-1','מו״פ — Chip/X',rdX,`מינימום חוקי ${fmt(DATALOG.rdMinPerQuarter.X)} SF`,rdX<DATALOG.rdMinPerQuarter.X?'מתחת למינימום':'');
+    if(rdY>0) add('H1-1','מו״פ — PC/Y',rdY,`מינימום חוקי ${fmt(DATALOG.rdMinPerQuarter.Y)} SF`,rdY<DATALOG.rdMinPerQuarter.Y?'מתחת למינימום':'');
+  } else if((lev.rd||0)>0){
+    add('H1-1','מו״פ (Liechtenstein) — Chip/X + PC/Y',lev.rd,
+      `פצל בין X ל-Y לפי יעדי הדרגה · מינימום ${fmt(DATALOG.rdMinPerQuarter.X)} / ${fmt(DATALOG.rdMinPerQuarter.Y)} SF`,'לפצל');
+  }
+  // H1-2 — market research. Recommended studies used to stop at the recommendation screen.
+  const mrs=[]; (lev.actions||[]).forEach(a=>{ if(Array.isArray(a.mrList)) a.mrList.forEach(c=>{ if(!mrs.includes(c)) mrs.push(c); }); });
+  if(mrs.length){
+    const paid=mrs.filter(c=>!MR_FREE.includes(c));
+    const cost=paid.reduce((a,c)=>{ const v=MR_COST(c); return a+(v==null?0:v); },0);
+    add('H1-2','הזמנת מחקרי שוק',paid.length,
+      `${paid.join(', ')||'—'} · עלות ${fmt(cost)}K SF · החינמיים (${MR_FREE.join(', ')}) מגיעים אוטומטית — אל תזמין אותם`,
+      paid.length>3?'חריגה מ-3 סלוטים':'');
+  }
+  // H2 — securities. Idle cash is not free; this used to have no row at all.
+  if((lev.securities||0)>0)
+    add('H2','השקעה בניירות ערך',lev.securities,
+      `בחר מטבע + Investment/Bonds · אג״ח ברזיל ${DATALOG.interest.govSecurities.brazil}%/רבעון היא התשואה הגבוהה הזמינה`);
+  if((lev.h4Loan||0)>0) add('H4','הלוואה בין-חברות',lev.h4Loan,'חברה לווה · מטבע · קרן · תשלום סופי · רבעון · ריבית');
+  if((lev.h5License||0)>0) add('H5','רישיון רמה טכנולוגית',lev.h5License,'ניתן להעניק רק רבעון אחרי קבלת הדרגה · מינימום 2 רבעונים');
+
+  /* ---------- H6 · industrial sales, incl. every signed commitment due this quarter ---------- */
+  let contractRows=0;
+  try{
+    contractPlan().filter(c=>c.deliveryQuarter===targetQ).forEach(c=>{
+      const useFb=c.fbAllowed && c.gap>0 && c.fbGap<=0;
+      const grade=useFb?c.fbGrade:c.grade;
+      const reg=REGIONS.find(x=>x.id===(c.region||'europe'))||{name:'אירופה',cur:'EUR'};
+      add('H6',`מכירה תעשייתית — ${c.counterparty||'חוזה'} · ${c.prod}${grade} ל${reg.name}`,c.need,
+        `${fmt(c.unitPrice||0)} ${c.currency||'EUR'}/יח׳ · סה״כ ${fmt(c.contractValueLC||0)} ${c.currency||'EUR'} · תשלום ${(c.collection||[]).join('/')}%`
+        +` · הובלה ${c.freightOnSeller?'על המוכר':'על הקונה'}`
+        +(useFb?` · אספקה בדרגה ${c.prod}${c.fbGrade} לפי סעיף 5`:'')
+        +(c.fbBlockedNote?` · ${c.fbBlockedNote}`:''),
+        'חוזה חתום — חובה');
+      contractRows++;
+    });
+  }catch(e){}
+  // discretionary B2B beyond the contracts
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{};
+    if((rl.b2bUnits||0)>0)
+      add('H6',`מכירה תעשייתית — ${r.name}`,rl.b2bUnits,
+        `${fmt(rl.b2bPrice||0)} ${r.cur}/יח׳ · אחוזי תשלום חייבים להסתכם ב-100%`);
+  });
+
+  /* ---------- W · cross-area ---------- */
+  REGIONS.forEach(r=>{ const rl=(lev.regions&&lev.regions[r.id])||{};
+    if((rl.fxSell||0)>0) add('W3',`המרת מטבע בבנק מקומי — ${r.name}`,rl.fxSell,`${r.cur} · Sell/Buy לכל מט״ח בנפרד`); });
+
+  /* ---------- what the game asks for and the plan does not answer ---------- */
+  const emitted=new Set(rows.map(r=>r.form));
+  const alwaysAsk=[
+    ['A1-1','מחיר ופרסום לשבבים בכל אזור שבו יש מלאי שבבים למכירה'],
+    ['A1-2','מחיר ופרסום למחשבים בכל אזור שבו יש מלאי מחשבים למכירה'],
+    ['H1-1','מו״פ — הפסקה גוררת קנס עקביות; שמור רצפה גם ברבעון חלש'],
+    ['H1-2','שלושת המחקרים החינמיים מגיעים אוטומטית; עד 3 בתשלום'],
+  ];
+  const missing=alwaysAsk.filter(([f])=>!emitted.has(f));
+  // price is the classic loss: any stock meant for sale with no price line is called out here
+  const unpriced=(S.quarters[S.activeQuarter].operational.inventory||[]).filter(i=>(i.qty||0)>0&&!(i.price>0));
+  if(unpriced.length){
+    const u=unpriced.reduce((a,i)=>a+(i.qty||0),0);
+    add('A1-1/A1-2','⚠ מלאי ללא מחיר — ללא הזנת מחיר לא תהיה מכירה',u,
+      unpriced.slice(0,4).map(i=>`${i.product||'?'}${i.grade!=null?i.grade:''} ${(REGIONS.find(r=>r.id===i.region)||{}).name||'ללא אזור'} ${fmt(i.qty)} יח׳`).join(' · '),'חובה');
+  }
+  missing.forEach(([f,why])=> add(f,'לא תוכנן ברבעון זה',0,why,'לבדוק'));
+
+  if(!rows.length) add('—','לא הוזנו מהלכים בתרחיש לרבעון זה',0,'הזן מנופים בסימולטור');
+  const order={'A1-1':1,'A1-2':2,'A1-3':3,'A2-1':4,'A2-3':5,'A2-4':6,'A3-1':7,'A3-2':8,'A3-3':9,'A4':10,
+    'H1-1':11,'H1-2':12,'H2':13,'H4':14,'H5':15,'H6':16,'W1':17,'W2':18,'W3':19,'A1-1/A1-2':2.5,'—':99};
+  return rows.sort((a,b)=>(order[a.form]||50)-(order[b.form]||50));
 }
 function renderInputSheet(box,targetQ,sc){
   const rows=buildInputRows(targetQ,sc);
-  box.innerHTML=`<table class="tbl"><thead><tr><th>טופס</th><th>פעולה</th><th>ערך</th><th>הערה</th><th>בוצע?</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr><td><span class="chip">${r.form}</span></td><td>${esc(r.action)}</td><td class="num">${fmt(r.value)}</td><td class="small muted">${esc(r.note)}</td><td style="text-align:center">☐</td></tr>`).join('')}</tbody></table>
+  const flagTag=f=> !f?'' : (f==='חוזה חתום — חובה'||f==='חובה')
+    ? `<span class="tag r">${esc(f)}</span>` : `<span class="tag a">${esc(f)}</span>`;
+  box.innerHTML=`<table class="tbl"><thead><tr><th>טופס</th><th>פעולה</th><th>ערך</th><th>הערה</th><th>סטטוס</th><th>בוצע?</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr${r.flag?' style="background:rgba(248,113,113,.06)"':''}><td><span class="chip">${r.form}</span></td><td style="text-align:start">${esc(r.action)}</td><td class="num">${fmt(r.value)}</td><td class="small muted" style="text-align:start;white-space:normal;line-height:1.6">${esc(r.note)}</td><td>${flagTag(r.flag)}</td><td style="text-align:center">☐</td></tr>`).join('')}</tbody></table>
     ${!sc?'<div class="small muted" style="margin-top:10px">אין תרחיש נבחר — צור תרחיש בסימולטור כדי לאכלס את הגיליון.</div>':''}`;
 }
 // WS-2: chip→computer constraint. PCs (Y) produced in a quarter need chips (X) already in inventory
 // (1-quarter delay — chips produced this quarter are available only next quarter).
 // Fix #2: chip→PC guard uses the real Data Log grade matrix (chips-per-PC varies 1–5 by grade,
 // and some X/Y grade pairs are incompatible = 0), not a 1:1 assumption.
+/* FIX #74 (P0) — an area runs more than one production line.
+   The lever schema held a single `product` per area per quarter, so Group 8's actual Q4
+   (48,000 X2 AND 18,000 Y1, both in Europe) could not be expressed at all: the second line
+   overwrote the first. Every downstream check — chip coverage, capacity, the input sheet,
+   the cash projection — therefore reasoned about half the plan.
+   Rather than rewrite the stored shape (which would invalidate every saved scenario), the
+   primary object stays line 0 and `rl.lines[]` carries the rest. `linesOf()` is the single
+   normaliser every consumer now goes through, so adding a line cannot be forgotten in one
+   place and honoured in another. */
+function linesOf(lev, regionId){
+  const rl=(lev&&lev.regions&&lev.regions[regionId])||{};
+  const base={ product:rl.product==='X'?'X':'Y', grade:(rl.grade!=null?rl.grade:null),
+    model:rl.model||'Standard', production:rl.production||0, unitCost:rl.unitCost||0,
+    price:rl.price||0, qtySold:(rl.qtySold!=null?rl.qtySold:0), sales:rl.sales||0,
+    advertising:rl.advertising||0, margin:rl.margin||null, _i:0, _primary:true };
+  const extra=(Array.isArray(rl.lines)?rl.lines:[]).map((l,i)=>({
+    product:l.product==='X'?'X':'Y', grade:(l.grade!=null?l.grade:null),
+    model:l.model||'Deluxe', production:l.production||0, unitCost:l.unitCost||0,
+    price:l.price||0, qtySold:(l.qtySold!=null?l.qtySold:0), sales:l.sales||0,
+    advertising:l.advertising||0, margin:l.margin||null, _i:i+1, _primary:false }));
+  return [base,...extra];
+}
+/* Lines that actually do something — the ones worth validating and printing. */
+function activeLines(lev, regionId){
+  return linesOf(lev,regionId).filter(l=>(l.production>0||l.sales>0||l.qtySold>0||l.advertising>0||l.price>0));
+}
+const linePrice=l=> l.price>0 ? l.price
+  : (l.qtySold>0&&l.sales>0 ? l.sales/l.qtySold
+  : (l.margin&&l.unitCost>0 ? l.unitCost*l.margin : 0));
+/* Does this area sell BOTH products this quarter? Drives the Data Log 04 selling-cost tier. */
+function sellsBothIn(lev, regionId){
+  const ls=activeLines(lev,regionId).filter(l=>l.sales>0||l.qtySold>0);
+  return ls.some(l=>l.product==='X') && ls.some(l=>l.product==='Y');
+}
+/* FIX #47 (P1) — ASSORTMENT. Guide 4.10.1: a company selling two models sells more in total
+   than a company selling one, but its standard model alone sells less — the higher grade
+   cannibalises the lower one. The engine listed 'assortment' as a demand determinant and then
+   modelled nothing, so the whole two-model strategy (the jump from 15,000 to 26,000 units in
+   Q5) rested on an assumption with no mechanism behind it.
+   Two DISTINCT grades of the same product in one area is what counts — the same grade twice is
+   one model, not two (Guide 4.3). Factors are ESTIMATES, deliberately below the plan's own
+   assumption, and are labelled as estimates wherever they surface. */
+const ASSORTMENT={ 1:1.00, 2:1.55, 3:1.70 };   // total-demand multiplier by distinct grades
+function assortmentInfo(lev, regionId, product){
+  const ls=activeLines(lev,regionId).filter(l=>l.product===product && (l.sales>0||l.qtySold>0));
+  const grades=[...new Set(ls.map(l=>l.grade).filter(g=>g!=null))];
+  const n=Math.max(1,Math.min(3,grades.length||(ls.length?1:0)));
+  const factor=ASSORTMENT[n]||1;
+  return { models:n, grades, factor,
+    // the low grade loses share to the high one even as the total rises
+    cannibalisation: n>1 ? 0.35 : 0,
+    note: n>1 ? `שני דגמים בדרגות ${grades.join(' ו-')} — ביקוש כולל ×${factor} (אומדן), הדגם הנמוך מאבד ~35% לטובת הגבוה`
+              : 'דגם אחד — אין אפקט מגוון. שתי דרגות שונות באותו אזור פותחות מאגר ביקוש שני' };
+}
 function chipGuard(sc,targetQ){
   const op=S.quarters[S.activeQuarter].operational;
-  const chipInv=(op.inventory||[]).filter(i=>i.product==='X').reduce((a,i)=>a+(i.qty||0),0);
+  const inv=(op.inventory||[]);
   const gx=Math.max(0,Math.min(9,op.techX||0)), gy=Math.max(0,Math.min(9,op.techY||0));
   const ratio=(DATALOG.chipPerPC[gx]&&DATALOG.chipPerPC[gx][gy])||0; // chips per PC for X{gx}→Y{gy}
-  const lev=sc&&sc.levers[targetQ]; let pcPlanned=0;
-  if(lev) REGIONS.forEach(r=>{ const rl=lev.regions[r.id]||{}; if(rl.product==='Y') pcPlanned+=(rl.production||0); });
+  const lev=sc&&sc.levers[targetQ];
+  // FIX #2 (P1): chips already promised under a signed contract are NOT available to feed our
+  // own PC lines. Reserve the committed quantity for the quarter it must be produced in, before
+  // anything else is allowed to consume it.
+  let reserved=0, reservedNote='';
+  try{
+    // Every pending X commitment locks up stock, whether or not a gap remains. The gap>0 test
+    // was backwards: when stock already covers the contract there is no gap, and that is exactly
+    // the case where the same chips were being counted twice — once for the buyer, once for us.
+    const ct=contractPlan().filter(c=>c.prod==='X' && qIndex(c.deliveryQuarter)>=qIndex(targetQ));
+    ct.forEach(c=>{ const committed=Math.min(c.need||0, Math.max(c.stock||0, c.fbStock||0)); reserved+=committed; });
+    if(ct.length) reservedNote=ct.map(c=>`${fmt(c.need)} × ${c.prod}${c.fbAllowed&&c.fbGap<c.gap?(c.fbGrade+'+'):c.grade} ל-${c.deliveryQuarter}`).join(' · ');
+  }catch(e){}
+  // FIX #1 (P1): chips are physical stock in a specific area. Chips sitting in Europe cannot
+  // feed a PC line in Brazil without a transfer, so the balance must be struck PER REGION.
+  // The old global sum passed plans that are impossible to execute.
+  const byRegion=[]; let pcPlanned=0, chipInvTotal=0, worst=null;
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    const stock=inv.filter(i=>i.product==='X' && (i.region||'')===r.id).reduce((a,i)=>a+(i.qty||0),0);
+    // FIX #74: sum EVERY PC line in the area, not just the one that happened to be primary
+    const pc=lev?activeLines(lev,r.id).filter(l=>l.product==='Y').reduce((a,l)=>a+l.production,0):0;
+    const chipMade=lev?activeLines(lev,r.id).filter(l=>l.product==='X').reduce((a,l)=>a+l.production,0):0;
+    const need=pc*ratio;
+    chipInvTotal+=stock; pcPlanned+=pc;
+    const row={region:r.id,name:r.name,stock,pc,chipMade,need,gap:Math.max(0,need-stock)};
+    byRegion.push(row);
+    if(row.gap>0 && (!worst||row.gap>worst.gap)) worst=row;
+  });
+  // chips with no region tag yet (legacy rows) are counted separately and never assumed local
+  const untagged=inv.filter(i=>i.product==='X' && !i.region).reduce((a,i)=>a+(i.qty||0),0);
+  const regionGap=byRegion.reduce((a,x)=>a+x.gap,0);
+  const chipInv=chipInvTotal+untagged;
   const compatible=!(pcPlanned>0 && ratio===0);   // grade pair incompatible → illegal
   const chipsNeeded=pcPlanned*ratio;
-  return {chipInv,pcPlanned,ratio,gx,gy,compatible,chipsNeeded,
-    ok:compatible && chipsNeeded<=chipInv, gap:Math.max(0,chipsNeeded-chipInv)};
+  const freeAfterReserve=chipInv-reserved;
+  const gap=Math.max(regionGap, Math.max(0,chipsNeeded-freeAfterReserve));
+  return {chipInv,chipInvTotal,untagged,pcPlanned,ratio,gx,gy,compatible,chipsNeeded,
+    byRegion,worst,regionGap,reserved,reservedNote,freeAfterReserve,
+    ok:compatible && gap===0, gap};
 }
 // Per-plant capacity from the Data Log (units/plant/Q). The data model tracks only a total plant
 // count, so this flags production that exceeds ONE plant's capacity and reports the plants implied.
 function capacityCheck(sc,targetQ){
   const lev=sc&&sc.levers[targetQ]; const issues=[];
-  if(lev) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{}; const prod=rl.production||0;
-    if(prod<=0) return; const prd=rl.product==='X'?'X':'Y';
-    const cap=(DATALOG.capacity[prd]&&DATALOG.capacity[prd][r.id])||0;
-    if(cap>0 && prod>cap) issues.push({region:r.id,name:(REGIONS.find(x=>x.id===r.id)||{}).name,product:prd,prod,cap,plants:Math.ceil(prod/cap)});
+  // FIX #74: capacity binds per PRODUCT per area across all lines, and against the plants
+  // actually declared for that product — two lines of the same product share the same plants.
+  if(lev) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    ['X','Y'].forEach(prd=>{
+      const prod=activeLines(lev,r.id).filter(l=>l.product===prd).reduce((a,l)=>a+l.production,0);
+      if(prod<=0) return;
+      const capPer=(DATALOG.capacity[prd]&&DATALOG.capacity[prd][r.id])||0;
+      if(capPer<=0) return;
+      const plants=Math.max(1,plantsForProduct(r.id,prd)||1);
+      const cap=capPer*plants;
+      if(prod>cap) issues.push({region:r.id,name:(REGIONS.find(x=>x.id===r.id)||{}).name,
+        product:prd,prod,cap,capPer,plants,plantsNeeded:Math.ceil(prod/capPer)});
+    });
   });
   return issues;
 }
@@ -4413,8 +4886,10 @@ function scenarioValidation(sc,targetQ){
   const lev=sc&&sc.levers[targetQ]; if(!lev) return {noNeg:true,hasCost:true};
   let noNeg=true,hasCost=true;
   REGIONS.forEach(r=>{ const rl=lev.regions[r.id]||{};
-    ['production','unitCost','sales','advertising','invest','transferIn'].forEach(k=>{ if((rl[k]||0)<0) noNeg=false; });
-    if((rl.production||0)>0 && !(rl.unitCost>0)) hasCost=false; });
+    ['invest','transferIn','transferOut'].forEach(k=>{ if((rl[k]||0)<0) noNeg=false; });
+    linesOf(lev,r.id).forEach(l=>{
+      ['production','unitCost','sales','advertising'].forEach(k=>{ if((l[k]||0)<0) noNeg=false; });
+      if(l.production>0 && !(l.unitCost>0)) hasCost=false; }); });
   if((lev.rd||0)<0) noNeg=false;
   return {noNeg,hasCost};
 }
@@ -4425,11 +4900,12 @@ function phantomSales(sc,targetQ){
   const lev=sc&&sc.levers[targetQ]; if(!lev) return [];
   const op=S.quarters[S.activeQuarter].operational;
   let prodUnits=0, sellUnits=0;
-  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{};
-    prodUnits+=(rl.production||0);
-    const pEff=rl.price>0?rl.price:(rl.margin&&rl.unitCost>0?rl.unitCost*rl.margin:0);
-    if((rl.sales||0)>0){ const su=rl.qtySold!=null?rl.qtySold:(pEff>0?Math.round((rl.sales||0)/pEff):0); sellUnits+=su; }
-  });
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ activeLines(lev,r.id).forEach(l=>{
+    if(l.product!=='Y') return;                      // finished goods only
+    prodUnits+=l.production;
+    const pEff=linePrice(l);
+    if(l.sales>0||l.qtySold>0) sellUnits+=(l.qtySold>0?l.qtySold:(pEff>0?Math.round(l.sales/pEff):0));
+  }); });
   const invY=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
   const supply=prodUnits+invY;
   return (sellUnits>supply && sellUnits>0) ? [{sold:sellUnits,supply,gap:sellUnits-supply}] : [];
@@ -4488,7 +4964,7 @@ function renderChecklist(box,targetQ,sc){
     {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
     {t:`העברות מגובות במקור (מטה)${ptrans?` · מעביר ${fmt(ptrans.totalIn)} אך במטה ${fmt(ptrans.hqCash)}`:''}`,ok:!ptrans},
     {t:`דרגות תואמות: X${cg.gx}→Y${cg.gy}${cg.pcPlanned?(cg.compatible?` דורש ${cg.ratio} שבבים/מחשב`:' — לא תואם!'):''}`,ok:cg.compatible},
-    {t:`מחשבים ≤ שבבים זמינים${cg.pcPlanned?` · דרושים ${fmt(cg.chipsNeeded)} מול ${fmt(cg.chipInv)} במלאי`:''}`,ok:cg.compatible&&cg.chipsNeeded<=cg.chipInv},
+    {t:`מחשבים ≤ שבבים זמינים באותו אזור${cg.pcPlanned?` · דרושים ${fmt(cg.chipsNeeded)} מול ${fmt(cg.chipInv)} במלאי${cg.reserved?` (מתוכם ${fmt(cg.reserved)} שמורים לחוזה)`:''}`:''}`,ok:cg.compatible&&cg.gap===0},
     {t:`ייצור בגבול הקיבולת (Data Log)${caps.length?` · ${caps[0].name} ${fmt(caps[0].prod)} > ${fmt(caps[0].cap)}/מפעל`:''}`,ok:caps.length===0},
     {t:'לכל ייצור מתוכנן יש עלות יח׳',ok:val.hasCost},
     {t:'אין ערכים שליליים בתרחיש',ok:val.noNeg},
@@ -4503,7 +4979,7 @@ function renderChecklist(box,targetQ,sc){
     ${phantoms.length?`<div class="tag a" style="margin-top:10px">${IC('warn')} מכירת-יתר: מתוכננת מכירה של <b>${fmt(phantoms[0].sold)}</b> יח׳ סה״כ אך ההיצע (מלאי מוגמר + ייצור) הוא <b>${fmt(phantoms[0].supply)}</b> — פער ${fmt(phantoms[0].gap)}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת.</div>`:''}
     ${ptrans?`<div class="tag a" style="margin-top:8px">${IC('warn')} העברת-פנטום: מעביר לאזורים ${fmt(ptrans.totalIn)} אך במטה יש רק ${fmt(ptrans.hqCash)} (חוסר ${fmt(ptrans.gap)}). העברה (A3-1) ממומנת מהמטה — אי-אפשר להעביר יותר ממה שיש בו.</div>`:''}
     ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
-      (cg.gap>0?`<div class="tag r" style="margin-top:10px">${IC('warn')} חסרים ${fmt(cg.gap)} שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם. <b>ההגשה חסומה.</b></div>`:'')}
+      (cg.gap>0?`<div class="tag r" style="display:block;margin-top:10px;line-height:1.7;white-space:normal">${IC('warn')} חסרים <b>${fmt(cg.gap)}</b> שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם, או שנע אותם לאזור הייצור. <b>ההגשה חסומה.</b>${cg.worst?`<br><b>האזור החסר:</b> ${esc(cg.worst.name)} — נדרשים ${fmt(cg.worst.need)} ובמלאי המקומי ${fmt(cg.worst.stock)}. <span class="muted">שבבים באזור אחר אינם זמינים כאן ללא שינוע (רבעון).</span>`:''}${cg.reserved?`<br><b>שמורים לחוזה:</b> ${fmt(cg.reserved)} יח׳ — ${esc(cg.reservedNote)}. הם אינם זמינים לצריכה עצמית.`:''}${cg.untagged?`<br><span class="muted">${fmt(cg.untagged)} שבבים ללא סימון אזור במלאי — סמנו אזור בלשונית הקליטה כדי שהבדיקה תהיה מלאה.</span>`:''}</div>`:'')}
     ${gl.length?`<div class="tag ${gl.some(g=>g.over)?'r':'a'}" style="margin-top:8px">${IC('warn')} <b>מגבלת שתי דרגות (§4.9):</b> ${gl.map(g=>`${g.regionName}/${g.product==='Y'?'מחשב':'שבב'} מחזיק ${g.count} דרגות (${g.grades.join(', ')})`).join(' · ')}. הכנסת דרגה שלישית לאזור <b>תוריד אוטומטית את הדרגה האמצעית לרמת הנמוכה</b> — מחיקת שווי של מלאי טוב. מסלולי יציאה: ${RULES.grades.exits.join(' · ')}.</div>`:''}
     ${dov.length?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>המלצה חורגת מהביקוש:</b> ${dov.map(d=>`"${esc(d.title.slice(0,44))}" — ${fmt(d.qty)} יח׳ ב${(REGIONS.find(r=>r.id===d.region)||{}).name||d.region} מול תקרה ${fmt(d.ceiling)} (${esc(d.src)})`).join(' · ')}. כמות מעבר לתקרה פשוט לא תימכר — היא תישאר במלאי ותצבור עלות אחזקה.</div>`:''}
     ${ol.length?`<div class="tag r" style="margin-top:8px">${IC('warn')} <b>הרכב משרדים לא חוקי:</b> ${ol.map(o=>`${o.region}: ${o.n} — ${o.why}`).join(' · ')}.</div>`:''}
@@ -4516,9 +4992,19 @@ window.downloadInputSheet=(targetQ)=>{
   // Fix #2: hard-block export of an illegal production plan (grade-incompatible or chip-starved).
   const cg=chipGuard(sc,targetQ);
   if(!cg.compatible){ toast(`הגשה חסומה: דרגת שבב X${cg.gx} אינה תואמת למחשב Y${cg.gy} (טבלת ההמרה). נדרש מו״פ להתאמת דרגות.`,'r'); go('sim'); return; }
-  if(cg.gap>0){ toast(`הגשה חסומה: חסרים ${fmt(cg.gap)} שבבים (${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}). ייצר/רכוש שבבים קודם.`,'r'); go('sim'); return; }
+  if(cg.gap>0){ toast(`הגשה חסומה: חסרים ${fmt(cg.gap)} שבבים${cg.worst?` ב${cg.worst.name}`:''} (${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)})${cg.reserved?` · ${fmt(cg.reserved)} שמורים לחוזה`:''}. ייצר/רכוש/שנע שבבים קודם.`,'r'); go('sim'); return; }
+  // FIX #46 (P0): "no price = no sale" is the single most common technical loss in the game.
+  // It was only a checklist tick, so a quarter could still be exported with saleable stock and
+  // an empty price field. It is now a hard block, exactly like the chip guard.
+  const unpriced=(S.quarters[S.activeQuarter].operational.inventory||[]).filter(i=>(i.qty||0)>0 && !(i.price>0));
+  if(unpriced.length){
+    const units=unpriced.reduce((a,i)=>a+(i.qty||0),0);
+    const where=unpriced.slice(0,3).map(i=>`${i.product||'?'}${i.grade!=null?i.grade:''} ${(REGIONS.find(r=>r.id===i.region)||{}).name||'ללא אזור'}`).join(' · ');
+    toast(`הגשה חסומה: ${fmt(units)} יח׳ במלאי ללא מחיר (${where}${unpriced.length>3?' ועוד':''}). ללא מחיר — אפס מכירות ברבעון.`,'r');
+    go('ingest'); return;
+  }
   const rows=buildInputRows(targetQ,sc);
-  const aoa=[['טופס','פעולה','ערך','הערה','בוצע?'],...rows.map(r=>[r.form,r.action,r.value,r.note,''])];
+  const aoa=[['טופס','פעולה','ערך','הערה','סטטוס','בוצע?'],...rows.map(r=>[r.form,r.action,r.value,r.note,r.flag||'',''])];
   const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'הזנה '+targetQ); XLSX.writeFile(wb,`INTOPIA_input_${targetQ}.xlsx`);
   toast('גיליון הזנה יוצא ✓','g');
@@ -5007,7 +5493,14 @@ function parseStrategyJSON(txt, horizon){
       REGIONS.forEach(r=>{
         const g=(src.regions||{})[r.id]||{};
         const price=n(g.price), qty=n(g.qtySold), prod=n(g.production);
-        levers[q].regions[r.id]={ production:prod, unitCost:n(g.unitCost),
+        // FIX #74: the model may return several production/sales lines for one area
+        const extra=Array.isArray(g.lines)?g.lines.slice(1).map(l=>({
+          product:(l.product==='X'?'X':'Y'), grade:(l.grade!=null?Math.max(0,Math.min(9,+l.grade||0)):null),
+          model:l.model||'Deluxe', production:Math.max(0,+l.production||0), unitCost:Math.max(0,+l.unitCost||0),
+          price:Math.max(0,+l.price||0), qtySold:Math.max(0,+l.qtySold||0),
+          sales:Math.max(0,+l.sales|| ((+l.price||0)*(+l.qtySold||0)) ), advertising:Math.max(0,+l.advertising||0)
+        })):[];
+        levers[q].regions[r.id]={ lines:extra, production:prod, unitCost:n(g.unitCost),
           price, qtySold:qty, sales:Math.round(price*qty),
           advertising:n(g.advertising), invest:n(g.invest), transferIn:n(g.transferIn),
           newFac:Math.min(3,Math.round(n(g.newFac))), offices:Math.round(n(g.offices)),
@@ -5035,6 +5528,11 @@ function scoreStrategyVariant(v, base){
     const ph=phantomSales(fake,q); if(ph.length) violations.push(`${q}: מכירה ${fmt(ph[0].sold)} מול היצע ${fmt(ph[0].supply)}`);
     const ol=officeLegality(fake,q); if(ol.length) violations.push(`${q}: ${ol[0].region} ${ol[0].n} משרדים — ${ol[0].why}`);
     const caps=capacityCheck(fake,q); if(caps.length) violations.push(`${q}: ${caps[0].name} ${fmt(caps[0].prod)} > קיבולת ${fmt(caps[0].cap)}`);
+    // FIX #4 (P0): the chip→PC dependency is the hardest rule in the game and this validator
+    // never checked it — an AI plan could build computers with no chips and still be "legal".
+    const cgv=chipGuard(fake,q);
+    if(!cgv.compatible) violations.push(`${q}: דרגות לא תואמות X${cgv.gx}→Y${cgv.gy} (0 בטבלת ההמרה)`);
+    else if(cgv.gap>0) violations.push(`${q}: חסרים ${fmt(cgv.gap)} שבבים${cgv.worst?` ב${cgv.worst.name}`:''} לייצור ${fmt(cgv.pcPlanned)} מחשבים`);
     if(plantsBy) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
       const pr=(v.levers[q].regions[r.id]||{}).production||0;
       if(pr>0 && !(plantsBy[r.id]>0)) violations.push(`${q}: ייצור ב${r.name} ללא מפעל`); });
@@ -5045,9 +5543,10 @@ function scoreStrategyVariant(v, base){
   Object.entries(contractRequirements()).forEach(([pq,list])=>{
     list.forEach(c=>{
       const lv=v.levers[pq];
-      const made=lv?REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>{ const rl=lv.regions[r.id]||{};
-        return a+((rl.product===c.prod)?(rl.production||0):0); },0):0;
-      if(made<c.gap) violations.push(`${pq}: לא מכסה התחייבות ${fmt(c.gap)} × ${c.prod}${c.grade} (מתוכנן ${fmt(made)})`);
+      const made=lv?REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
+        a+activeLines(lv,r.id).filter(l=>l.product===c.prod).reduce((b,l)=>b+l.production,0),0):0;
+      const bind=(c.bindingGap!=null?c.bindingGap:c.gap);
+      if(made<bind) violations.push(`${pq}: לא מכסה התחייבות ${fmt(bind)} × ${c.prod}${(c.fbAllowed&&c.fbGap<c.gap)?(c.fbGrade+"+ (סעיף 5)"):c.grade} (מתוכנן ${fmt(made)})`);
     });
   });
   return { ...v, score:sp.value, past:sp.pastHalf, pot:sp.potentialHalf, endCash:sp.endCash,
@@ -5074,8 +5573,11 @@ function strategyContext(base, horizon){
     ct.forEach(c=> L.push(`- **${fmt(c.need)} יח׳ ${c.prod}${c.grade} לאספקה ב-${c.deliveryQuarter}.** במלאי בדרגה מתאימה ${fmt(c.stock)} → חסר **${fmt(c.gap)}**. `
       +`הייצור חייב להסתיים ב-**${c.productionQuarter}** (סחורה נכנסת למלאי בסוף רבעון הייצור). `
       +`דרגת ${c.prod} נוכחית ${c.tech}${c.techOK?' — מספיקה':` — **לא מספיקה, נדרש מו״פ ל-${c.prod}${c.grade} לפני הייצור**`}.`
+      +(c.fbAllowed?`**סעיף 5 בחוזה מתיר לספק רמה נמוכה מתאימה (${c.prod}${c.fbGrade} ומעלה)** — במלאי כזה ${fmt(c.fbStock)}, ולכן הפער המחייב בפועל הוא **${fmt(c.bindingGap)}**. ${c.fbBlockedNote?("אזהרה: "+c.fbBlockedNote+" "):""}`:``)
+      +(c.penaltyPct?`אי-אספקה = קנס מחיר הרכישה +${c.penaltyPct}% ≈ ${fmt(c.penaltySF)} SF. `:``)
+      +(c.unitPrice?`שווי החוזה ${fmt(c.contractValueLC)} ${c.currency} (${fmt(c.unitPrice)}/יח׳), גבייה ${(c.collection||[]).join("/")}%. `:``)
       +(c.capKnown?` תקרת ייצור תאורטית ${fmt(c.capPerQuarter)} יח׳/רבעון.`:'')));
-    L.push(`- תכנן ייצור **${ct[0].prod}** (לא רק מחשבים) ברבעונים הרלוונטיים, בשדה production של אזור עם מפעל, עם "product":"${ct[0].prod}" ו-"grade":${ct[0].grade}. אלה התחייבויות מקודשות — אי-עמידה היא כשל אסטרטגי.`);
+    L.push(`- תכנן ייצור **${ct[0].prod}** (לא רק מחשבים) ברבעונים הרלוונטיים, בשדה production של אזור עם מפעל, עם "product":"${ct[0].prod}" ו-"grade":${ct[0].grade}${ct[0].fbAllowed?(" (או "+ct[0].fbGrade+" לפי סעיף 5 — חלופה חוקית, לא כשל)"):""}. אי-עמידה גוררת קנס כספי ופגיעה ברכיב השותפויות בציון.`);
   }
   return L.join('\n');
 }
