@@ -30,26 +30,15 @@ ck('R-56 · no plants ⇒ target floors at the share we already hold, not at 0',
 ck('R-56 · an undeclared plant split returns null rather than a guess',
   r56.unknown.cap===null && r56.unknown.capShare===null);
 
-// ---- R-34 · the loan window gates the A3-2 recommendation
-const r34=await page.evaluate(()=>{
+/* R-34's checks used to live here and asserted `RULES.finance.loanWindow.openQuarters === ['Q1']`.
+   Reading the guide showed that rule was backwards — "loans are not available UNTIL the Bank has a
+   sense for how the industry is developing", so the EARLY quarters are the closed ones. Keeping
+   these assertions would have pinned the bug in place. They are replaced by the corrected checks in
+   wave2.cjs, which assert the sourced behaviour instead. Deliberately not re-stated here. */
+await page.evaluate(()=>{
   S.config.plantSplit={us:{X:0,Y:0},europe:{X:2,Y:2},brazil:{X:0,Y:0}};
   S.quarters.Q3.operational.plantsByRegion={us:0,europe:4,brazil:0};
-  S.config.goals.noExternalLoans=false; S.config.goals.floors={...S.config.goals.floors,Q4:9000000};
-  const find=()=>(buildActionPlan('Q3',nextQuarters('Q3')[0])||[]).find(i=>/מימון גישור/.test(i.title));
-  const win=RULES.finance.loanWindow.openQuarters.slice();
-  RULES.finance.loanWindow.openQuarters=['Q1']; const closed=find();
-  RULES.finance.loanWindow.openQuarters=['Q4']; const open=find();
-  RULES.finance.loanWindow.openQuarters=win;
-  return { needsSource:RULES.finance.loanWindow.needsSource,
-    closed:closed?{t:closed.title,conf:closed.conf,warn:/חלון ההלוואה/.test(closed.detail)}:null,
-    open:open?{t:open.title,conf:open.conf,warn:/חלון ההלוואה/.test(open.detail)}:null };
 });
-ck('R-34 · outside the window the card warns and drops to H4', !!r34.closed &&
-  r34.closed.warn===true && r34.closed.conf==='est' && /H4/.test(r34.closed.t), r34.closed&&r34.closed.t);
-ck('R-34 · inside the window A3-2 is recommended with no warning', !!r34.open &&
-  r34.open.warn===false && r34.open.conf==='data' && /A3-2/.test(r34.open.t), r34.open&&r34.open.t);
-ck('R-34 · the rule is labelled as not yet sourced, so it warns instead of blocking',
-  r34.needsSource===true);
 
 // ---- D-04 · every Q9 target says what drives it
 const d04=await page.evaluate(()=>({

@@ -285,6 +285,10 @@ canvas{display:block;max-width:100%}
 .empty{text-align:center;padding:40px 20px;color:var(--muted)}
 .empty .ic{font-size:40px;opacity:.5;margin-bottom:8px}
 .est{border-bottom:1px dotted var(--amber);cursor:help}
+/* I-1 · unverified ≠ estimated. A wavy red underline reads as "go check this", which is the action
+   this category actually calls for, while the dotted amber `est` reads as "we approximated it". */
+.unver{border-bottom:2px wavy var(--red);cursor:help}
+.unver sup{color:var(--red);font-weight:800;margin-inline-start:1px}
     .est sup{color:var(--amber);font-weight:700;margin-inline-start:1px}
     .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:4px 11px;font-size:12.5px;font-weight:600}
 /* A chip is usually a label, but the master-plan strip renders each quarter as a clickable one.
@@ -414,6 +418,12 @@ const DATALOG = {
   // 07_Finance — automatic one-quarter loss carry-forward, as a fraction of the loss.
   // Brazil has none. Liechtenstein carries the full loss.
   lossCarryForward:{ us:0.6, europe:0.3, brazil:0, hq:1 },
+  /* Data Log 03, headed "MAXIMAL capacity per plant by product and area" — note MAXIMAL, not
+     optimal. The printed page carries exactly three numbers: 50.000 on the X row, and 25.000 and
+     18.000 on the Y row. Column positions were calibrated against the acquisition-cost table on
+     the same page, where the mapping is unambiguous and matches plantAcqCost below exactly. On
+     that calibration the three printed figures are X-US, Y-US and Y-EU. The other three below came
+     from the OCR-reconstructed xlsx, not from the printed page — see CAPACITY_UNVERIFIED. */
   capacity:{ X:{ us:50000, europe:35000, brazil:12000 }, Y:{ us:25000, europe:18000, brazil:14000 } }, // 03 units/plant/Q
   plantAcqCost:{ X:{ us:2000000, europe:1000000, brazil:1600000 }, Y:{ us:1800000, europe:800000, brazil:1600000 } }, // 03 LC Q1
   plantFixedCost:{ X:{ us:[80000,110000,120000], europe:[40000,54000,64000], brazil:[60000,100000,120000] },
@@ -535,7 +545,24 @@ const RULES = {
   // an illegal office count.
   offices:{ minCentral:1, minRegional:1, maxCentral:1, maxRegional:9,
     centralEqualsTwoRegional:true,
-    note:'הרכב חוקי: משרד מרכזי אחד + 1 עד 9 משרדים אזוריים. עלות מרכזי = 2 אזוריים (Data Log 04).' },
+    note:'הרכב חוקי: משרד מרכזי אחד + 1 עד 9 משרדים אזוריים. עלות מרכזי = 2 אזוריים (Data Log 04).',
+    /* R-10 (src, §4.6 — the guide gives this its own heading: "Create/Change A CSO Takes A Q") */
+    changeTakesAQuarter:'<b>שינוי מערך המכירה נכנס לתוקף רק בסוף הרבעון.</b> אם ברבעון מסוים עוברים מסוכנים למשרדים משלנו — <b>המכירות באותו רבעון עדיין יטופלו ע״י הסוכנים</b>, ואת עלות המעבר משלמים כבר ברבעון ההחלטה. גם בכיוון ההפוך: המכירות ברבעון ההחלטה מחויבות עוד לפי המערך הקודם (§4.6).',
+    twoQuartersToEfficiency:'עלות המכירה הנמוכה ביותר בהיקף נתון מושגת <b>רק לאחר שני רבעונים לפחות</b> של פעילות באותו מספר משרדים — פתיחה וסגירה חוזרות שומרות אותנו תמיד בעלות הגבוהה (§4.6).',
+    changeCostAccelerates:'עלויות השינוי (פיצויי פיטורין, הובלה, הכשרה) <b>מואצות בחריפות</b> ככל שמספר המשרדים שנפתחים או נסגרים בבת אחת גדל — יש פרמיה על הרחבה הדרגתית ומתוכננת (§4.6).',
+    diminishingReturns:'כל תוספת משרד מגדילה את המכירות במידת-מה — אך זו פונקציה של תשואה פוחתת, ובשלב מסוים התוספת לרווח קטנה מהעלות השולית. <b>MR81</b> (60K) נותן, לכל אזור, כמה משרדים כדאי להקים לכמות נתונה (§4.6).',
+    src:true },
+
+  /* R-32 (src, §4.4 + §4.14 + Data Log 04/10) · There is no published "B2B price band". What the
+     sources DO fix are four hard price constraints, and those are what a price recommendation has
+     to respect. Encoded as rules rather than invented as a band. */
+  pricing:{ integralUnitsOnly:'מחירים בשוק הצרכני נקבעים <b>ביחידות שלמות של המטבע המקומי בלבד</b>, והשינוי המינימלי הוא: מחשב — BRL 20 / €10 / $5 · שבב — BRL 10 / €1 / $1 (§4.4).',
+    brazilPCCap:'<b>פיקוח מחירים בברזיל:</b> מחשבים בדרגות Y0–Y3 — מחיר מקסימלי BRL 1,400. חל "עד להודעה חדשה" (§4.4 + §7).',
+    interCompanyMinimum:'במכירה בין-חברות ובהעברה תוך-חברתית יש <b>מחיר מינימום שקובעות רשויות המס</b>; רשויות מס או אנטי-דמפינג עשויות לקבוע מינימום (ולעתים מקסימום) בהעברות תוך-חברתיות (§4.14).',
+    plantSaleMinimum:'מכירת מפעל (W2) — מחיר מינימלי 1,000 יח׳ מטבע (§4.14).',
+    componentDefault:'מחיר ההעברה הדיפולטיבי של רכיבים ממפעל שבבים צמוד = <b>ערך המלאי הממוצע</b> של הרכיבים. אין עלויות העברה במכירת רכיבים באותו אזור (§4.13).',
+    inertiaAndResentment:'בהשקת דרגה חדשה יש אינרציית צרכן שצריך להתגבר עליה. צרכנים <b>מתרעמים על העלאות מחיר חדות ופתאומיות</b>; הנחות משמחות אותם — אך רק עד שהם משווים מחירים, כלומר לרבעון אחד (§4.4).',
+    src:true },
 
   // §4.7 (src) + Data Log 03 — production cost structure beyond the cost tables.
   production:{ twoGradeInterference:'ייצור שתי דרגות במפעל אחד גורר עלויות הפרעה — היעילות המרבית היא דרגה אחת בקיבולת מיטבית. עם 2+ מפעלים באזור, ייצר כל דרגה במפעל נפרד (§4.7)',
@@ -553,14 +580,40 @@ const RULES = {
     apScope:'זכאים כוללים עלויות ייצור משתנות, רכיבי Nippon ורכישות פנים-קבוצתיות. כל שאר ההוצאות — כולל עלות קבועה של מפעל — יוצאות ישירות מהמזומן (Data Log 09)',
     outOfPhase:'אחוזי A/R ו-A/P זהים אך מוסטים ברבעון אחד: סחורה מיוצרת ב-Qt ונמכרת ב-Qt+1 (Data Log 09)' },
 
-  /* R-34 · The financing window. The rules review recorded that a NEW long-term bank loan can be
-     raised only in the opening quarter, while short-term facilities and supplier credit stay
-     available throughout. I could not re-cite the guide passage from inside this environment, so
-     this is labelled `needsSource` and the engine WARNS rather than blocks: a wrong hard block
-     would remove a legal option, which is worse than a warning the team can dismiss. Set
-     `openQuarters` from the guide once confirmed, or empty it to switch the warning off. */
-  finance:{ loanWindow:{ openQuarters:['Q1'], needsSource:true,
-    note:'הלוואת בנק חדשה (A3-2) — לפי סקירת החוקים ניתנת לגיוס רק ברבעון הפתיחה. אשראי ספקים והלוואות בין-חברות (H4) זמינים לאורך כל המשחק. <b>טרם אומת מול המדריך</b> — אם המדריך אומר אחרת, עדכן ב-RULES.finance.loanWindow.' } },
+  /* R-34 (src, §4.11) · CORRECTED. An earlier pass encoded this backwards — as "a new bank loan is
+     available only in Q1" — and warned in exactly the quarters where the bank IS willing to lend.
+     The guide says the opposite: "As a rule, loans are not available UNTIL the Bank has a sense for
+     how the industry is developing." So the late quarters are the open window, not the closed one.
+     Keeping it a warning rather than a block is what made the error harmless. */
+  finance:{
+    citiLoan:{ earlyQuartersClosed:['Q1','Q2'], src:true,
+      note:'הלוואת CitiBank ארוכת-טווח (טופס H): <b>אינה זמינה בתחילת המשחק</b> — "loans are not available until the Bank has a sense for how the industry is developing" (§4.11). הסכום והמשך נקבעים ע״י ה-Administrator, ריבית ≥5%/רבעון, בדרך כלל ל-6 רבעונים, ו<b>אין פירעון מוקדם</b>. הריבית והקרן נגבות אוטומטית — ודאו מזומן במטה.' },
+    bonds:{ fromQuarter:'Q2', src:true,
+      note:'אג״ח ארוכות-טווח (H2) — ניתנות להנפקה מ-Q2 והלאה. SF 2M בשני רבעונים נפרדים או SF 3M ברבעון אחד, ל-10 רבעונים, ריבית ≥5.8%/רבעון ב-SF. אין פדיון מוקדם. התמורה עשויה להיות גבוהה או נמוכה מהערך הנקוב (§4.11).' },
+    areaBankLoan:{ src:true,
+      note:'הלוואת בנק אזורית — קצרת-טווח (90 יום), מוגבלת לאחוז סביר מעודף הנכסים השוטפים על ההתחייבויות השוטפות באזור. <b>החלטה חורגת תקוצץ אוטומטית לתקרה.</b> ריביות: ארה״ב 4% · אירופה 3.5% · ברזיל 6% (§4.11 + Data Log 07).' },
+    loanVsSecurities:{ src:true,
+      note:'<b>לא ניתן להחזיק באותו אזור גם הלוואה קצרה וגם ני״ע ממשלתי קצר.</b> אם יש ני״ע ואתם לוקחים הלוואה — הבנק ימכור את הני״ע אוטומטית. קחו זאת בחשבון (§4.11).' },
+    interCompanyLoan:{ src:true,
+      note:'הלוואה בין-חברות (H4/L1+L2) — <b>בכל זמן</b>, בכל מטבע, מינימום 1,000 יח׳ מטבע וריבית ≥0.01%. חוזה-אב חייב להירשם אצל ה-Court (Administrator) כדי לתקוף; שני הטפסים מוגשים ע״י <b>המלווה</b>. חוזי H4 סטנדרטיים נאכפים אוטומטית (§4.11 + §4.14).' } },
+
+  /* R-49 (src) · Agreement formalities. Sources: the course booklet's own two templates
+     ("הסכם שיתוף פעולה", "הסכם מכירה וקניה") plus guide §4.14. An agreement that misses a field
+     is not a weaker agreement — it is an unenforceable one, and our 30,000-unit X3 commitment
+     lives or dies on this. */
+  agreements:{ src:true,
+    h6Fields:['מאיזה אזור','לאיזה אזור','שתי החברות','<b>אלפי</b> יחידות','מחיר ליחידה','מטבע','תנאי אשראי (% מזומן / % אחרי רבעון / % אחרי שני רבעונים)','אמצעי הובלה (יבשתי / אווירי)'],
+    h6Note:'טופס H6 חייב לפרט את כל השדות האלה. שימו לב שהכמות נרשמת ב<b>אלפי</b> יחידות (§4.14.2).',
+    saleTemplate:['המוכר וְהקונה — מספרי חברה','המוצר והדרגה','המטבע','פריסת התשלום באחוזים','הרבעון שבו תסופק הסחורה','שיעור הקנס אם המוכר לא יספק בזמן ובמקום','שיעור הקנס אם הקונה לא ישלם במועד','חתימת נציג המוכר · חתימת נציג הקונה · <b>משקיף</b>'],
+    coopTemplate:['שתי החברות — מספרי חברה','סכום ההשקעה המשותפת','מטרת ההשקעה','<b>סכום הקנס</b> אם צד אחד לא יקיים את חלקו','חתימות שני הנציגים + משקיף'],
+    standingContract:'חוזה אספקה קבוע (Standing Supplier Contract) — חתום בידי שני הצדדים ו<b>רשום אצל ה-Administrator</b>. כדי שיהיה בר-אכיפה עליו לכלול <b>לפחות 3,000 יחידות בכל רבעון למשך 3 רבעונים לפחות</b> (§4.14.2).',
+    serviceFees:'תשלומי שירות בין-חברות (W1) — בהרצות סטנדרטיות רק בין מטות. מעל <b>SF 200,000</b> ברבעון נדרש <b>אישור מוקדם</b> מה-Administrator בשם רשויות המס (§4.14.3).',
+    loanRegistration:'חוזה הלוואה בין-חברות — חוזה-האב חייב להירשם אצל ה-Court (Administrator) כדי לתקוף, והטפסים מוגשים ע״י <b>המלווה</b> (§4.11).',
+    /* The single most consequential clause we did not have: shortfalls are not simply a breach. */
+    expediting:'<b>חובת המוכר נאכפת ע״י expediting של היחידות החסרות.</b> כלומר אם נהיה בחסר מול חוזה — המשחק ישלים את החסר בכפייה על חשבוננו, ולא "פשוט נפר". בהעברות תוך-חברתיות אין expediting — שם היחידה המוכרת פשוט תספק את מה שיש (§4.14.2 + §4.14.4).',
+    lowerGradeFallback:'לפי סעיף 5 בתבנית הסכם המכירה של החוברת: אם למוכר אין אפשרות לספק את הדרגה המקורית — <b>עליו לספק כמות מספקת של דרגה נמוכה מתאימה</b>. זה מסלול חוקי, לא הפרה.',
+    buyerPriority:'סעיף 7 בתבנית: לקונה החתום <b>תינתן עדיפות אספקה</b> על פני כל קונה אחר שיבוא בהסכם עם אותו מוכר — כלומר חוזה חתום מקדים אותנו בתור.',
+    twoGradeTrap:'אם הדרגה שנקנתה אינה אחת שהקונה כבר משווק באזור — נכנסת מגבלת שתי הדרגות, ו<b>הדרגה האמצעית תתמזג אוטומטית עם הנמוכה</b> במלאי שלו (§4.14.2).' },
 
   // Data Log 08 (src) — the timing skeleton of the whole game.
   lags:{ productionToSale:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — פיגור של רבעון עד שניתן למכור אותה',
@@ -773,6 +826,22 @@ function save(silent){
    The distinction existed only inside the rules card; a player reading "פרסום 239,000"
    on an action card had no way to know it rested on an assumed elasticity. */
 function est(html, why){ return `<span class="est" title="${esc(why||'אומדן מכויל — לא מספר מצוטט מחוקי המשחק')}">${html}<sup>~</sup></span>`; }
+/* I-1 · A third category the app was missing. `est` means "we calibrated this"; `src` means "a
+   source states it". Neither fits a number that came out of an OCR-reconstructed file and is NOT
+   on the printed page — that is not an estimate, it is an unverified reading, and the difference
+   matters when a plan is built on it. */
+const CAPACITY_UNVERIFIED={
+  X:{ europe:'הדף המודפס של Data Log 03 נושא שלושה מספרים בלבד בטבלת הקיבולת (50.000 · 25.000 · 18.000). 35,000 אינו מופיע בו — הוא הגיע מקובץ ה-xlsx ששוחזר ב-OCR.',
+      brazil:'12,000 אינו מופיע בדף המודפס של Data Log 03 — מקורו בשחזור ה-OCR.' },
+  Y:{ brazil:'14,000 אינו מופיע בדף המודפס של Data Log 03 — מקורו בשחזור ה-OCR.' } };
+const capUnverified=(product,rid)=>((CAPACITY_UNVERIFIED[product]||{})[rid])||null;
+/* Wrap a figure the sources do not confirm. Deliberately louder than `est`: an unverified number
+   should look different from a calibrated one, because the fix is different (go read the page). */
+function unver(html, why){ return `<span class="unver" title="${esc(why)}">${html}<sup>?</sup></span>`; }
+function capacityFigure(product,rid){
+  const v=(DATALOG.capacity[product]||{})[rid]||0, why=capUnverified(product,rid);
+  return why?unver(fmt(v),why):fmt(v);
+}
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const uid = ()=>Math.random().toString(36).slice(2,9);
@@ -1783,18 +1852,28 @@ const MR_FREE_SRC='חוברת עזר — מחקרי שווקים, עמודת ע�
    So MR3 is contested, and MR74 may be free only in Q4/Q8/Q9 rather than always. The tool
    follows the booklet because it is this course's own material, and shows the conflict so
    the team can settle it with the instructor instead of discovering it mid-quarter. */
+/* Both of these were read verbatim out of the guide PDF and both are genuine conflicts with the
+   booklet — not vague recollections. The booklet is this course's document and outranks the guide,
+   so the operative free list stays 17/28/74. Recording the exact wording matters because it is
+   what lets the team settle it in one question if a quarter ever bills us for MR74. */
 const MR_FREE_CONFLICTS=[
-  {code:'MR3',  claim:'המדריך §VI: "בריצות סטנדרטיות פריטים 3, 17 ו-28 חינמיים בכל רבעון"', effect:'אם נכון — יש לכם מקום חינמי רביעי, וחבל לשלם על MR3'},
-  {code:'MR74', claim:'המדריך עמ׳ 1461: דוחות מאוחדים ניתנים חינם ב-Q4, Q8 ובאחרון בלבד', effect:'אם נכון — MR74 חינם ברבעון הנוכחי אך עולה ב-Q5/Q6/Q7, ויש לתקצב אותו שם'},
+  {code:'MR3',  claim:'המדריך (נספח הפלט לדוגמה): "In standard runs items 3, 17 and 28 are free every quarter, and companies get them automatically. This enables the company to order three (in standard runs) additional MR items on its own."',
+                effect:'המדריך אומר שהשלישי החינמי הוא MR3 — החוברת מתמחרת את MR3 ב-10K ומציינת את MR74 כחינמי. החוברת מחייבת. תקרת שלושת הנרכשים — מאושרת בשני המקורות.'},
+  {code:'MR74', claim:'המדריך §4.10.5 (פריטים 71–75): "in most runs consolidated statements will be provided free in Qs 4 and 8 (simulating annual reports) as well as in the last Q of the run"',
+                effect:'זו ברירת המחדל הגנרית. עמודת העלות בחוברת רושמת MR74 = "חינם" <b>בלי הגבלת רבעון</b> — ולכן בקורס הזה הוא חינם בכל רבעון.'},
   {code:'MR29', claim:'המדריך §4.10.5: רשימת ברירת המחדל של ה-CIA היא 3, 28, 29', effect:'רשימת ה-CIA "עשויה להשתנות מעת לעת" — לכן היא החלשה מבין השלוש'},
 ];
-/* Per the guide, MR74 is free in the annual-report quarters. Reported as an advisory only —
-   the operative free list stays the booklet's. */
-const MR74_FREE_QUARTERS=['Q4','Q8','Q9'];
+/* H-2, closed. This used to warn that MR74 "might be charged" outside Q4/Q8/Q9 and to send the
+   team to ask the instructor. Both sources have now been read directly: the guide restricts it to
+   the annual-report quarters "in most runs", the booklet's cost column simply says חינם. The
+   booklet governs, so there is nothing left to ask. */
+const MR74_GUIDE_FREE_QUARTERS=['Q4','Q8','Q9'];
 function mrFreeNoteFor(q){
-  return MR74_FREE_QUARTERS.includes(q)
-    ? `לפי המדריך, דוחות מאוחדים (MR74) ניתנים חינם ב-${MR74_FREE_QUARTERS.join('/')} — ${q} הוא אחד מהם.`
-    : `לפי המדריך, MR74 חינם רק ב-${MR74_FREE_QUARTERS.join('/')}. ב-${q} ייתכן שהוא בתשלום — ודאו מול המרצה לפני שאתם מסתמכים על מקום פנוי.`;
+  const generic=MR74_GUIDE_FREE_QUARTERS.includes(q);
+  return `דוחות מאוחדים (MR74) — <b>חינם</b>, לפי עמודת העלות בחוברת העזר, בלי הגבלת רבעון. `
+    + (generic
+      ? `המדריך מגדיר ${MR74_GUIDE_FREE_QUARTERS.join('/')} כרבעוני הדוח השנתי, ו-${q} הוא אחד מהם — שני המקורות מסכימים כאן.`
+      : `המדריך הגנרי מגביל זאת ל-${MR74_GUIDE_FREE_QUARTERS.join('/')} "in most runs", אך החוברת של הקורס גוברת. אם רבעון כלשהו כן יחויב עליו — זה הסימן שההרצה שלנו נוהגת לפי המדריך, ואז יש לתקצב 10K.`);
 }
 function infoGaps(entered){
   const gaps=[]; const last=entered[entered.length-1]; const mi=last?S.quarters[last].marketIntel||{}:{};
@@ -2599,7 +2678,8 @@ PAGE_RENDER.plan = (c)=>{
             <td style="text-align:start;white-space:normal;max-width:150px" class="small muted">${esc(r.cost)}</td></tr>`).join('')}
           </tbody></table></div>
           <div class="small muted" style="margin-top:8px;line-height:1.7">${IC('info')} ${(()=>{const w=whoHasGrade(it.routes.cap&&'X'||'X',0);return '';})()}
-            <b>כדי לדעת ממי לקנות</b> צריך לראות מי מחזיק או מייצר את הדרגה — <b>MR29</b> (דרגות מלאי סגירה לפי חברה) ו-<b>MR30</b> (דרגות שיוצרו לרבעון הבא לפי חברה). שימוש משתלם באחד משלושת המקומות בתשלום.
+            <b>כדי לדעת ממי לקנות</b> צריך לראות מי מחזיק או מייצר את הדרגה — <b>MR29</b> (דרגות מלאי סגירה לפי חברה, <b>2K</b>) ו-<b>MR30</b> (דרגות שיוצרו לרבעון הבא לפי חברה, <b>5K</b>). <b style="color:var(--green)">7K SF לשניהם — קנו אותם.</b> זה המידע היחיד שהופך את "רכישה מחברה אחרת" ממסלול משוער למסלול בדיק, והוא זול פי כמה מכל מחקר אחר שיסגור את הפער הזה.
+            <br>${IC('warn')} <b>מה שהחוזה קובע ואין לנו בקוד:</b> חובת המוכר <b>נאכפת ע״י expediting של היחידות החסרות</b> (§4.14.2) — חסר אינו "הפרה" אלא השלמה כפויה על חשבוננו. ומנגד, סעיף 5 בתבנית ההסכם של החוברת מתיר לספק <b>דרגה נמוכה מתאימה בכמות מספקת</b> כשאין אפשרות לספק את המקורית. וסעיף 7: לקונה החתום יש <b>עדיפות אספקה</b> על קונים שיבואו אחריו.
             <br>${IC('warn')} <b>מלכודת שתי הדרגות (§4.9):</b> אם תחזיק כבר שתי דרגות של ${esc(it.routes.cap?'':'')}המוצר באזור והדרגה החדשה תיכנס כשלישית — הדרגה האמצעית <b>תרד אוטומטית לרמת הנמוכה</b>. אל תייצר שתי דרגות נמוכות "בינתיים".</div>
         </details>`:''}
         ${it.aiNote?`<div class="small" style="margin-top:6px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">${IC('cpu')} ${esc(it.aiNote)}</div>`:''}
@@ -3123,12 +3203,15 @@ function buildActionPlan(q,targetQ){
         dep:`אשראי הספקים יקר (${S.config.params.interest.supplierCredit}%) ופוגע ברכיב האיתנות — צמצמו את משכו ע״י האצת מכירות וגבייה. אין לבקש הלוואה מאף גורם.`});
     } else {
       const fo=financeActionOptions(targetQ,need,'europe');
-      // R-34: if the target quarter is outside the loan window, the A3-2 half of this option may
-      // not be available at all — say so on the card instead of recommending a route that closed.
-      const lw=RULES.finance.loanWindow, inWindow=!lw.openQuarters.length||lw.openQuarters.includes(targetQ);
-      const windowWarn = inWindow ? '' :
-        `<div class="tag a" style="display:block;margin-top:8px;line-height:1.7">⚠ <b>חלון ההלוואה:</b> ${targetQ} אינו ברבעונים שבהם ניתן לגייס הלוואת בנק חדשה (${lw.openQuarters.join(', ')}). הישאר ב-<b>H4 בין-חברות</b> ובאשראי ספקים. ${lw.needsSource?'<b>הכלל טרם אומת מול המדריך</b> — ודא לפני שאתה מוותר על A3-2.':''}</div>`;
-      out.push({cat:'fin',level:'amber',conf:inWindow?'data':'est',title:`מימון גישור — ${inWindow?'A3-2':'H4 (חלון A3-2 סגור)'}`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
+      // R-34: the long-term CitiBank facility is closed in the opening quarters, not the late ones,
+      // and the area facility carries its own limit. Say which door is actually open in targetQ.
+      const fin=RULES.finance, citiClosed=fin.citiLoan.earlyQuartersClosed.includes(targetQ);
+      const windowWarn = `<div class="tag ${citiClosed?'a':'b'}" style="display:block;margin-top:8px;line-height:1.75">${citiClosed?'⚠':'ℹ'} <b>איזו דלת פתוחה ב-${targetQ}:</b>`
+        + (citiClosed
+          ? ` הלוואת CitiBank ארוכת-הטווח <b>עדיין סגורה</b> — "loans are not available until the Bank has a sense for how the industry is developing". הישארו בהלוואה אזורית קצרה (A3-2), ב-H4 בין-חברות ובאשראי ספקים.`
+          : ` הלוואת CitiBank ארוכת-הטווח <b>פתוחה</b> (הבנק מלווה משהתעשייה התפתחה) — אך ל-6 רבעונים ו<b>ללא פירעון מוקדם</b>. אג״ח (H2) פתוחות מ-${fin.bonds.fromQuarter}.`)
+        + ` <br>${IC('warn')} ההלוואה האזורית מוגבלת לאחוז מעודף הנכסים השוטפים — <b>חריגה תקוצץ אוטומטית</b>. ואם יש באזור ני״ע ממשלתי קצר, לקיחת הלוואה <b>תמכור אותו אוטומטית</b>.</div>`;
+      out.push({cat:'fin',level:'amber',conf:'rule',title:`מימון גישור — A3-2${citiClosed?'':' / H (CitiBank)'}`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
         detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. הלוואה מקומית (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה. חלופה: H4 בין-חברות. <b>מומלץ: לווה ${fmt(need)} SF</b> (גישור מינימלי). אופציות אחרות למטה.${windowWarn}`,
         dep:`קח את המימון רבעון לפני הצורך — הגבייה המדורגת מעכבת את המזומן גם אחרי שהמכירות מתחילות.`,
         optionCols:fo.optionCols, options:fo.options, sim:fo.options[0].sim});
@@ -3762,6 +3845,44 @@ function renderRulesCard(){
         <b>גמישות צולבת (§5.2):</b> ${RULES.cross.note} אומדנים: ${['us','europe','brazil'].map(r=>rn[r]+' '+RULES.cross.chipVsPcPrice[r]).join(' · ')}<br>
         <b>צמיחה (§5.2):</b> ${RULES.potential.growth}<br>
         <b>תקרת הרמה מפרסום:</b> ${(RULES.adv.maxLift*100).toFixed(0)}% — ${RULES.adv.maxLiftNote}</div>
+      <details class="fverd" style="margin-top:12px"><summary>${IC('book')} כללים שנוספו מהמדריך ומהחוברת — מימון · תמחור · משרדים · הסכמים ⌄</summary>
+        <div class="small" style="line-height:1.9;padding:10px 2px 2px">
+          <b style="color:var(--purple)">מימון (§4.11)</b><br>
+          • ${RULES.finance.citiLoan.note}<br>
+          • ${RULES.finance.bonds.note}<br>
+          • ${RULES.finance.areaBankLoan.note}<br>
+          • ${RULES.finance.loanVsSecurities.note}<br>
+          • ${RULES.finance.interCompanyLoan.note}<br><br>
+          <b style="color:var(--purple)">תמחור (§4.4 · §4.13 · §4.14)</b><br>
+          • ${RULES.pricing.integralUnitsOnly}<br>
+          • ${RULES.pricing.brazilPCCap}<br>
+          • ${RULES.pricing.interCompanyMinimum}<br>
+          • ${RULES.pricing.plantSaleMinimum}<br>
+          • ${RULES.pricing.componentDefault}<br>
+          • ${RULES.pricing.inertiaAndResentment}<br><br>
+          <b style="color:var(--purple)">משרדי מכירות (§4.6)</b><br>
+          • ${RULES.offices.changeTakesAQuarter}<br>
+          • ${RULES.offices.twoQuartersToEfficiency}<br>
+          • ${RULES.offices.changeCostAccelerates}<br>
+          • ${RULES.offices.diminishingReturns}<br><br>
+          <b style="color:var(--purple)">הסכמים — מה הופך אותם לברי-אכיפה (§4.14 + תבניות החוברת)</b><br>
+          • <b style="color:var(--red)">${RULES.agreements.expediting}</b><br>
+          • ${RULES.agreements.lowerGradeFallback}<br>
+          • ${RULES.agreements.buyerPriority}<br>
+          • ${RULES.agreements.standingContract}<br>
+          • ${RULES.agreements.serviceFees}<br>
+          • ${RULES.agreements.loanRegistration}<br>
+          • ${RULES.agreements.twoGradeTrap}<br>
+          • <b>טופס H6 — שדות חובה:</b> ${RULES.agreements.h6Fields.join(' · ')}<br>
+          • <b>תבנית הסכם מכירה (חוברת) — סעיפים:</b> ${RULES.agreements.saleTemplate.join(' · ')}<br>
+          • <b>תבנית הסכם שיתוף פעולה (חוברת):</b> ${RULES.agreements.coopTemplate.join(' · ')}<br><br>
+          <b style="color:var(--purple)">קיבולת — optimal מול maximal (§4.7)</b><br>
+          • טבלת Data Log 03 היא <b>maximal</b> capacity. עלות היחידה היא פרבולה שהמינימום שלה בקיבולת ה<b>אופטימלית</b>; מעליה הייצור אפשרי אך בעלות שולית עולה, עד ה-maximal.<br>
+          • הפער בין optimal ל-maximal: בברזיל בשבבים <b>יותר מ-50%</b> · פחות מכך בארה״ב · <b>הקטן ביותר באירופה</b>.<br>
+          • <b>MR24</b> (24K) נותן את היקף הייצור האופטימלי לפי אזור ומוצר — זה המחקר שהופך את הפרבולה מתיאור למספר.<br>
+          • שינוי קצב הייצור (למעלה או למטה) גורר עלויות התאמה — שעות נוספות, פיצויים, break-in. יש פרמיה על קצב יציב.<br>
+          • יעילות המפעל ניתנת לשיפור בהשקעה ב<b>שיפור שיטות</b> (methods improvements) — MR7/MR8/MR9 מראים מי בתעשייה משקיע בזה.
+        </div></details>
     </div></div>`;
 }
 /* WS-3 · Demand-engine panel — what the model has learned, its confidence, competitor trends, and which MR to buy. */
@@ -5097,11 +5218,32 @@ function officeLegality(sc,targetQ){
   });
   return out;
 }
+/* R-10 (src, §4.6 "Create/Change A CSO Takes A Q") · Changing the sales setup takes effect only at
+   the END of the quarter: the quarter you decide in is still sold by the OLD arrangement, while you
+   already pay the change cost. So a plan that opens offices in targetQ and books the extra volume
+   in targetQ is counting a lift that cannot arrive until targetQ+1. This was encoded nowhere. */
+function officeTimingGuard(sc,targetQ){
+  const lev=sc&&sc.levers[targetQ]; if(!lev) return [];
+  const nowOffices=(S.quarters[S.activeQuarter].operational||{}).offices;
+  const out=[];
+  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    const rl=lev.regions[r.id]||{}; const planned=rl.offices;
+    if(planned==null) return;
+    // Only meaningful when we know what we have today; offices is reported per company, not per area,
+    // so treat a per-area plan that exceeds the reported total as an opening this quarter.
+    if(nowOffices==null) return;
+    const opening=planned>nowOffices;
+    const sellsHere=activeLines(lev,r.id).some(l=>(l.qtySold||0)>0||(l.sales||0)>0);
+    if(opening&&sellsHere) out.push({region:r.name, from:nowOffices, to:planned,
+      why:`המשרדים נפתחים ב-${targetQ} אך נכנסים לתוקף רק בסופו — המכירות ב-${targetQ} עוד יטופלו לפי המערך הקודם, ואת עלות השינוי משלמים כבר עכשיו. אל תתקצבו את תוספת הנפח לפני ${nextQuarters(targetQ)[0]||'הרבעון הבא'}.`});
+  });
+  return out;
+}
 function renderChecklist(box,targetQ,sc){
   const Q=S.quarters[S.activeQuarter];
   const cg=chipGuard(sc,targetQ), val=scenarioValidation(sc,targetQ), caps=capacityCheck(sc,targetQ);
   const phantoms=phantomSales(sc,targetQ), ptrans=phantomTransfers(sc,targetQ);
-  const gl=gradeLimitGuard(), ol=officeLegality(sc,targetQ);
+  const gl=gradeLimitGuard(), ol=officeLegality(sc,targetQ), otg=officeTimingGuard(sc,targetQ);
   const dov=demandOverreach(buildActionPlan(S.activeQuarter,targetQ));
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
@@ -5117,6 +5259,7 @@ function renderChecklist(box,targetQ,sc){
     {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
     {t:`עד 2 דרגות למוצר באזור (§4.9)${gl.length?` · ${gl[0].regionName}/${gl[0].product} כבר ב-${gl[0].count}`:''}`,ok:!gl.some(g=>g.over)},
     {t:`הרכב משרדי מכירות חוקי (Data Log 04)${ol.length?` · ${ol[0].region} ${ol[0].n}`:''}`,ok:ol.length===0},
+    {t:`נפח המכירות אינו נשען על משרדים שנפתחים רק עכשיו (§4.6)${otg.length?` · ${otg[0].region} ${otg[0].from}→${otg[0].to}`:''}`,ok:otg.length===0},
     {t:`אין המלצה שחורגת מהביקוש הנצפה${dov.length?` · ${fmt(dov[0].qty)} מול תקרה ${fmt(dov[0].ceiling)}`:''}`,ok:dov.length===0},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
@@ -5127,6 +5270,7 @@ function renderChecklist(box,targetQ,sc){
     ${gl.length?`<div class="tag ${gl.some(g=>g.over)?'r':'a'}" style="margin-top:8px">${IC('warn')} <b>מגבלת שתי דרגות (§4.9):</b> ${gl.map(g=>`${g.regionName}/${g.product==='Y'?'מחשב':'שבב'} מחזיק ${g.count} דרגות (${g.grades.join(', ')})`).join(' · ')}. הכנסת דרגה שלישית לאזור <b>תוריד אוטומטית את הדרגה האמצעית לרמת הנמוכה</b> — מחיקת שווי של מלאי טוב. מסלולי יציאה: ${RULES.grades.exits.join(' · ')}.</div>`:''}
     ${dov.length?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>המלצה חורגת מהביקוש:</b> ${dov.map(d=>`"${esc(d.title.slice(0,44))}" — ${fmt(d.qty)} יח׳ ב${(REGIONS.find(r=>r.id===d.region)||{}).name||d.region} מול תקרה ${fmt(d.ceiling)} (${esc(d.src)})`).join(' · ')}. כמות מעבר לתקרה פשוט לא תימכר — היא תישאר במלאי ותצבור עלות אחזקה.</div>`:''}
     ${ol.length?`<div class="tag r" style="margin-top:8px">${IC('warn')} <b>הרכב משרדים לא חוקי:</b> ${ol.map(o=>`${o.region}: ${o.n} — ${o.why}`).join(' · ')}.</div>`:''}
+    ${otg.length?`<div class="tag a" style="display:block;margin-top:8px;line-height:1.75;white-space:normal">${IC('warn')} <b>תזמון פתיחת משרדים (§4.6 — "Create/Change A CSO Takes A Q"):</b> ${otg.map(o=>`<b>${o.region}</b> ${o.from}→${o.to} — ${o.why}`).join('<br>')}<br><span class="muted">${esc(RULES.offices.twoQuartersToEfficiency.replace(/<[^>]+>/g,''))}</span></div>`:''}
     ${caps.length?`<div class="tag a" style="margin-top:8px">${IC('warn')} חריגת קיבולת: ${caps.map(c=>`${c.name} ${c.product} ${fmt(c.prod)} יח׳ > ${fmt(c.cap)}/מפעל → נדרשים ${c.plants} מפעלים`).join(' · ')}.</div>`:''}
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;
 }
@@ -5270,8 +5414,14 @@ function goalTab(t){
             <td class="num">${r.total==null?'—':fmt(r.total)}</td>
             <td><input class="f" type="number" min="0" style="max-width:90px" value="${r.x==null?'':r.x}" placeholder="?" oninput="setPlantSplit('${r.rid}','X',this.value)"></td>
             <td><input class="f" type="number" min="0" style="max-width:90px" value="${r.y==null?'':r.y}" placeholder="?" oninput="setPlantSplit('${r.rid}','Y',this.value)"></td>
-            <td class="small muted" style="text-align:start;white-space:normal">${r.declared?`X ${fmt((r.x||0)*((DATALOG.capacity.X||{})[r.rid]||0))} · Y ${fmt((r.y||0)*((DATALOG.capacity.Y||{})[r.rid]||0))} יח׳/רבעון${r.mismatch?` <b style="color:var(--red)">— סכום ${r.sum} ≠ ${r.total} בדוח</b>`:''}`:'לא הוצהר'}</td></tr>`).join('')}
+            <td class="small muted" style="text-align:start;white-space:normal">${r.declared?`X ${(r.x||0)?`${r.x}×${capacityFigure('X',r.rid)}`:'0'} · Y ${(r.y||0)?`${r.y}×${capacityFigure('Y',r.rid)}`:'0'} יח׳/רבעון${r.mismatch?` <b style="color:var(--red)">— סכום ${r.sum} ≠ ${r.total} בדוח</b>`:''}`:'לא הוצהר'}</td></tr>`).join('')}
         </tbody></table></div>
+        ${(()=>{ const bad=[]; ['X','Y'].forEach(p=>REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const w=capUnverified(p,r.id); if(w) bad.push({p,r,w}); }));
+          return bad.length?`<div class="cb" style="margin-top:10px;border-inline-start:3px solid var(--red)"><div class="small" style="line-height:1.8">
+            ${IC('warn')} <b style="color:var(--red)">${bad.length} מספרי קיבולת אינם מופיעים בדף המודפס של Data Log 03</b> — הם הגיעו מקובץ ה-xlsx ששוחזר ב-OCR. הדף המודפס נושא <b>שלושה</b> מספרים בטבלת הקיבולת: 50.000 · 25.000 · 18.000.
+            <br>${bad.map(b=>`<b>${b.p} · ${b.r.name}</b> = ${unver(fmt((DATALOG.capacity[b.p]||{})[b.r.id]||0),b.w)}`).join(' · ')}
+            <br><b>למה זה חשוב:</b> קיבולת X באירופה היא הבסיס לכל תוכנית ה-30,000 X3. ודאו את שלושת המספרים מול העמוד המודפס לפני שמסתמכים עליהם.
+            <br>${IC('info')} כמו כן — הטבלה כותרתה <b>MAXIMAL</b> capacity, לא optimal. עלות היחידה היא פרבולה שהמינימום שלה ב<b>קיבולת האופטימלית</b>, וייצור מעליה עולה יותר (§4.7). <b>MR24</b> (24K) נותן את היקף הייצור האופטימלי לפי אזור ומוצר.</div></div>`:''; })()}
         ${(()=>{ const cx=capacityForProduct('X'), cy=capacityForProduct('Y');
           return `<div class="small" style="margin-top:10px;line-height:1.8">
             <b>קיבולת שבבים (X):</b> ${cx.known?(cx.units?`${fmt(cx.units)} יח׳/רבעון`:'<span style="color:var(--red)">0 — אין מפעל שבבים</span>'):'<span style="color:var(--amber)">לא ידוע</span>'} ·
