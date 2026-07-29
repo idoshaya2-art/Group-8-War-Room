@@ -268,6 +268,25 @@ ck('the demand ceiling responds to price at all', dem.priceResponsive);
 ck('a missing own-price falls back to the MR28 market median', dem.anchorPriceRecovered, dem.anchorPriceSrc);
 ck('the engine list contains no demand overreach', dem.overreachOnEngineList===0);
 ck('the overreach guard actually catches a violation', dem.overreachDetectsAViolation);
+/* v10 made chip lines first-class, so the oversell guard must cover BOTH products and must
+   not let chips already promised to a signed contract be sold on the open market as well. */
+const ov=await page.evaluate(()=>{
+  const t=nextQuarters(S.activeQuarter)[0];
+  const mk=(patch)=>{ const L={}; L[t]={rd:0,regions:{}};
+    REGIONS.forEach(r=>L[t].regions[r.id]={production:0,unitCost:0,sales:0,qtySold:0,price:0,advertising:0,invest:0,transferIn:0,newFac:0,offices:0,product:'Y'});
+    Object.assign(L[t].regions.europe,patch); return {levers:L}; };
+  const pc=phantomSales(mk({product:'Y',qtySold:999999,price:130,sales:999999*130}),t);
+  const chip=phantomSales(mk({product:'X',qtySold:999999,price:41,sales:999999*41}),t);
+  const okPlan=phantomSales(mk({product:'Y',qtySold:1000,price:130,sales:130000}),t);
+  return {pcCaught:pc.length===1&&pc[0].product==='Y',
+          chipCaught:chip.length===1&&chip[0].product==='X',
+          chipCountsContract:chip[0]&&chip[0].committed>0,
+          legalPlanPasses:okPlan.length===0};
+});
+ck('overselling computers is caught', ov.pcCaught);
+ck('overselling CHIPS is caught too — first-class lines are guarded', ov.chipCaught);
+ck('chips already promised to the contract are excluded from sellable supply', ov.chipCountsContract);
+ck('a plan within supply still passes', ov.legalPlanPasses);
 const demUI=await page.evaluate(()=>{ go('export'); return null; });
 await page.waitForTimeout(400);
 ck('the submission checklist checks for demand overreach',
@@ -355,29 +374,38 @@ const mr=await page.evaluate(()=>{
   const buyCard=items.find(i=>/^קנה מחקרי שוק/.test(i.title||''));
   const missCard=items.find(i=>/חינמיים חסרים/.test(i.title||''));
   return { freeTrio:MR_FREE.join(','),
-    catalogFree:MR_STUDIES.filter(m=>m.free).map(m=>m.code).join(','),
+    catalogFree:MR_STUDIES.filter(m=>m.cost===0).map(m=>m.code).join(','),
     buyTitle:buyCard?buyCard.title:'(none)',
     buyCardNeverListsAFreeStudy: buyCard? !MR_FREE.some(f=>buyCard.title.includes(f)) : true,
     missingFreeIsAnIngestionCard: !!missCard && /לא H1-2/.test(missCard.form||''),
     missingFreeSaysDoNotBuy: !!missCard && /אל תקנה/.test(missCard.title||''),
-    slots:mrPaidSlots(t) };
+    slots:mrPaidSlots(t),
+    conflicts:MR_FREE_CONFLICTS.length,
+    conflictCodes:MR_FREE_CONFLICTS.map(c=>c.code).join(','),
+    freeNoteMentionsQ4:/Q4/.test(mrFreeNoteFor('Q4')) };
 });
-ck('the free trio is 3 / 17 / 28 per the guide', mr.freeTrio==='MR3,MR17,MR28');
-ck('the catalog marks exactly those three as free', mr.catalogFree==='MR3,MR17,MR28');
+// The operative free list follows the course booklet's cost column (17/28/74), which is this
+// run's own material. The guide disagrees in three places and each conflict must be surfaced
+// rather than silently resolved — see MR_FREE_CONFLICTS.
+ck('the free list follows the course booklet', mr.freeTrio==='MR17,MR28,MR74', mr.freeTrio);
+ck('the catalog marks exactly those as free', mr.catalogFree===mr.freeTrio, mr.catalogFree);
+ck('the guide/booklet conflicts are recorded, not resolved silently',
+   mr.conflicts>=3 && mr.conflictCodes.includes('MR3') && mr.conflictCodes.includes('MR74'), mr.conflictCodes);
+ck('MR74 free quarters from the guide are stated per target quarter', mr.freeNoteMentionsQ4);
 ck('the BUY card never lists a free study', mr.buyCardNeverListsAFreeStudy, mr.buyTitle);
 ck('a missing free study is treated as an ingestion problem, not a purchase', mr.missingFreeIsAnIngestionCard);
 ck('and it says explicitly not to buy it', mr.missingFreeSaysDoNotBuy);
 ck('paid slots are capped at three', mr.slots.max===3);
 const cat=await page.evaluate(()=>{ openMRCatalog(); const t=document.body.innerText;
-  return {opened:/קטלוג מחקרי השוק/.test(t), quotesTheGuide:/3, 17 ו-28/.test(t),
+  return {opened:/קטלוג מחקרי השוק/.test(t), quotesTheGuide:/חוברת עזר|עמודת עלות/.test(t),
     warnsNotToOrderFree:/אל תזמין אותם/.test(t), showsRemainingSlots:/מקומות פנויים/.test(t),
-    flagsItem29Ambiguity:/פריט 29/.test(t), explainsEstimateItems:/אומדן/.test(t),
+    flagsItem29Ambiguity:/המדריך חולק על החוברת/.test(t), explainsEstimateItems:/אומדן/.test(t),
     listsEveryStudy:document.querySelectorAll('table tbody tr').length}; });
 ck('the catalog opens with every study numbered', cat.opened && cat.listsEveryStudy>=27, cat.listsEveryStudy+' rows');
-ck('it quotes the guide on which three are free', cat.quotesTheGuide);
+ck('the catalog states its source for the free list', cat.quotesTheGuide);
 ck('it warns not to spend a paid slot on a free study', cat.warnsNotToOrderFree);
 ck('it shows how many paid slots remain', cat.showsRemainingSlots);
-ck('it flags the item-29 ambiguity between the two guide sections', cat.flagsItem29Ambiguity);
+ck('it flags where the guide contradicts the booklet', cat.flagsItem29Ambiguity);
 ck('it explains the probabilistic "estimate" items', cat.explainsEstimateItems);
 await page.evaluate(()=>closeModal());
 

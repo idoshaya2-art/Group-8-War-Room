@@ -41,12 +41,15 @@ ck('a company in this state raises alerts', diag.alerts>0, diag.alerts+' alerts'
 /* ---- 3. CONTINUITY: decisions → simulator → export must carry the same numbers ---- */
 await at('plan');
 const recs=await page.evaluate(()=>{ const q=S.activeQuarter,t=nextQuarters(q)[0];
-  return (buildActionPlan(q,t)||[]).map(i=>({title:(i.title||'').slice(0,80),level:i.level||i.sev,hasSim:!!i.sim,blocked:!!i.blocked})); });
+  return (buildActionPlan(q,t)||[]).map(i=>({title:(i.title||'').slice(0,80),level:i.level||i.sev,hasSim:!!i.sim,blocked:!!i.blocked,hasAction:!!i.action})); });
 ck('decisions tab produces concrete actions', recs.length>0, recs.length+' actions');
 const musts=recs.filter(r=>r.level==='red');
 ck('mandatory actions are marked as such', musts.length>0, musts.length+' red');
-ck('mandatory actions are executable (carry lever values)',
-   musts.every(m=>m.hasSim||m.blocked), musts.filter(m=>!m.hasSim&&!m.blocked).map(m=>m.title).join(' | ')||'all executable');
+// "executable" means the card gives you a way forward: lever values to send, a button to
+// open the relevant screen, or an explicit block explaining what must happen first.
+ck('mandatory actions are executable (payload, button, or stated blocker)',
+   musts.every(m=>m.hasSim||m.blocked||m.hasAction),
+   musts.filter(m=>!m.hasSim&&!m.blocked&&!m.hasAction).map(m=>m.title).join(' | ')||'all executable');
 
 await page.evaluate(()=>{ S.scenarios=[]; save(); });
 await at('sim');

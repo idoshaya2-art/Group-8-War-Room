@@ -73,4 +73,5 @@ console.log('PASS '+R.pass.length+'  FAIL '+R.fail.length);
 R.fail.forEach(f=>console.log('  ✗ '+f)); R.pass.forEach(f=>console.log('  ✓ '+f));
 console.log('pageErrors:',errs);
 await b.close();
+process.exit((typeof R!=='undefined'&&R.fail&&R.fail.length)?1:0);
 })();

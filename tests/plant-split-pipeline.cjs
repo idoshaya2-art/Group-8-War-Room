@@ -76,4 +76,5 @@ const est2=await p.evaluate(()=>document.querySelectorAll('.est').length);
 console.log('estimate markers on Intel:',est2);
 console.log('pageErrors:',errs);
 await b.close();
+process.exit((typeof R!=='undefined'&&R.fail&&R.fail.length)?1:0);
 })();

@@ -61,7 +61,13 @@ const SEED=`(()=>{
     // projected tech: aggressive R&D raises tech vs base
     S.config.goals.techXTarget=7; S.config.goals.techYTarget=6;
     const lvAgg={}; nextQuarters(q).slice(0,6).forEach(qq=>{lvAgg[qq]={rd:400000,regions:{}};REGIONS.forEach(r=>lvAgg[qq].regions[r.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y'});});
-    out.projTech=projectedTechAt(q,lvAgg).techY>((S.quarters[q].operational.techY)||0);
+    // v10 made R&D probabilistic (#14/#15): a grade is no longer promised for a spend, it is
+    // an expectation with a stated success probability. Assert the honest contract instead of
+    // the old guarantee — the expectation must rise and the calibration source must be named.
+    const pt=projectedTechAt(q,lvAgg);
+    out.projTech = pt.expY>((S.quarters[q].operational.techY)||0)
+                && Array.isArray(pt.probs) && pt.probs.length>0
+                && !!(pt.cal&&pt.cal.src);
     // goal optimizer
     const rec=recommendGoals(); out.goalOpt=rec.cumProfitTarget>0 && rec.techYTarget>=1;
     // magic export model: plants europe only → US/BR production 0, sales spread

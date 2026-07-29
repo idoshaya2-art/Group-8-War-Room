@@ -2,7 +2,7 @@
 # Runs every suite. Exit code is non-zero if any suite fails.
 cd "$(dirname "$0")"
 fail=0
-for t in dead-code decisions rules-coverage rules-orderings rules-behaviour floor-contracts contract-card \
+for t in dead-code audit-fixes decisions rules-coverage rules-orderings rules-behaviour floor-contracts contract-card \
          plant-split-pipeline strategist player-path sweep-pages sweep-regression; do
   node "$t.cjs" || fail=1
 done

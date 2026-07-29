@@ -19,4 +19,5 @@ const ov=await p.evaluate(()=>document.documentElement.scrollWidth-document.docu
 console.log('pageErrors:',errs.length, errs.slice(0,6));
 console.log('mobileOverflow:',ov);
 await b.close();
+process.exit((typeof R!=='undefined'&&R.fail&&R.fail.length)?1:0);
 })();

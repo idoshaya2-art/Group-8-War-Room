@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v10.0 · audit batches 1-3';
+const APP_VERSION = 'v10.1 · audit batches 1-3 + browser QA';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1742,6 +1742,30 @@ function detectTrends(entered){
    that report feeds 60% of the past-performance half of the final score. */
 const MR_FREE=['MR17','MR28','MR74'];
 const MR_FREE_SRC='חוברת עזר — מחקרי שווקים, עמודת עלות: 17 · 28 · 74 = חינם';
+/* Two sources disagree about the free list and neither is dismissed here.
+   The course booklet's cost column (operative above) shows 17/28/74 at zero.
+   The guide says something different in two places:
+     §VI  — "In standard runs items 3, 17 and 28 are free every quarter, and companies get
+             them automatically. This enables the company to order three additional items."
+     §4.10.5 — the CIA default set is 3, 28, 29, and "may vary from time to time".
+     p.1461 — MR74 specifically: "consolidated statements will be provided free in Qs 4 and 8
+             (simulating annual reports) as well as in the last Q of the run".
+   So MR3 is contested, and MR74 may be free only in Q4/Q8/Q9 rather than always. The tool
+   follows the booklet because it is this course's own material, and shows the conflict so
+   the team can settle it with the instructor instead of discovering it mid-quarter. */
+const MR_FREE_CONFLICTS=[
+  {code:'MR3',  claim:'המדריך §VI: "בריצות סטנדרטיות פריטים 3, 17 ו-28 חינמיים בכל רבעון"', effect:'אם נכון — יש לכם מקום חינמי רביעי, וחבל לשלם על MR3'},
+  {code:'MR74', claim:'המדריך עמ׳ 1461: דוחות מאוחדים ניתנים חינם ב-Q4, Q8 ובאחרון בלבד', effect:'אם נכון — MR74 חינם ברבעון הנוכחי אך עולה ב-Q5/Q6/Q7, ויש לתקצב אותו שם'},
+  {code:'MR29', claim:'המדריך §4.10.5: רשימת ברירת המחדל של ה-CIA היא 3, 28, 29', effect:'רשימת ה-CIA "עשויה להשתנות מעת לעת" — לכן היא החלשה מבין השלוש'},
+];
+/* Per the guide, MR74 is free in the annual-report quarters. Reported as an advisory only —
+   the operative free list stays the booklet's. */
+const MR74_FREE_QUARTERS=['Q4','Q8','Q9'];
+function mrFreeNoteFor(q){
+  return MR74_FREE_QUARTERS.includes(q)
+    ? `לפי המדריך, דוחות מאוחדים (MR74) ניתנים חינם ב-${MR74_FREE_QUARTERS.join('/')} — ${q} הוא אחד מהם.`
+    : `לפי המדריך, MR74 חינם רק ב-${MR74_FREE_QUARTERS.join('/')}. ב-${q} ייתכן שהוא בתשלום — ודאו מול המרצה לפני שאתם מסתמכים על מקום פנוי.`;
+}
 function infoGaps(entered){
   const gaps=[]; const last=entered[entered.length-1]; const mi=last?S.quarters[last].marketIntel||{}:{};
   if(!(mi.sales||[]).length)
@@ -2985,6 +3009,7 @@ function buildActionPlan(q,targetQ){
       optionCols:cp.optionCols, options:cp.options, sim:cp.options[1].sim}); }
   // 1. Cash floor risk
   if(brk) out.push({cat:'fin',level:'red',title:'סכנת שבירת רצפת מזומן',form:'A3-2 (הלוואה מקומית) / H4 (הלוואה בין-חברות)',
+    action:"go('financials')", actionLabel:'פתח את הקרנת התזרים',
     detail:`ההקרנה מראה ירידה מתחת לרצפה ב-<b>${brk.q}</b> (מזומן ${fmt(brk.unified)} מול רצפה ${fmt(brk.floor)}). גייס מימון או הקטן הוצאות עוד לפני כן.`,
     dep:`ההחלטה חייבת להתקבל <b>רבעון-שניים לפני</b> ${brk.q} — מימון וצמצום הוצאות משפיעים על המזומן קדימה, לא רטרואקטיבית.`});
   // 2. Negative currency
@@ -4264,6 +4289,9 @@ window.openMRCatalog=()=>{
         <b>חוברת העזר</b> (עמודת העלות) קובעת: 17 · 28 · <b>74</b> חינם, ופריט <b>3 עולה 10,000 SF</b>.
         <b>מדריך INTOPIA §VI</b> קובע: 3 · 17 · 28 חינם.<br>
         הכלי הולך לפי <b>חוברת העזר</b>, שגוברת בהיררכיית המקורות ומגובה בתדריך הפתיחה. אם המרצה יקבע אחרת — עדכנו את <code>MR_FREE</code>.
+        <div class="tag a" style="display:block;margin-top:9px;line-height:1.75;white-space:normal">${IC('warn')} <b>המדריך חולק על החוברת בשלוש נקודות — שווה לסגור מול המרצה:</b><br>
+          ${MR_FREE_CONFLICTS.map(c=>`<b>${c.code}</b> — ${esc(c.claim)}<br><span class="small muted">${esc(c.effect)}</span>`).join('<br>')}
+          <br><b>${esc(mrFreeNoteFor(nextQuarters(S.activeQuarter)[0]||S.activeQuarter))}</b></div>
         <b>המחיר של הטעות בכל אחד מהכיוונים: סלוט בתשלום אחד לרבעון.</b></div>
     </div>
     <div class="between" style="margin:0 2px 8px;flex-wrap:wrap;gap:8px">
@@ -4899,16 +4927,25 @@ function scenarioValidation(sc,targetQ){
 function phantomSales(sc,targetQ){
   const lev=sc&&sc.levers[targetQ]; if(!lev) return [];
   const op=S.quarters[S.activeQuarter].operational;
-  let prodUnits=0, sellUnits=0;
-  REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ activeLines(lev,r.id).forEach(l=>{
-    if(l.product!=='Y') return;                      // finished goods only
-    prodUnits+=l.production;
-    const pEff=linePrice(l);
-    if(l.sales>0||l.qtySold>0) sellUnits+=(l.qtySold>0?l.qtySold:(pEff>0?Math.round(l.sales/pEff):0));
-  }); });
-  const invY=(op.inventory||[]).filter(i=>i.product==='Y').reduce((a,i)=>a+(i.qty||0),0);
-  const supply=prodUnits+invY;
-  return (sellUnits>supply && sellUnits>0) ? [{sold:sellUnits,supply,gap:sellUnits-supply}] : [];
+  // Checked per PRODUCT. Chips became a first-class line in v10 (#74) and there is a signed
+  // chip contract, but this guard only looked at Y — so an impossible chip sale passed.
+  const out=[];
+  ['Y','X'].forEach(prod=>{
+    let prodUnits=0, sellUnits=0;
+    REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ activeLines(lev,r.id).forEach(l=>{
+      if(l.product!==prod) return;
+      prodUnits+=l.production;
+      const pEff=linePrice(l);
+      if(l.sales>0||l.qtySold>0) sellUnits+=(l.qtySold>0?l.qtySold:(pEff>0?Math.round(l.sales/pEff):0));
+    }); });
+    if(!sellUnits) return;
+    const inv=(op.inventory||[]).filter(i=>i.product===prod).reduce((a,i)=>a+(i.qty||0),0);
+    // chips already promised to a signed contract cannot also be sold on the open market
+    const committed = prod==='X' ? contractPlan().reduce((a,c)=>a+(c.prod==='X'?Math.max(0,c.bindingGap!=null?c.bindingGap:c.gap):0),0) : 0;
+    const supply=Math.max(0, prodUnits+inv-committed);
+    if(sellUnits>supply) out.push({product:prod, sold:sellUnits, supply, committed, gap:sellUnits-supply});
+  });
+  return out;
 }
 // Wave 1 · guard #2 — phantom transfer: transfers into regions (A3-1) are funded by the Home Office.
 // Flag transferring more than HQ actually holds — money that appears with no real source debit.
@@ -4961,7 +4998,7 @@ function renderChecklist(box,targetQ,sc){
   const dov=demandOverreach(buildActionPlan(S.activeQuarter,targetQ));
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
-    {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
+    {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · ${phantoms[0].product}: מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
     {t:`העברות מגובות במקור (מטה)${ptrans?` · מעביר ${fmt(ptrans.totalIn)} אך במטה ${fmt(ptrans.hqCash)}`:''}`,ok:!ptrans},
     {t:`דרגות תואמות: X${cg.gx}→Y${cg.gy}${cg.pcPlanned?(cg.compatible?` דורש ${cg.ratio} שבבים/מחשב`:' — לא תואם!'):''}`,ok:cg.compatible},
     {t:`מחשבים ≤ שבבים זמינים באותו אזור${cg.pcPlanned?` · דרושים ${fmt(cg.chipsNeeded)} מול ${fmt(cg.chipInv)} במלאי${cg.reserved?` (מתוכם ${fmt(cg.reserved)} שמורים לחוזה)`:''}`:''}`,ok:cg.compatible&&cg.gap===0},
@@ -4976,7 +5013,7 @@ function renderChecklist(box,targetQ,sc){
     {t:`אין המלצה שחורגת מהביקוש הנצפה${dov.length?` · ${fmt(dov[0].qty)} מול תקרה ${fmt(dov[0].ceiling)}`:''}`,ok:dov.length===0},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
-    ${phantoms.length?`<div class="tag a" style="margin-top:10px">${IC('warn')} מכירת-יתר: מתוכננת מכירה של <b>${fmt(phantoms[0].sold)}</b> יח׳ סה״כ אך ההיצע (מלאי מוגמר + ייצור) הוא <b>${fmt(phantoms[0].supply)}</b> — פער ${fmt(phantoms[0].gap)}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת.</div>`:''}
+    ${phantoms.length?`<div class="tag a" style="margin-top:10px;display:block;line-height:1.7;white-space:normal">${IC('warn')} <b>מכירת-יתר:</b> ${phantoms.map(p=>`<b>${p.product==='Y'?'מחשבים':'שבבים'}</b> — מתוכננת מכירה של <b>${fmt(p.sold)}</b> יח׳ מול היצע <b>${fmt(p.supply)}</b>${p.committed>0?` (אחרי ${fmt(p.committed)} שמחויבים לחוזה)`:''}, פער ${fmt(p.gap)}`).join(' · ')}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת — ולא למכור שבבים שכבר הובטחו בחוזה.</div>`:''}
     ${ptrans?`<div class="tag a" style="margin-top:8px">${IC('warn')} העברת-פנטום: מעביר לאזורים ${fmt(ptrans.totalIn)} אך במטה יש רק ${fmt(ptrans.hqCash)} (חוסר ${fmt(ptrans.gap)}). העברה (A3-1) ממומנת מהמטה — אי-אפשר להעביר יותר ממה שיש בו.</div>`:''}
     ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
       (cg.gap>0?`<div class="tag r" style="display:block;margin-top:10px;line-height:1.7;white-space:normal">${IC('warn')} חסרים <b>${fmt(cg.gap)}</b> שבבים (דרושים ${cg.ratio}/מחשב × ${fmt(cg.pcPlanned)}) — ייצר/רכוש שבבים רבעון קודם, או שנע אותם לאזור הייצור. <b>ההגשה חסומה.</b>${cg.worst?`<br><b>האזור החסר:</b> ${esc(cg.worst.name)} — נדרשים ${fmt(cg.worst.need)} ובמלאי המקומי ${fmt(cg.worst.stock)}. <span class="muted">שבבים באזור אחר אינם זמינים כאן ללא שינוע (רבעון).</span>`:''}${cg.reserved?`<br><b>שמורים לחוזה:</b> ${fmt(cg.reserved)} יח׳ — ${esc(cg.reservedNote)}. הם אינם זמינים לצריכה עצמית.`:''}${cg.untagged?`<br><span class="muted">${fmt(cg.untagged)} שבבים ללא סימון אזור במלאי — סמנו אזור בלשונית הקליטה כדי שהבדיקה תהיה מלאה.</span>`:''}</div>`:'')}
@@ -5549,9 +5586,19 @@ function scoreStrategyVariant(v, base){
       if(made<bind) violations.push(`${pq}: לא מכסה התחייבות ${fmt(bind)} × ${c.prod}${(c.fbAllowed&&c.fbGap<c.gap)?(c.fbGrade+"+ (סעיף 5)"):c.grade} (מתוכנן ${fmt(made)})`);
     });
   });
+  // The same shortage repeated for every quarter used to fill the display cap and hide a
+  // different, more serious breach behind it. Keep one of each KIND, worst kind first.
+  const kindOf=t=>/התחייבות/.test(t)?0:(/ללא מפעל/.test(t)?1:(/מכירה/.test(t)?2:(/קיבולת/.test(t)?3:(/שבבים/.test(t)?4:5))));
+  const seenKind=new Set(), byKind=[];
+  violations.slice().sort((a,b)=>kindOf(a)-kindOf(b)).forEach(t=>{
+    const k=kindOf(t); if(seenKind.has(k)) return; seenKind.add(k);
+    const more=violations.filter(x=>kindOf(x)===k).length-1;
+    byKind.push(more>0?`${t} (ועוד ${more} רבעונים)`:t);
+  });
   return { ...v, score:sp.value, past:sp.pastHalf, pot:sp.potentialHalf, endCash:sp.endCash,
     breaches:breaches.length, worstBreach:breaches.length?breaches[0].q:null,
-    violations:violations.slice(0,4), legal:violations.length===0, feasible:breaches.length===0 };
+    violations:byKind.slice(0,5), violationCount:violations.length,
+    legal:violations.length===0, feasible:breaches.length===0 };
 }
 function strategyContext(base, horizon){
   const L=[buildAIContext()];

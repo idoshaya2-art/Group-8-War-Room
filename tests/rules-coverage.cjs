@@ -80,4 +80,5 @@ console.log('COVERAGE: '+ok.length+'/'+R.length+' present, '+miss.length+' missi
 console.log('--- MISSING ---'); miss.forEach(r=>console.log('  ✗ ['+r.sheet+'] '+r.item));
 console.log('\npageErrors:',errs);
 await b.close();
+process.exit((typeof R!=='undefined'&&R.fail&&R.fail.length)?1:0);
 })();
