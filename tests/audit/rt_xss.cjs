@@ -1,5 +1,9 @@
-const {open}=require('../lib.cjs');
+/* D-01 · A model-authored action must never be able to execute code in the page. The decision card
+   renders title/form/detail as raw HTML by design, so the escaping has to happen where the model's
+   text becomes an item. This suite asserts the injection stays inert. */
+const {open,checks}=require('../lib.cjs');
 (async()=>{
+const {ck,report}=checks();
 const {browser,page,errors}=await open();
 await page.evaluate(()=>{
   ['Q1','Q2','Q3'].forEach((q,i)=>{ const Q=S.quarters[q]; Q.entered=true;
@@ -32,7 +36,14 @@ const out=await page.evaluate(()=>({
   pwnedText:/PWNED/.test(document.body.innerText),
   escapedVisible:/<img src=x/.test(document.body.innerText)
 }));
-console.log(JSON.stringify(out));
-console.log('errs',errors.filter(e=>!/net::ERR|Failed to load/.test(e)).slice(0,3));
+ck('D-01 · the injected action is accepted by the engine (so the render path is really exercised)',
+  res.added===1, `added ${res.added}`);
+ck('D-01 · the title is stored escaped', /^&lt;img/.test(String(res.titleRaw||'')), String(res.titleRaw||'').slice(0,40));
+ck('D-01 · no handler ran from the title', out.pwned===false);
+ck('D-01 · no handler ran from the detail', out.pwned2===false);
+ck('D-01 · no injected node reached the DOM', out.injectedImgs===0, `${out.injectedImgs} nodes`);
+ck('D-01 · the markup is shown to the user as literal text', out.escapedVisible===true);
+ck('D-01 · no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0);
 await browser.close();
+process.exit(report('RED TEAM — HTML injection via model output')?1:0);
 })();

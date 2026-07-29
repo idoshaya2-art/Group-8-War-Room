@@ -165,7 +165,10 @@ details.sec .secbody{padding:16px 18px}
 .btn.primary:hover{filter:brightness(1.08)}
 .btn.ghost{background:transparent}
 .btn.danger{background:var(--redbg);color:var(--red);border-color:transparent}
-.btn.sm{padding:6px 11px;font-size:13px}
+/* min-height, not padding: a 36px floor keeps every small button thumb-sized on a phone without
+   growing the ones that are already big enough. Measured before: גיבוי/שחזור/+ רישום החלטה/✕ came
+   out under 32px at 390x844. */
+.btn.sm{padding:6px 11px;font-size:13px;min-height:36px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 
 input.f,select.f,textarea.f{
@@ -284,6 +287,9 @@ canvas{display:block;max-width:100%}
 .est{border-bottom:1px dotted var(--amber);cursor:help}
     .est sup{color:var(--amber);font-weight:700;margin-inline-start:1px}
     .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:4px 11px;font-size:12.5px;font-weight:600}
+/* A chip is usually a label, but the master-plan strip renders each quarter as a clickable one.
+   Only the interactive variants get the 36px thumb floor — the labels keep their compact size. */
+button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
 .hr{height:1px;background:var(--line);margin:16px 0;border:0}
 .src{font-size:11px;color:var(--muted2);font-style:italic}
 .pill-tabs{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
@@ -546,6 +552,15 @@ const RULES = {
   arap:{ taxToAP1:'מסים בכל האזורים נזקפים ל-A/P1 — כלומר משולמים רבעון קדימה, לא מיד (Data Log 09)',
     apScope:'זכאים כוללים עלויות ייצור משתנות, רכיבי Nippon ורכישות פנים-קבוצתיות. כל שאר ההוצאות — כולל עלות קבועה של מפעל — יוצאות ישירות מהמזומן (Data Log 09)',
     outOfPhase:'אחוזי A/R ו-A/P זהים אך מוסטים ברבעון אחד: סחורה מיוצרת ב-Qt ונמכרת ב-Qt+1 (Data Log 09)' },
+
+  /* R-34 · The financing window. The rules review recorded that a NEW long-term bank loan can be
+     raised only in the opening quarter, while short-term facilities and supplier credit stay
+     available throughout. I could not re-cite the guide passage from inside this environment, so
+     this is labelled `needsSource` and the engine WARNS rather than blocks: a wrong hard block
+     would remove a legal option, which is worse than a warning the team can dismiss. Set
+     `openQuarters` from the guide once confirmed, or empty it to switch the warning off. */
+  finance:{ loanWindow:{ openQuarters:['Q1'], needsSource:true,
+    note:'הלוואת בנק חדשה (A3-2) — לפי סקירת החוקים ניתנת לגיוס רק ברבעון הפתיחה. אשראי ספקים והלוואות בין-חברות (H4) זמינים לאורך כל המשחק. <b>טרם אומת מול המדריך</b> — אם המדריך אומר אחרת, עדכן ב-RULES.finance.loanWindow.' } },
 
   // Data Log 08 (src) — the timing skeleton of the whole game.
   lags:{ productionToSale:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — פיגור של רבעון עד שניתן למכור אותה',
@@ -1525,6 +1540,21 @@ function marketShareScore(base){
   const n=Math.max(new Set(sales.map(s=>s.company)).size,2);
   return {score:_c01((our/total)/(2*(1/n))), share:our/total}; // 2× fair share = full marks
 }
+/* R-56 · A market-share target is only real if the plants can make the units. Share was being set
+   at 2x fair share with no reference to output at all, so the most seductive target on the page —
+   "grow share" — could be one no factory we own is able to supply. Ceiling = units the current
+   plant split can produce in a quarter, over the observed market size for that product. */
+function shareCapacityCeiling(){
+  const base=S.activeQuarter;
+  const sales=(S.quarters[base].marketIntel||{}).sales||[]; if(!sales.length) return null;
+  const market=sales.reduce((a,s)=>a+s.units,0); if(market<=0) return null;
+  // The share figure MR reports is unit-based across whatever product mix the studies cover, so
+  // the comparable supply figure is total sellable output, both products.
+  const capX=capacityForProduct('X'), capY=capacityForProduct('Y');
+  if(!capX.known||!capY.known) return null;
+  const units=capX.units+capY.units; if(units<=0) return {pct:0, units:0, market, src:'אין מפעלים'};
+  return { pct:Math.min(100,units/market*100), units, market, src:'קיבולת מפעלים בפועל / שוק נצפה (MR)' };
+}
 function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's future-quarter levers (WS-2 tax applied)
   if(!levers) return 0; const p=S.config.params, loans=S.quarters[base].financial.loans||0; let add=0;
   nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; let net=0;
@@ -1979,12 +2009,42 @@ function recommendGoals(){
   const techXTarget=Math.min(9,(op.techX||0)+remaining);                 // ≤1 grade/quarter
   const techYTarget=Math.min(9,(op.techY||0)+remaining);
   const shareObj=marketShareScore(base); const curShare=shareObj?shareObj.share:null;
-  const q9Share=Math.round(Math.max(curShare||0, 2/nCo)*100);            // 2× fair share = full marks
+  // R-56: 2× fair share is the scoring ideal, but a target above what the plants can produce is a
+  // target we cannot execute. Cap at the capacity ceiling — never below the share we already hold.
+  const capCeil=shareCapacityCeiling();
+  const ideal=Math.max(curShare||0, 2/nCo)*100;
+  const q9Share=Math.round(capCeil?Math.max((curShare||0)*100, Math.min(ideal, capCeil.pct)):ideal);
+  const shareCapped=!!(capCeil && ideal>capCeil.pct+0.05);
   const roe=Math.max(g.scoreTargets.roe, Math.ceil((f.roe||0)*1.1));
   const roi=Math.max(g.scoreTargets.roi, Math.ceil((f.roi||0)*1.1));
   const ros=Math.max(g.scoreTargets.ros, Math.ceil((f.ros||0)*1.1));
   return { remaining, cumNet, profPace, topRE, nCo, cumProfitTarget, finalRETarget, equityTarget,
-    techXTarget, techYTarget, q9Share, scoreTargets:{roe,roi,ros} };
+    techXTarget, techYTarget, q9Share, scoreTargets:{roe,roi,ros},
+    capShare:capCeil?capCeil.pct:null, shareCapped, shareIdeal:Math.round(ideal) };
+}
+/* Why a target sits where it sits. A target that does not move when our own results get worse
+   looks broken; usually it is competitor-anchored or capped by physics, and saying so is the
+   difference between "the number is stuck" and "the number is not about us". */
+function goalDriver(key){
+  let rec; try{ rec=recommendGoals(); }catch(e){ return ''; }
+  const paceProj=Math.round(rec.cumNet+rec.profPace*rec.remaining);
+  const leaderLed = rec.topRE!=null && Math.round(rec.topRE*1.10)>=paceProj;
+  switch(key){
+    case 'cumProfitTarget': case 'finalRETarget': case 'equityTarget':
+      return leaderLed
+        ? `נשלט ע״י המתחרה המוביל (רווחים צבורים ${fmt(Math.round(rec.topRE))} ×1.10, מ-MR74) — לא ע״י הקצב שלנו, ולכן הרעה אצלנו לא מזיזה אותו`
+        : `נגזר מהקצב שלנו (${fmt(Math.round(rec.profPace))}/רבעון על ${rec.remaining} רבעונים)${rec.topRE==null?' — אין נתוני מתחרים (MR74) לעגן בהם':''}`;
+    case 'techXTarget': case 'techYTarget':
+      return 'תקרה פיזית — דרגה עולה ≤1/רבעון, ולכן היעד נחסם במה שאפשר להשיג עד Q9';
+    case 'q9Share':
+      return `פי-2 מהנתח ההוגן (${rec.nCo} חברות = ${(200/rec.nCo).toFixed(1)}%)`+
+             (rec.capShare!=null?` · חסום בקיבולת הייצור בפועל (${rec.capShare.toFixed(1)}%)`:'');
+    case 'roe': case 'roi': case 'ros':
+      return 'הגבוה מבין היעד הקיים לביצוע שלנו +10% — יעד שלא יורד';
+    case 'q9Score':
+      return 'שאיפה שהצוות קבע ידנית — לא נגזרת מהנתונים ולא זזה מעצמה';
+    default: return '';
+  }
 }
 window.openGoalOptimizer=()=>{ const panel=$('#goalOptPanel'); if(!panel)return; const rec=recommendGoals(); window._goalRec=rec; const g=S.config.goals;
   const line=(label,cur,next,pct)=>{ const dir=next>cur?'↑':(next<cur?'↓':'='); const col=next>cur?'var(--green)':(next<cur?'var(--amber)':'var(--muted)');
@@ -2003,7 +2063,7 @@ window.openGoalOptimizer=()=>{ const panel=$('#goalOptPanel'); if(!panel)return;
       ${line('ROI יעד',g.scoreTargets.roi,rec.scoreTargets.roi,true)}
       ${line('ROS יעד',g.scoreTargets.ros,rec.scoreTargets.ros,true)}
     </tbody></table></div>
-    <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')} <b>הבסיס:</b> רווח מצטבר = ${rec.topRE!=null?`לנצח את המוביל (רווחים צבורים ${fmt(rec.topRE)}) ב-10%`:'הרחבת הקצב הנוכחי'} או המשך הקצב שלנו (${fmt(Math.round(rec.profPace))}/רבעון) — הגבוה מביניהם. דרגות טק = המקסימום שניתן להשיג פיזית עד Q9 (עולה ≤1/רבעון). נתח שוק = פי-2 מהנתח ההוגן (${rec.nCo} חברות). יעילות = מעל הביצוע הנוכחי שלנו. <b>שים לב:</b> העלאת יעד מגדילה את הפער המוצג — זו שאיפה כנה, לא ניפוח ציון.</div>
+    <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')} <b>הבסיס:</b> רווח מצטבר = ${rec.topRE!=null?`לנצח את המוביל (רווחים צבורים ${fmt(rec.topRE)}) ב-10%`:'הרחבת הקצב הנוכחי'} או המשך הקצב שלנו (${fmt(Math.round(rec.profPace))}/רבעון) — הגבוה מביניהם. דרגות טק = המקסימום שניתן להשיג פיזית עד Q9 (עולה ≤1/רבעון). נתח שוק = פי-2 מהנתח ההוגן (${rec.nCo} חברות)${rec.shareCapped?`, <b style="color:var(--amber)">חסום ב-${rec.capShare.toFixed(1)}% כי זה מה שהמפעלים שיש לנו יכולים לייצר</b> (האידאלי היה ${rec.shareIdeal}%)`:''}. יעילות = מעל הביצוע הנוכחי שלנו. <b>שים לב:</b> העלאת יעד מגדילה את הפער המוצג — זו שאיפה כנה, לא ניפוח ציון.</div>
   </div>`;
 };
 window.applyRecommendedGoals=()=>{ const rec=window._goalRec; if(!rec)return; const g=S.config.goals;
@@ -3063,8 +3123,13 @@ function buildActionPlan(q,targetQ){
         dep:`אשראי הספקים יקר (${S.config.params.interest.supplierCredit}%) ופוגע ברכיב האיתנות — צמצמו את משכו ע״י האצת מכירות וגבייה. אין לבקש הלוואה מאף גורם.`});
     } else {
       const fo=financeActionOptions(targetQ,need,'europe');
-      out.push({cat:'fin',level:'amber',conf:'data',title:`מימון גישור — A3-2`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
-        detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. הלוואה מקומית (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה. חלופה: H4 בין-חברות. <b>מומלץ: לווה ${fmt(need)} SF</b> (גישור מינימלי). אופציות אחרות למטה.`,
+      // R-34: if the target quarter is outside the loan window, the A3-2 half of this option may
+      // not be available at all — say so on the card instead of recommending a route that closed.
+      const lw=RULES.finance.loanWindow, inWindow=!lw.openQuarters.length||lw.openQuarters.includes(targetQ);
+      const windowWarn = inWindow ? '' :
+        `<div class="tag a" style="display:block;margin-top:8px;line-height:1.7">⚠ <b>חלון ההלוואה:</b> ${targetQ} אינו ברבעונים שבהם ניתן לגייס הלוואת בנק חדשה (${lw.openQuarters.join(', ')}). הישאר ב-<b>H4 בין-חברות</b> ובאשראי ספקים. ${lw.needsSource?'<b>הכלל טרם אומת מול המדריך</b> — ודא לפני שאתה מוותר על A3-2.':''}</div>`;
+      out.push({cat:'fin',level:'amber',conf:inWindow?'data':'est',title:`מימון גישור — ${inWindow?'A3-2':'H4 (חלון A3-2 סגור)'}`,form:'A3-2 (Invest or Borrow — Borrow) / H4',
+        detail:`ההקרנה יורדת למינימום <b>${fmt(Math.round(minProj))} SF</b> מול כרית ביטחון ${fmt(safety)}${Object.values(g.floors||{}).some(v=>v>0)?' (הרצפה שהוגדרה)':' (ברירת מחדל — הגדר רצפות ביעדים)'}. הלוואה מקומית (ריבית ${S.config.params.interest.bank}%) עד כניסת הגבייה. חלופה: H4 בין-חברות. <b>מומלץ: לווה ${fmt(need)} SF</b> (גישור מינימלי). אופציות אחרות למטה.${windowWarn}`,
         dep:`קח את המימון רבעון לפני הצורך — הגבייה המדורגת מעכבת את המזומן גם אחרי שהמכירות מתחילות.`,
         optionCols:fo.optionCols, options:fo.options, sim:fo.options[0].sim});
     }
@@ -4633,6 +4698,13 @@ PAGE_RENDER.export = (c)=>{
 function selectedExportScenario(){ const id=$('#expScenario')?.value; return S.scenarios.find(s=>s.id===id)||S.scenarios[0]; }
 function renderPlanDeltaPreview(){
   const box=$('#planDeltaPreview'); if(!box) return;
+  // The column is headed "בפועל", so it must not be filled from a state that has no actuals.
+  // The floor and the contract deadlines derive from DEFAULT_CONTRACTS and floorComponents, which
+  // need no entered quarter — so on a clean install this table used to assert "חסר 30,000" and a
+  // 420,000 SF floor as facts about a game that had not started.
+  if(!enteredQuarters().length){
+    box.innerHTML=`<div class="cb"><div class="small muted">${IC('info')} השוואת התוכנית הכתובה למצב בפועל תופיע לאחר קליטת הרבעון הראשון — עד אז אין "בפועל" להשוות אליו.</div></div>`;
+    return; }
   let rows=[]; try{ rows=planDeltas(); }catch(e){ box.innerHTML=''; return; }
   const chg=rows.filter(r=>r.changed);
   box.innerHTML=`<details class="fverd" ${chg.length?'open':''}><summary>${chg.length?`${IC('warn')} ${chg.length} פערים בין התוכנית הכתובה למצב בפועל ⌄`:`${IC('check')} התוכנית תואמת את המצב בפועל ⌄`}</summary>
@@ -4795,12 +4867,31 @@ function buildInputRows(targetQ,sc){
     'H1-1':11,'H1-2':12,'H2':13,'H4':14,'H5':15,'H6':16,'W1':17,'W2':18,'W3':19,'A1-1/A1-2':2.5,'—':99};
   return rows.sort((a,b)=>(order[a.form]||50)-(order[b.form]||50));
 }
+/* Entering the real simulator is number-after-number off this sheet, so the value has to be one
+   click away. `navigator.clipboard` needs a secure context and this app also runs from file://,
+   hence the textarea fallback — without it the button would silently do nothing locally. */
+window.copyText=async(txt,label)=>{
+  const s=String(txt==null?'':txt);
+  try{ await navigator.clipboard.writeText(s); toast((label||'הועתק')+' ✓','g'); return; }catch(e){}
+  try{ const ta=document.createElement('textarea'); ta.value=s;
+    ta.style.cssText='position:fixed;top:-1000px;opacity:0'; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove(); toast((label||'הועתק')+' ✓','g'); }
+  catch(e){ toast('ההעתקה נכשלה — סמן והעתק ידנית','a'); }
+};
+let _sheetGroups={};
+window.copySheetForm=(form)=>{ const lines=_sheetGroups[form]||[];
+  copyText(lines.join('\n'), `${form} — ${lines.length} שדות`); };
 function renderInputSheet(box,targetQ,sc){
   const rows=buildInputRows(targetQ,sc);
   const flagTag=f=> !f?'' : (f==='חוזה חתום — חובה'||f==='חובה')
     ? `<span class="tag r">${esc(f)}</span>` : `<span class="tag a">${esc(f)}</span>`;
+  // One copy button per form (all its fields, as "action = value" lines) and one per value.
+  _sheetGroups={};
+  rows.forEach(r=>{ (_sheetGroups[r.form]=_sheetGroups[r.form]||[]).push(`${r.action} = ${r.value}`); });
+  const firstOf={}; rows.forEach((r,i)=>{ if(firstOf[r.form]==null) firstOf[r.form]=i; });
   box.innerHTML=`<table class="tbl"><thead><tr><th>טופס</th><th>פעולה</th><th>ערך</th><th>הערה</th><th>סטטוס</th><th>בוצע?</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr${r.flag?' style="background:rgba(248,113,113,.06)"':''}><td><span class="chip">${r.form}</span></td><td style="text-align:start">${esc(r.action)}</td><td class="num">${fmt(r.value)}</td><td class="small muted" style="text-align:start;white-space:normal;line-height:1.6">${esc(r.note)}</td><td>${flagTag(r.flag)}</td><td style="text-align:center">☐</td></tr>`).join('')}</tbody></table>
+    <tbody>${rows.map((r,i)=>`<tr${r.flag?' style="background:rgba(248,113,113,.06)"':''}><td style="white-space:nowrap"><span class="chip">${r.form}</span>${firstOf[r.form]===i&&(_sheetGroups[r.form]||[]).length>1?`<button class="btn sm ghost" style="margin-inline-start:5px" title="העתק את כל שדות ${esc(r.form)}" onclick="copySheetForm('${esc(r.form)}')">${IC('clipboard')} ${(_sheetGroups[r.form]||[]).length}</button>`:''}</td><td style="text-align:start">${esc(r.action)}</td><td class="num" style="white-space:nowrap">${fmt(r.value)} <button class="btn sm ghost" title="העתק את הערך" onclick="copyText(${JSON.stringify(String(r.value))},'הערך')">${IC('clipboard')}</button></td><td class="small muted" style="text-align:start;white-space:normal;line-height:1.6">${esc(r.note)}</td><td>${flagTag(r.flag)}</td><td style="text-align:center">☐</td></tr>`).join('')}</tbody></table>
+    ${rows.length?`<div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn sm" onclick="copyText(${JSON.stringify(rows.map(r=>`${r.form}\t${r.action}\t${r.value}`).join('\n'))},'כל הגיליון')">${IC('clipboard')} העתק את כל הגיליון (${rows.length} שורות)</button><span class="small muted">או העתק טופס בודד / ערך בודד מהטבלה.</span></div>`:''}
     ${!sc?'<div class="small muted" style="margin-top:10px">אין תרחיש נבחר — צור תרחיש בסימולטור כדי לאכלס את הגיליון.</div>':''}`;
 }
 // WS-2: chip→computer constraint. PCs (Y) produced in a quarter need chips (X) already in inventory
@@ -5126,12 +5217,12 @@ function goalTab(t){
     <div class="card">
       <div class="ch"><h3>${IC('dollar')} 50% ביצועי עבר — כסף ויעילות</h3></div>
       <div class="cb" style="overflow-x:auto"><table class="tbl"><thead><tr><th>יעד</th><th>נוכחי</th><th>יעד Q9</th><th>סטטוס</th></tr></thead><tbody>
-        ${row('רווח מצטבר (לנצח את המוביל)',fmt(Math.round(cumNet)),gi('cumProfitTarget',g.cumProfitTarget),st(cumNet>=g.cumProfitTarget),'סכום הרווח הנקי מכל הרבעונים')}
-        ${row('רווחים צבורים',fmt(f.retainedEarnings||0),gi('finalRETarget',g.finalRETarget),st((f.retainedEarnings||0)>=g.finalRETarget))}
-        ${row('הון עצמי',fmt(f.totalEquity||0),gi('equityTarget',g.equityTarget),st((f.totalEquity||0)>=g.equityTarget))}
-        ${row('יעילות ROE',(f.roe||0)+'%',gi('scoreTargets.roe',g.scoreTargets.roe),st((f.roe||0)>=g.scoreTargets.roe))}
-        ${row('יעילות ROI',(f.roi||0)+'%',gi('scoreTargets.roi',g.scoreTargets.roi),st((f.roi||0)>=g.scoreTargets.roi))}
-        ${row('יעילות ROS',(f.ros||0)+'%',gi('scoreTargets.ros',g.scoreTargets.ros),st((f.ros||0)>=g.scoreTargets.ros))}
+        ${row('רווח מצטבר (לנצח את המוביל)',fmt(Math.round(cumNet)),gi('cumProfitTarget',g.cumProfitTarget),st(cumNet>=g.cumProfitTarget),'סכום הרווח הנקי מכל הרבעונים · '+goalDriver('cumProfitTarget'))}
+        ${row('רווחים צבורים',fmt(f.retainedEarnings||0),gi('finalRETarget',g.finalRETarget),st((f.retainedEarnings||0)>=g.finalRETarget),goalDriver('finalRETarget'))}
+        ${row('הון עצמי',fmt(f.totalEquity||0),gi('equityTarget',g.equityTarget),st((f.totalEquity||0)>=g.equityTarget),goalDriver('equityTarget'))}
+        ${row('יעילות ROE',(f.roe||0)+'%',gi('scoreTargets.roe',g.scoreTargets.roe),st((f.roe||0)>=g.scoreTargets.roe),goalDriver('roe'))}
+        ${row('יעילות ROI',(f.roi||0)+'%',gi('scoreTargets.roi',g.scoreTargets.roi),st((f.roi||0)>=g.scoreTargets.roi),goalDriver('roi'))}
+        ${row('יעילות ROS',(f.ros||0)+'%',gi('scoreTargets.ros',g.scoreTargets.ros),st((f.ros||0)>=g.scoreTargets.ros),goalDriver('ros'))}
       </tbody></table></div>
     </div>
     <div class="card" style="margin-top:14px">
@@ -5139,8 +5230,8 @@ function goalTab(t){
       <div class="cb" style="overflow-x:auto"><table class="tbl"><thead><tr><th>יעד</th><th>נוכחי</th><th>יעד Q9</th><th>סטטוס</th></tr></thead><tbody>
         ${row('דרגת Chip (X)',op.techX||0,gi('techXTarget',g.techXTarget),st((op.techX||0)>=g.techXTarget),'עולה ≤1 דרגה/רבעון · מקס׳ בר-השגה '+Math.min(9,(op.techX||0)+mp.remaining))}
         ${row('דרגת PC (Y)',op.techY||0,gi('techYTarget',g.techYTarget),st((op.techY||0)>=g.techYTarget),'עולה ≤1 דרגה/רבעון · מקס׳ בר-השגה '+Math.min(9,(op.techY||0)+mp.remaining))}
-        ${row('נתח שוק (%)',(shareObj?(shareObj.share*100).toFixed(1)+'%':'—'),gi('q9Share',g.q9Share),st(shareObj&&shareObj.share*100>=g.q9Share))}
-        ${row('ציון סיום יעד',mp.score.toFixed(0),gi('q9Score',g.q9Score),st(mp.score>=g.q9Score))}
+        ${row('נתח שוק (%)',(shareObj?(shareObj.share*100).toFixed(1)+'%':'—'),gi('q9Share',g.q9Share),st(shareObj&&shareObj.share*100>=g.q9Share),goalDriver('q9Share')+(()=>{const c=shareCapacityCeiling();return c&&g.q9Share>c.pct+0.05?` · <b style="color:var(--amber)">היעד ${g.q9Share}% מעל מה שהקיבולת יכולה לספק (${c.pct.toFixed(1)}% = ${fmt(c.units)} יח׳ מול שוק ${fmt(c.market)})</b>`:''})())}
+        ${row('ציון סיום יעד',mp.score.toFixed(0),gi('q9Score',g.q9Score),st(mp.score>=g.q9Score),goalDriver('q9Score'))}
       </tbody></table></div>
     </div>
     <div class="card" style="margin-top:14px">
