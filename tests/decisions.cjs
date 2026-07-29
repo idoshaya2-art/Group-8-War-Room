@@ -1,6 +1,7 @@
 /* DECISIONS SUITE — the action list must cover every decision family, mark what has been
    sent without navigating away, and only accept AI suggestions the engine can validate. */
 const {open,checks}=require('./lib.cjs');
+const DATALOG_X_EU=()=>35000;   // Data Log 03 EU chip capacity per plant
 (async()=>{
 const {browser,page,errors}=await open();
 const {ck,report}=checks();
@@ -478,6 +479,46 @@ ck('it checks the zero-debt red line of the plan', pl.catchesDebtRedLine);
 ck('the untouched original .docx is downloadable', pl.origLinkPresent);
 ck('both generated documents have their own button', pl.downloadButtons>=2, pl.downloadButtons+' buttons');
 ck('the deltas are previewed on the page before downloading', pl.previewRendered);
+
+/* ---- REAL REPORT: the MIS states the plant split per product; parse it, do not ask ---- */
+const real=await page.evaluate(()=>{
+  // verbatim MIS rows from the team's real Q3 report
+  const rows=[
+    ['0PLANTS BUILT AND BUILDING',0,null,0,2,null,2,0,null,0],
+    ['MAX. PRODUCIBLE GRADE',2,null,1,2,null,1,2,null,1],
+  ];
+  const find=(re)=>rows.find(r=>re.test(String(r[0]||'').replace(/^0/,'')));
+  const pr=find(/^PLANTS BUILT AND BUILDING/), mp=find(/^MAX.? PRODUCIBLE GRADE/);
+  const byProd={ us:{X:pr[1]||0,Y:pr[3]||0}, europe:{X:pr[4]||0,Y:pr[6]||0}, brazil:{X:pr[7]||0,Y:pr[9]||0} };
+  const totals={us:byProd.us.X+byProd.us.Y, europe:byProd.europe.X+byProd.europe.Y, brazil:byProd.brazil.X+byProd.brazil.Y};
+  // apply exactly what ingestion would now store
+  S.quarters.Q3.operational.plantsByProduct=byProd;
+  S.quarters.Q3.operational.plantsByRegion=totals;
+  S.quarters.Q3.operational.techX=Math.max(mp[1],mp[4],mp[7]);
+  S.quarters.Q3.operational.techY=Math.max(mp[3],mp[6],mp[9]);
+  S.config.plantSplit={us:{X:byProd.us.X,Y:byProd.us.Y},europe:{X:byProd.europe.X,Y:byProd.europe.Y},brazil:{X:byProd.brazil.X,Y:byProd.brazil.Y}};
+  save();
+  const cx=capacityForProduct('X'), cy=capacityForProduct('Y');
+  const c=contractPlan()[0], r=contractRoutes(c);
+  return {byProd, totals, techX:S.quarters.Q3.operational.techX, techY:S.quarters.Q3.operational.techY,
+    chipCap:cx.units, chipKnown:cx.known, pcCap:cy.units,
+    splitStatusComplete:plantSplitStatus().complete, noMismatch:!plantSplitStatus().anyMismatch,
+    capOK:c.capOK, techOK:c.techOK,
+    produceBlocked:!r.routes.find(x=>x.key==='produce').feasible,
+    blockedOnGradeNotPlant:/דרגת/.test(r.routes.find(x=>x.key==='produce').why),
+    gradeReadyIn:r.gradeReadyForProductionIn, best:r.best.key};
+});
+ck('the plant split is read per product from the MIS row', 
+   real.byProd.europe.X===2 && real.byProd.europe.Y===2, JSON.stringify(real.byProd.europe));
+ck('the area total is the sum, not the chip column', real.totals.europe===4, 'europe total '+real.totals.europe);
+ck('max producible grade gives techX/techY', real.techX===2 && real.techY===1, `X${real.techX}/Y${real.techY}`);
+ck('chip capacity is derived from declared chip plants', real.chipKnown && real.chipCap===2*DATALOG_X_EU(), real.chipCap+' units');
+ck('PC capacity is separate and correct', real.pcCap===2*18000, real.pcCap+' units');
+ck('ingestion makes the manual split declaration unnecessary', real.splitStatusComplete && real.noMismatch);
+ck('capacity is NOT the constraint on the contract', real.capOK===true);
+ck('the grade IS the constraint', real.techOK===false && real.produceBlocked && real.blockedOnGradeNotPlant);
+ck('R&D puts the grade in reach for the later tranche', real.gradeReadyIn==='Q5');
+ck('so the near tranche routes to purchase, not production', real.best==='buy-surface', real.best);
 
 const jsErr=errors.filter(e=>!/Failed to load resource|net::ERR_/.test(e));
 ck('no JavaScript errors', jsErr.length===0, jsErr.slice(0,2).join(' | '));

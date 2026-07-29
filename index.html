@@ -372,7 +372,7 @@ canvas{display:block;max-width:100%}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v10.1 · audit batches 1-3 + browser QA';
+const APP_VERSION = 'v10.2 · plant split from the report';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3416,8 +3416,20 @@ const MG_MAIN=[1,4,7], MG_PC=[3,6,9];
 function extractMgmt(rows,scan,f){
   const sumCols=(re,cols)=>{ const r=findRow(rows,re); if(!r)return null; return cols.reduce((a,c)=>a+(parseNumber(r[c])||0),0); };
   const maxCols=(re,cols)=>{ const r=findRow(rows,re); if(!r)return null; return Math.max(...cols.map(c=>parseNumber(r[c])||0)); };
-  const plants=sumCols(/^PLANTS BUILT AND BUILDING/,MG_MAIN); if(plants!==null){ scan.factories=plants; f.push('מפעלים');
-    const pr=findRow(rows,/^PLANTS BUILT AND BUILDING/); if(pr){ scan.plantsByRegion={us:parseNumber(pr[1])||0,europe:parseNumber(pr[4])||0,brazil:parseNumber(pr[7])||0}; } }
+  // The MIS row is laid out CHIP,PC per area: [US-X, _, US-Y, EU-X, _, EU-Y, BR-X, _, BR-Y].
+  // This used to read cells 1/4/7 as "the area total", which are in fact the CHIP columns —
+  // so four European plants were reported as two, and the X/Y split the report states plainly
+  // was thrown away and then asked of the user by hand.
+  const pr=findRow(rows,/^PLANTS BUILT AND BUILDING/);
+  if(pr){
+    const byProd={ us:{X:parseNumber(pr[1])||0, Y:parseNumber(pr[3])||0},
+                   europe:{X:parseNumber(pr[4])||0, Y:parseNumber(pr[6])||0},
+                   brazil:{X:parseNumber(pr[7])||0, Y:parseNumber(pr[9])||0} };
+    scan.plantsByProduct=byProd;
+    scan.plantsByRegion={ us:byProd.us.X+byProd.us.Y, europe:byProd.europe.X+byProd.europe.Y, brazil:byProd.brazil.X+byProd.brazil.Y };
+    scan.factories=scan.plantsByRegion.us+scan.plantsByRegion.europe+scan.plantsByRegion.brazil;
+    f.push('מפעלים לפי מוצר');
+  }
   const offices=sumCols(/REG.? SALES OFFICES/,MG_MAIN); if(offices!==null){ scan.offices=offices; f.push('משרדים'); }
   const ownChip=maxCols(/^MAX.? OWNED GRADE/,MG_MAIN), ownPc=maxCols(/^MAX.? OWNED GRADE/,MG_PC);
   if(ownChip!==null){ scan.techX=ownChip; scan.techY=ownPc; f.push('רמות Chip/Computer'); }
@@ -3455,7 +3467,11 @@ function applyParsed({scan}){
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
   if(scan.cash){ REGIONS.forEach(r=>{ if(scan.cash[r.id]!==undefined) f.cash[r.id]=scan.cash[r.id]; }); }
   ['consolidated','netProfit','revenue','grossMargin','retainedEarnings','loans','ap','ar','supplierCredit','securities','netPlant','totalAssets','commonStock','totalEquity','interestExp','marketResearch'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) f[k]=scan[k]; });
-  ['techX','techY','maxProducible','factories','offices','rd','plantsByRegion'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) op[k]=scan[k]; });
+  ['techX','techY','maxProducible','factories','offices','rd','plantsByRegion','plantsByProduct'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) op[k]=scan[k]; });
+  // The report states the split, so the manual declaration stops being required — it becomes
+  // an override for the rare case the team knows better than the sheet.
+  if(scan.plantsByProduct){ S.config.plantSplit=S.config.plantSplit||{};
+    Object.entries(scan.plantsByProduct).forEach(([rid,v])=>{ S.config.plantSplit[rid]={X:v.X,Y:v.Y}; }); }
   if(scan.inventory&&scan.inventory.length) op.inventory=scan.inventory;
   if(scan.gameRates) S.config.params.gameRates=scan.gameRates;
   save();
