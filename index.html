@@ -5807,8 +5807,13 @@ function applyReview(engineItems, review, targetQ){
       return;
     }
     if(e.verdict==='add' && e.sim && e.title){
+      // SECURITY: an action card renders `title`/`form`/`detail` as raw HTML on purpose — the
+      // engine authors markup there. A model-authored action is untrusted text (the fact pack is
+      // built from uploaded report files, so text a report carries can come back out as a title)
+      // and this page holds the API key in localStorage. Escape the model's strings here, where
+      // they first become an engine-shaped item. `aiNote` is escaped at its own render site.
       const cand={ cat:'strat', level:e.level||'info', conf:'est', ai:true,
-        title:e.title, form:e.form||'', detail:e.why, sim:e.sim };
+        title:esc(e.title), form:esc(e.form||''), detail:esc(e.why), sim:e.sim };
       const v=validateEnriched(cand,targetQ);
       if(v.ok) list.push({...cand, aiVerdict:'add'});
       else rejected.push({title:e.title, why:v.why});
