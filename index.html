@@ -382,7 +382,11 @@ button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
    goals (team configuration). Strategy is configuration, not code.
    ========================================================================= */
 
-const APP_VERSION = 'v10.2 · plant split from the report';
+/* Bump this on every deploy. It is the only way a user standing in front of the live page can
+   tell whether what they are looking at is the build that was just pushed — five waves shipped
+   while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
+   from the screen. It renders in the footer and in the page title. */
+const APP_VERSION = 'v11.0 · נתיב מתגלגל Q4→Q9 · 12/12 חוקים · דיוק תחזית';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
