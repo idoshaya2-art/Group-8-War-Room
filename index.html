@@ -615,6 +615,71 @@ const RULES = {
     buyerPriority:'סעיף 7 בתבנית: לקונה החתום <b>תינתן עדיפות אספקה</b> על פני כל קונה אחר שיבוא בהסכם עם אותו מוכר — כלומר חוזה חתום מקדים אותנו בתור.',
     twoGradeTrap:'אם הדרגה שנקנתה אינה אחת שהקונה כבר משווק באזור — נכנסת מגבלת שתי הדרגות, ו<b>הדרגה האמצעית תתמזג אוטומטית עם הנמוכה</b> במלאי שלו (§4.14.2).' },
 
+  /* R-15 · R&D continuity and the reset (src, §4.3). The behavioural model lives in
+     techPathRamped / rdQuartersForNextGrade; this is the wording it implements. */
+  rdProgram:{ src:true,
+    consistency:'הסתברות ההצלחה של מו״פ תלויה ב<b>עקביות, גודל ומשך</b> התוכנית. ההשקעות הראשונות הולכות לגיוס וארגון צוות — ולכן <b>רבעון בלי מימון אינו "עצירה" אלא פירוק והתחלה מחדש של הרמפה</b> (§4.3).',
+    resetAfterPatent:'<b>ברבעון שבו מתקבל פטנט ממו״פ עצמי, ההסתברות לפטנט הבא מתאפסת</b> — לוקח זמן להסב את הצוות. אך הצוות הוכיח את עצמו, ולכן <b>העליות העתידיות בהסתברות גדולות מבעבר</b> לאותה הוצאה. המשמעות המעשית: דרגה בכל רבעון אינה אפשרית בהוצאה קבועה (§4.3).',
+    resetAfterPurchase:'גם ברבעון שבו <b>קונים</b> פטנט מחברה אחרת תוך המשך מו״פ עצמי, ההסתברות לשיפור הבא נסוגה זמנית (§4.3).',
+    chronological:'שיפורים מושגים <b>בסדר כרונולוגי בלבד</b> במו״פ — X1…X9 בזה אחר זה. דרגה גבוהה מכילה את כל הנמוכות ממנה. עקיפה אפשרית רק ברישוי פטנט (§4.3).',
+    direction:'המו״פ מכוון תמיד לדרגה הבאה מעל הגבוהה שבבעלותכם. אם יש רישיון <b>מוגבל</b> (ייצור בלבד) לדרגה גבוהה — המו״פ עדיין יכוון לדרגות הנמוכות שאינן בבעלותכם, ורק כשכולן בבעלותכם הוא יתמקד בדרגה המוגבלת (§4.3).',
+    diminishing:'אפשר בהחלט לבזבז כסף במו״פ: <b>מעל נקודה מסוימת התשואה השולית של הוצאת מו״פ במעבדה נעשית זניחה</b> (§4.3).',
+    noSharedEconomies:'<b>אין חסכוני גודל משותפים</b> בין מו״פ ל-X ולמו״פ ל-Y — שני מסלולים נפרדים (§4.3).' },
+
+  /* R-16 · duds / lemons (src, §4.3 + §4.9). Not a probability the app can quote — the guide says
+     "occasionally" without a rate — so it is encoded as a risk to state, plus the two asymmetries
+     that actually change a decision. */
+  lemonRisk:{ src:true,
+    exists:'לעתים שיפור טכנולוגי מתגלה כ<b>כשל שיווקי מוחלט ("lemon" / "dud")</b> בעיני הצרכנים, גם כשההנדסה התלהבה ממנו. המדריך אומר "occasionally" ואינו נוקב בהסתברות — לכן זה סיכון שצריך להצהיר עליו, לא מספר שניתן לחשב (§4.3).',
+    asymmetry:'<b>האסימטריה שחשובה להחלטה:</b> X3 שנחשב dud כשנמכר בנפרד בשוק הצרכני <b>אינו בהכרח dud כשהוא מוטמע במחשב</b> — ולהיפך, Y4 יכול להיות dud גם כשהשבב שבתוכו נמכר מצוין בנפרד. כלומר כשל בשוק הצרכני של שבב אינו מפיל את עסקי המחשבים (§4.9).',
+    oemBlindness:'כל המחשבים באותה דרגה נתפסים כזהים בשוק הסופי — הצרכן <b>אינו מבחין</b> אם Y2 מכיל שני X2 או שלושה X0. כל יצרני המחשבים נתפסים כ-OEM (§4.9).',
+    laggingPcHalvesChipMarket:'אם פיתחתם X6 ואין עדיין Y5 בשוק — קיים שוק צרכני קטן של "חנונים" שמשדרגים מחשבים ידנית, אך <b>שוק השבבים בדרגה הגבוהה הוא כמחצית</b> ממה שהיה אם טכנולוגיית המחשבים הייתה משתווה (§4.3).',
+    obsolescence:'כשטכנולוגיה חדשה נכנסת לשוק, <b>דרגות ותיקות מאבדות נתח שוק במהירות</b> (§4.3).' },
+
+  /* R-17 · patent licensing as a costed alternative to R&D (src, §4.3 + §4.14). */
+  licensing:{ src:true, form:'H5',
+    negotiable:'כל שיפור ניתן להשגה ב<b>רישוי פטנט מחברה אחרת</b> — זו החלופה היחידה לסדר הכרונולוגי של המו״פ, ולכן הדרך היחידה לדלג על דרגות (§4.3).',
+    fullVsRestricted:'<b>בעלות מלאה</b> על פטנט מושגת רק ברישיון <b>בלתי-מוגבל בזמן ובטריטוריה</b>. רישיון מוגבל = "מייצר בלבד" — הוא מאפשר ייצור אך אינו נחשב לבעלות, וכפי שנאמר למעלה הוא גם אינו מסיט את כיוון המו״פ (§4.3).',
+    speedUpOwn:'חברה שרוצה להתמחות במו״פ יכולה <b>להאיץ את המחקר שלה</b> ע״י נטילת רישיונות על דרגות נמוכות מחברות אחרות, או התקשרות לשימוש במעבדות שלהן. הסכמי רישוי-הדדי (cross-licensing) אפשריים תמיד (§4.3).',
+    hoarding:'ניתן לצבור כל מספר של שיפורים במו״פ ו/או ברישוי — אך עדיין לייצר ולשווק רק <b>שתי דרגות</b> לכל מוצר באזור ברבעון (§4.3).',
+    minPrices:'רישיון יכול להינתן סלקטיבית או בלעדית, ועם התניות כמו <b>שמירת מחירי מינימום</b> (§4.2).' },
+
+  /* R-25 · process / methods improvement (src, §4.7 + §7). A separate lever from product R&D,
+     and the app had no notion of it at all. */
+  methodsImprovement:{ src:true,
+    what:'הפחתת עלויות ייצור נוספת מושגת בהשקעה ב<b>שיפור תהליך/שיטות</b>, שהשפעתו <b>הדרגתית</b>. כל שיפור שהושג <b>מוחל אוטומטית על כל מפעלי המוצר באזור</b> (§4.7).',
+    notTransferable:'<b>אינו ניתן להעברה בין-לאומית ואינו סחיר</b> — הוא קשור לטכנולוגיית הייצור המקומית. שיפור שהושג באירופה אינו עובר לברזיל ואינו נמכר (§4.7).',
+    chipsMoreThanPcs:'<b>אחוז הפחתת העלות המרבי גבוה יותר במפעל שבבים מבמפעל מחשבים</b> — אף שהסכום הדרוש להשפעה המרבית שונה. מפעלי שבבים גם מתיישנים מהר יותר ממפעלי מחשבים, כך שכאן השיפור גם בולם התיישנות (§4.7).',
+    regionalPattern:'ההשפעה קצרת-הטווח גדולה ביותר <b>בארה״ב</b> והצנועה ביותר <b>בברזיל</b>, ולשבבים תמיד יותר מלמחשבים. הסכומים הדרושים גבוהים ביותר <b>באירופה</b> ונמוכים ביותר <b>בברזיל</b> (§7).',
+    scale:'בפועל, הסכום הממוצע שמושקע בשיפור תהליכים <b>קטן במידה ניכרת</b> מזה שמושקע במו״פ למוצר. <b>MR7/MR8/MR9</b> מראים מי בתעשייה משקיע בזה ובכמה (§7).' },
+
+  /* R-24 · the utilisation cost curve (src, §4.7). The shape is quoted; the optimal-capacity
+     NUMBERS are not in the printed Data Log (which gives maximal), so they are left null until
+     MR24 supplies them rather than invented. */
+  utilisation:{ src:true,
+    curve:'בניצולת נמוכה מאוד עלות היחידה <b>גבוהה ובלתי-תלויה כמעט בנפח</b>. מנקודה מסוימת ואילך <b>עלות היחידה היא פרבולה שהמינימום שלה בקיבולת האופטימלית</b>. מעל האופטימום ניתן להגדיל תפוקה — אך <b>בעלות יחידה עולה</b> — עד לקיבולת המקסימלית שבטבלה (§4.7).',
+    lowOutputWorseForChips:'עלויות היחידה בתפוקה נמוכה גבוהות יחסית יותר במפעלי שבבים <b>אוטומטיים</b> מאשר בהרכבת מחשבים (§4.7).',
+    optimalVsMaximal:'הפער בין אופטימלי למקסימלי: בשבבים בברזיל <b>יותר מ-50%</b> · פחות מכך בארה״ב · <b>הקטן ביותר באירופה</b>, שם ציוד בקנה-מידה קטן דורש ניצולת גבוהה ליעילות מרבית. במחשבים הפער קטן מבשבבים בברזיל ובארה״ב, ובאירופה הפער בין מחשבים לשבבים מינימלי (§7).',
+    stableRateIsPremium:'<b>יש פרמיה על קצב ייצור יציב.</b> כל שינוי בקצב — למעלה או למטה — גורר עלויות התאמה: שעות נוספות, פיצויים, או break-in (§4.7).',
+    oneGradePerPlant:'היעילות המרבית במפעל בודד מושגת בייצור <b>דרגה אחת בקיבולת אופטימלית</b>. עם שני מפעלים באזור, ייצרו כל דרגה במפעל נפרד (§4.7).',
+    varCostBand:'בתפוקה קרובה לאופטימום, עלות ייצור משתנה ליחידה היא בדרך כלל <b>11–20%</b> ממחיר הקמעונאי של שבבים בדגם חסכוני ו-<b>20–40%</b> במחשבים, בתחילת המשחק (§4.7).',
+    mrForOptimal:'<b>MR24</b> (24K) — "היקף ייצור אופטימלי": טווח ערכים האומד את מספר יחידות הייצור האופטימלי לפי אזור ומוצר. זה המחקר שממלא את המספר החסר.' },
+
+  /* R-47 · triangulating estimate studies across quarters (src, §4.10.5). */
+  mrTriangulation:{ src:true,
+    estimateItems:[18,21,24,31,32,33,34,35,36,37,38,39,61,62,63,64,65,66,67,68,69],
+    rangeIsHonest:'חלק ממחקרי השוק מסומנים כ"אומדנים" (MR18, 21, 24, 31–39, 61–69). הם מדווחים כ<b>טווח מבוסס-הסתברות</b>, ו<b>התשובה האמיתית תמיד בתוך הטווח</b> (§4.10.5).',
+    orderAgainNarrows:'<b>אם הטווח רחב מדי — כדאי להזמין את אותו מחקר שוב.</b> זו הדרך המפורשת במדריך לצמצם את אי-הוודאות (§4.10.5).',
+    intersectAcrossQuarters:'שני טווחים לאותו גודל משני רבעונים <b>חייבים להצטלב</b> אם הגודל לא זז. חיתוך הטווחים צר מכל אחד מהם — וטווחים שאינם מצטלבים הם סימן שהגודל עצמו השתנה, לא שהמחקר טעה.',
+    debigHistory:'פריטים 2–16, 23, 25 ו-74 ניתנים לרכישה מ-Arthur DeBig עבור <b>כל רבעון קודם</b>, בשבריר ממחיר מידע עדכני — לעתים גם על בסיס מצטבר (§4.10.5).' },
+
+  /* R-53 · partnerships and systems-building are an explicit evaluation criterion (src, §2). */
+  partnerships:{ src:true,
+    criterion:'המדריך מונה במפורש בין קריטריוני ההערכה: <b>"evidence of mutually viable systems-building with other companies"</b>, הימנעות מהתנהגות דיספונקציונלית או תת-אופטימלית, ו-professional acumen (§2).',
+    futureEmphasis:'<b>"Action potential for the future at the end of the simulation is particularly emphasized"</b> — זהו הבסיס לכך שמחצית הציון היא פוטנציאל עתידי ולא ביצועי עבר (§2).',
+    ownGoalsCount:'הקריטריונים המיוחדים מדגישים שהישגי ארגון נמדדים <b>ביחס ליעדים שהוא הציב לעצמו</b> — ולכן היסודיות, הדמיון וההיגיון הפנימי של מסמך התוכנית עצמו הם קריטריון ביצוע (§2).',
+    revisionIsCredit:'<b>עדכון התוכנית אינו חולשה</b> — "such revisions are likely to give further evidence of thoroughness and skill in planning" (§2).' },
+
   // Data Log 08 (src) — the timing skeleton of the whole game.
   lags:{ productionToSale:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — פיגור של רבעון עד שניתן למכור אותה',
     airResellSameQuarter:'סחורה שהוטסה ניתנת למכירה חוזרת באותו רבעון שבו הגיעה — אך לא בהטסה שנייה',
@@ -841,6 +906,49 @@ const capUnverified=(product,rid)=>((CAPACITY_UNVERIFIED[product]||{})[rid])||nu
 /* Wrap a figure the sources do not confirm. Deliberately louder than `est`: an unverified number
    should look different from a calibrated one, because the fix is different (go read the page). */
 function unver(html, why){ return `<span class="unver" title="${esc(why)}">${html}<sup>?</sup></span>`; }
+/* R-24 · Optimal capacity is the minimum of the unit-cost parabola, and it is NOT in the printed
+   Data Log — that table is maximal capacity. MR24 measures it. Until the team enters MR24's answer
+   the engine says "unknown" rather than pretending maximal is optimal, and the only thing it will
+   assert unaided is the guide's directional statement: the gap is largest for Brazilian chips
+   (>50%), smallest in the EU. */
+function optimalCapacity(product, rid){
+  const cfg=((S.config||{}).optimalCapacity||{})[product]||{};
+  const v=cfg[rid];
+  if(v>0) return { units:Math.round(v), src:'MR24 — הוזן ע״י הצוות', known:true };
+  const max=(DATALOG.capacity[product]||{})[rid]||0;
+  if(!max) return { units:null, src:null, known:false };
+  // Direction only, from §7 — never presented as a measurement.
+  const gapPct = rid==='brazil' ? (product==='X'?0.5:0.3) : (rid==='us' ? (product==='X'?0.3:0.2) : 0.1);
+  return { units:Math.round(max/(1+gapPct)), src:`אומדן כיוון מ-§7 (פער אופטימלי↔מקסימלי ${Math.round(gapPct*100)}%) — <b>לא נמדד</b>. הזינו MR24 כדי להחליף`, known:false, gapPct };
+}
+/* Where does a planned volume sit on the parabola? Below optimal is expensive per unit; above it
+   is expensive at the margin. Both are worth saying out loud before a production decision. */
+function utilisationPosition(product, rid, plannedUnits, plants){
+  const n=(plants!=null?plants:plantsForProduct(rid,product));
+  if(!n||!(plannedUnits>0)) return null;
+  const opt=optimalCapacity(product,rid); if(!opt.units) return null;
+  const optTotal=opt.units*n, maxTotal=((DATALOG.capacity[product]||{})[rid]||0)*n;
+  const ratio=plannedUnits/optTotal;
+  let zone, note;
+  if(plannedUnits>maxTotal){ zone='over-max'; note=`מעל הקיבולת המקסימלית (${fmt(maxTotal)}) — לא ניתן לייצר`; }
+  else if(ratio>1.02){ zone='above-optimal'; note=`מעל האופטימום (${fmt(optTotal)}) — התפוקה אפשרית אך <b>בעלות יחידה עולה</b> עד ${fmt(maxTotal)}`; }
+  else if(ratio<0.7){ zone='well-below'; note=`${Math.round(ratio*100)}% מהאופטימום — בניצולת נמוכה עלות היחידה <b>גבוהה וכמעט אינה יורדת עם הנפח</b>${product==='X'?', וזה חמור יותר במפעל שבבים אוטומטי':''}`; }
+  else if(ratio<0.95){ zone='below-optimal'; note=`${Math.round(ratio*100)}% מהאופטימום (${fmt(optTotal)}) — עוד יש מרווח להוריד עלות יחידה`; }
+  else { zone='optimal'; note=`בקירוב באופטימום (${fmt(optTotal)}) — כאן עלות היחידה מינימלית`; }
+  return { zone, ratio, optTotal, maxTotal, note, known:opt.known, src:opt.src };
+}
+/* R-47 · Two ranges for the same quantity must intersect if the quantity did not move. The
+   intersection is narrower than either, and a non-intersection is itself information. */
+function intersectRanges(ranges){
+  const rs=(ranges||[]).filter(r=>r && isFinite(r.low) && isFinite(r.high) && r.high>=r.low);
+  if(!rs.length) return null;
+  const low=Math.max(...rs.map(r=>r.low)), high=Math.min(...rs.map(r=>r.high));
+  if(low>high) return { disjoint:true, n:rs.length,
+    note:'הטווחים אינם מצטלבים — לפי המדריך התשובה האמיתית תמיד בתוך הטווח, ולכן זה אומר <b>שהגודל עצמו השתנה בין הרבעונים</b>, לא שמחקר טעה.' };
+  const widest=Math.max(...rs.map(r=>r.high-r.low));
+  return { low, high, n:rs.length, width:high-low, narrowedBy:widest-(high-low), disjoint:false,
+    note:rs.length>1?`חיתוך ${rs.length} טווחים — צר ב-${fmt(Math.round(widest-(high-low)))} מהרחב שביניהם.`:'טווח בודד — הזמנת אותו מחקר שוב תצמצם אותו (§4.10.5).' };
+}
 /* Does a capacity total lean on any figure the printed page does not carry? If it does, the
    total inherits the doubt — a derived number is only as sourced as its inputs. */
 function anyCapUnverifiedInUse(plantsByRegion){
@@ -1007,6 +1115,10 @@ window.openScoreBreakdown=()=>{
           P.share!=null?'נתח היחידות שלך מתוך השוק הנצפה.':'<b>בלי מחקר יחידות אין נתח שוק, והמשקל מתחלק בין שאר המרכיבים</b> — כלומר חוסר המידע עצמו מעוות את הציון.')}
         ${row('בריאות פיננסית', P.health!=null?pct(P.health)+'/100':'—', '25%', 'מאזן',
           `ממוצע של הון עצמי/סך נכסים ו-1 מינוס חוב/הון עצמי. חוב ${fmt(f.loans||0)} מול הון ${fmt(f.totalEquity||0)}.`)}
+        ${(()=>{ const np=partnershipScore();
+          return row('שותפויות ובניית מערכות', np?pct(np.score)+'/100':'— (לא נרשמו הסכמים)', '10%', 'המדריך §2 + רשימת ההסכמים',
+            np ? `<b>${np.partners}</b> שותפים נפרדים ו-<b>${np.kinds.length}</b> סוגי הסדר, מתוך ${np.n} הסכמים רשומים. הניקוד מתגמל <b>רוחב</b> — שותפים שונים וסוגי הסדר שונים — ולא עשרה עותקים של אותו חוזה.<br>${IC('warn')} <b>שים לב:</b> רישום ההסכם הראשון עשוי <b>להוריד</b> את המחצית הזו, כי המרכיב עובר מ"לא נמדד" ל"נמדד וחלש". זה לא עונש על רישום — זה הקריטריון שהמדריך מונה במפורש, ועכשיו הוא נמדד.`
+               : `המדריך מונה במפורש <b>"evidence of mutually viable systems-building with other companies"</b> בין קריטריוני ההערכה. כל עוד לא נרשם אף הסכם, המרכיב <b>אינו נספר</b> והמשקל מתחלק בין השאר — כדי שחוסר נתונים לא ייראה כמו כישלון.`); })()}
       </tbody></table></div>
     </div>
 
@@ -1236,6 +1348,16 @@ function capacityForProduct(product){
   });
   return { units, known: known||!anyPlants, anyPlants };
 }
+/* R-24 · MR24's answer, entered once per product/area. Clearing the field returns the engine to
+   the directional estimate rather than to a stale number. */
+window.setOptimalCapacity=(product,rid,val)=>{
+  S.config.optimalCapacity=S.config.optimalCapacity||{};
+  S.config.optimalCapacity[product]=S.config.optimalCapacity[product]||{};
+  const n=parseFloat(val);
+  if(isFinite(n)&&n>0) S.config.optimalCapacity[product][rid]=Math.round(n);
+  else delete S.config.optimalCapacity[product][rid];
+  save(true);
+};
 window.setPlantSplit=(rid,product,val)=>{
   S.config.plantSplit=S.config.plantSplit||{};
   S.config.plantSplit[rid]=S.config.plantSplit[rid]||{X:null,Y:null};
@@ -1612,6 +1734,22 @@ function competitorRankOf(base,ourValue){ // rank OUR (possibly projected) profi
   const n=others.length+1, beat=others.filter(v=>v<ourValue).length;
   return {score:beat/(n-1), rank:n-beat, n}; // 1=best; responsive to ourValue
 }
+/* R-53 · Systems-building with other companies, scored from what the team has actually recorded.
+   Counted, not asserted: contracts already in config plus any agreements logged. Returns null when
+   nothing is recorded, so the score renormalises instead of docking marks for missing data. */
+function partnershipScore(){
+  const cs=Array.isArray(S.config.contracts)?S.config.contracts:[];
+  const ags=Array.isArray(S.config.agreements)?S.config.agreements:[];
+  const all=[...cs.map(c=>({kind:c.product?'supply':'other', with:c.counterparty||c.buyer||null})),
+             ...ags.map(a=>({kind:a.kind||'other', with:a.counterparty||null}))];
+  if(!all.length) return null;
+  const partners=new Set(all.map(a=>a.with).filter(Boolean));
+  const kinds=new Set(all.map(a=>a.kind).filter(Boolean));
+  // Breadth over count: the criterion is a viable SYSTEM, so distinct partners and distinct kinds
+  // of arrangement are what it rewards — not ten copies of the same contract.
+  const score=_c01((Math.min(3,partners.size)/3)*0.6 + (Math.min(3,kinds.size)/3)*0.4);
+  return { score, partners:partners.size, kinds:[...kinds], n:all.length };
+}
 function marketShareScore(base){
   const sales=(S.quarters[base].marketIntel||{}).sales||[]; if(!sales.length) return null;
   const total=sales.reduce((a,s)=>a+s.units,0); if(total<=0) return null;
@@ -1793,7 +1931,15 @@ function scoreProxy(leversByQuarter){
   const eqRatio=f.totalAssets>0?_c01(f.totalEquity/f.totalAssets):null;
   const levHealth=f.totalEquity>0?_c01(1-Math.min(1,(f.loans||0)/f.totalEquity)):null;
   const health=(eqRatio!=null||levHealth!=null)?_c01(((eqRatio||0)+(levHealth||0))/((eqRatio!=null?1:0)+(levHealth!=null?1:0))):null;
-  const parts=[{v:techScore,w:0.45},{v:shareObj?shareObj.score:null,w:0.30},{v:health,w:0.25}].filter(c=>c.v!=null);
+  /* R-53 (src, §2) · Partnerships are an explicit evaluation criterion — "evidence of mutually
+     viable systems-building with other companies" — and carried no weight here at all, so a
+     signed agreement scored the same as none. Weighted small (10%) and only counted when the team
+     has actually recorded agreements, so an empty roster does not silently penalise the score:
+     with none recorded the component is absent and the remaining weights renormalise, exactly as
+     they already do for a missing share or health figure. */
+  const netScore=partnershipScore();
+  const parts=[{v:techScore,w:0.45},{v:shareObj?shareObj.score:null,w:0.30},{v:health,w:0.25},
+               {v:netScore!=null?netScore.score:null,w:0.10}].filter(c=>c.v!=null);
   const wsum=parts.reduce((a,c)=>a+c.w,0)||1;
   const potentialHalf=_c01(parts.reduce((a,c)=>a+c.v*c.w,0)/wsum)*100;
   // ===== COMBINE =====
@@ -2240,6 +2386,59 @@ function techPath(base, levers){
   });
   return out;
 }
+/* R-15 (src, §4.3) · CORRECTION to techPath above. The guide states two things the grade
+   projection was ignoring:
+     "The probability of success of an R&D program is related to the consistency, size, and
+      durability of the program. Initial investments in an R&D program are applied to hiring and
+      organizing an effective staff. As the program continues the probability that the staff will
+      develop product improvements increases."
+     "In a quarter when a company gets a patent through in-house R&D, the probability of getting a
+      new patent is SET BACK TO ZERO... However, your team has now demonstrated its effectiveness,
+      and future quarterly probability increases will be GREATER than before for a given amount of
+      R&D expense."
+   So a grade every quarter is not merely optimistic — the mechanic forbids it at a steady spend.
+   After each patent the probability restarts from zero and has to ramp again, though each ramp is
+   faster than the last. And a quarter with no funding does not merely pause: the staff has to be
+   re-hired and organised, so the ramp restarts.
+   `ramp` is the modelled number of consecutive funded quarters needed for the NEXT grade. It is a
+   calibrated shape, not a quoted number — the guide gives the direction and the reset, not the
+   rate — so it is labelled `est` and every consumer says so. */
+const RD_RAMP={ first:2, decay:0.5, min:1, src:false,
+  note:'המדריך קובע שההסתברות <b>מתאפסת</b> אחרי כל פטנט ושהרמפה הבאה מהירה יותר, אך לא נותן קצב. האומדן: הדרגה הראשונה דורשת 2 רבעונים רצופים של מימון, וכל דרגה נוספת פחות, במינימום רבעון אחד. <b>זהו אומדן מכויל, לא מספר מצוטט.</b>' };
+function rdQuartersForNextGrade(gradesAlreadyGained){
+  const n=Math.max(0,gradesAlreadyGained|0);
+  return Math.max(RD_RAMP.min, Math.round(RD_RAMP.first-n*RD_RAMP.decay));
+}
+/* Grade path that honours the reset. Returns the same shape as techPath plus, per quarter, how
+   many consecutive funded quarters have accumulated toward the next grade. */
+function techPathRamped(base, levers){
+  const op=S.quarters[base].operational;
+  const out={}; const st={ X:{grade:op.techX||0, run:0, gained:0}, Y:{grade:op.techY||0, run:0, gained:0} };
+  nextQuarters(base).forEach(q=>{
+    const lev=(levers&&levers[q])||{};
+    const total=lev.rd||0;
+    let spend={ X:(lev.rdX!=null?lev.rdX:null), Y:(lev.rdY!=null?lev.rdY:null) };
+    if(spend.X==null&&spend.Y==null){ spend.Y=total; spend.X=0; }
+    ['X','Y'].forEach(p=>{
+      const s=st[p], funded=(spend[p]||0)>=DATALOG.rdMinPerQuarter[p];
+      if(!funded){ s.run=0; return; }        // a gap re-starts the hiring/organising ramp
+      s.run++;
+      if(s.run>=rdQuartersForNextGrade(s.gained) && s.grade<9){
+        s.grade++; s.gained++; s.run=0;      // patent obtained → probability back to zero
+      }
+    });
+    out[q]={ X:st.X.grade, Y:st.Y.grade, runX:st.X.run, runY:st.Y.run,
+      needX:rdQuartersForNextGrade(st.X.gained), needY:rdQuartersForNextGrade(st.Y.gained) };
+  });
+  return out;
+}
+/* Quarters of funded R&D needed to move a product up `n` grades from a standing start, given the
+   reset after each one. This is what the back-calculation must use — not `n`. */
+function rdQuartersForGrades(n, gainedSoFar){
+  let q=0, gained=Math.max(0,gainedSoFar|0);
+  for(let i=0;i<Math.max(0,n);i++){ q+=rdQuartersForNextGrade(gained); gained++; }
+  return q;
+}
 /* Which quarter must the work start in, for a milestone that has to be true in `atQ`? */
 function startQuarterFor(atQ, leadQuarters){
   const i=qIndex(atQ)-Math.max(0,leadQuarters);
@@ -2252,7 +2451,9 @@ function rollingPlan(base, levers){
   const proj=projectCashflow(base, levers||null);
   const byQ={}; proj.forEach(p=>byQ[p.q]=p);
   const pipe=plantPipeline(base, levers);
-  const tech=techPath(base, levers);
+  // R-15: the ramped path, not the one-grade-per-quarter path. The optimistic version made a
+  // three-grade climb look like three quarters when the reset after each patent makes it longer.
+  const tech=techPathRamped(base, levers);
   const contracts=contractPlan();
   const g=S.config.goals;
   const firstActionable=nq[0];
@@ -2277,10 +2478,13 @@ function rollingPlan(base, levers){
     due.filter(c=>c.grade>0).forEach(c=>{
       const have=(c.product==='X'?(S.quarters[base].operational.techX||0):(S.quarters[base].operational.techY||0));
       const need=c.grade-have;
+      // R-15: not `need` quarters — the probability resets to zero after each patent, so each
+      // grade needs its own ramp of consecutive funded quarters.
+      const lead=rdQuartersForGrades(need, 0);
       if(need>0) must.push({ kind:'tech',
         what:`דרגת ${c.product}${c.grade} כדי לייצר לחוזה`,
-        startQ:startQuarterFor(c.productionQuarter, need), lead:need, open:true,
-        why:`חסרות ${need} דרגות · דרגה עולה ≤1/רבעון, ולכן המו״פ חייב להתחיל ${need} רבעונים לפני הייצור`,
+        startQ:startQuarterFor(c.productionQuarter, lead), lead, open:true,
+        why:`חסרות ${need} דרגות. ההסתברות <b>מתאפסת אחרי כל פטנט</b> (§4.3), ולכן זה אינו ${need} רבעונים אלא <b>${lead}</b> רבעוני מו״פ רצופים — והמו״פ חייב להתחיל ${lead} רבעונים לפני הייצור. <span class="est">אומדן הרמפה<sup>~</sup></span>`,
         form:'H1-1' });
     });
     // 3 · capacity for what this quarter plans to produce
@@ -3080,6 +3284,7 @@ function renderCriticalPath(q,targetQ){
       <span class="row" style="gap:6px">${cp.missed.length?`<span class="tag r">${cp.missed.length} כבר איחרנו</span>`:''}${cp.now.length?`<span class="tag a">${cp.now.length} חייבות להתחיל ב-${targetQ}</span>`:''}</span></div>
     ${cp.missed.length?`<div style="margin-top:10px"><b class="small" style="color:var(--red)">איחרנו את מועד ההתחלה — היעד הזה לא יושג בזמן:</b>
       <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.missed.map(m=>item(m,'r')).join('')}</ul>
+      ${cp.missed.some(m=>!m.startQ)?`<div class="small" style="color:var(--red);margin-top:4px;line-height:1.7">${IC('warn')} עבור פריט אחד או יותר מועד ההתחלה נופל <b>לפני Q1</b> — כלומר גם משחק מושלם מהרבעון הראשון לא היה מגיע לשם בקצב מו״פ רגיל. זה אינו פיגור, זו הנחה שהייתה שגויה מהתחלה.</div>`:''}
       <div class="small muted" style="margin-top:6px">${IC('info')} כשמועד ההתחלה עבר, השאלה אינה "איך נספיק" אלא <b>מה החלופה</b> — רכישה מחברה אחרת, דרגה נמוכה לפי סעיף 5, או הזזת היעד.</div></div>`:''}
     ${cp.now.length?`<div style="margin-top:${cp.missed.length?'12':'10'}px"><b class="small" style="color:var(--amber)">חייב להתחיל ב-${targetQ}, אחרת המועד יאבד:</b>
       <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.now.map(m=>item(m,'a')).join('')}</ul></div>`:''}
@@ -3103,7 +3308,7 @@ function renderRollingPlan(q,targetQ){
     <td class="num small">${fmt(r.capX)} / ${fmt(r.capY)}${anyCapUnverifiedInUse(r.plants)?' <sup style="color:var(--red)" title="נגזר ממספר קיבולת שאינו מופיע בדף המודפס של Data Log 03">?</sup>':''}</td>
     <td class="small" style="text-align:start;white-space:normal">${r.due.length?r.due.map(c=>`${fmt(c.qty)} ${c.product}${c.grade!=null?c.grade:''}`).join('<br>'):'—'}</td>
     <td class="small" style="text-align:start;white-space:normal;line-height:1.7;min-width:280px">${r.must.length
-      ? r.must.map(m=>`${st[m.status]||''} <b>${esc(m.what)}</b>${m.startQ?` — להתחיל ב-<b>${m.startQ}</b>`:' — <b>אין רבעון התחלה בטווח</b>'}<div class="small muted">${m.why}</div>`).join('<div style="height:6px"></div>')
+      ? r.must.map(m=>`${st[m.status]||''} <b>${esc(m.what)}</b>${m.startQ?` — להתחיל ב-<b>${m.startQ}</b>`:` — <b style="color:var(--red)">מועד ההתחלה נופל לפני Q1</b>, כלומר בקצב הזה זה לא היה בר-השגה מעולם`}<div class="small muted">${m.why}</div>`).join('<div style="height:6px"></div>')
       : '<span class="muted">אין דרישה חדשה</span>'}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
@@ -4195,7 +4400,47 @@ function renderRulesCard(){
           • הפער בין optimal ל-maximal: בברזיל בשבבים <b>יותר מ-50%</b> · פחות מכך בארה״ב · <b>הקטן ביותר באירופה</b>.<br>
           • <b>MR24</b> (24K) נותן את היקף הייצור האופטימלי לפי אזור ומוצר — זה המחקר שהופך את הפרבולה מתיאור למספר.<br>
           • שינוי קצב הייצור (למעלה או למטה) גורר עלויות התאמה — שעות נוספות, פיצויים, break-in. יש פרמיה על קצב יציב.<br>
-          • יעילות המפעל ניתנת לשיפור בהשקעה ב<b>שיפור שיטות</b> (methods improvements) — MR7/MR8/MR9 מראים מי בתעשייה משקיע בזה.
+          • יעילות המפעל ניתנת לשיפור בהשקעה ב<b>שיפור שיטות</b> (methods improvements) — MR7/MR8/MR9 מראים מי בתעשייה משקיע בזה.<br><br>
+          <b style="color:var(--purple)">מו״פ — רציפות, איפוס ורישוי (§4.3)</b><br>
+          • <b style="color:var(--red)">${RULES.rdProgram.resetAfterPatent}</b><br>
+          • ${RULES.rdProgram.consistency}<br>
+          • ${RULES.rdProgram.resetAfterPurchase}<br>
+          • ${RULES.rdProgram.chronological}<br>
+          • ${RULES.rdProgram.direction}<br>
+          • ${RULES.rdProgram.diminishing}<br>
+          • ${RULES.rdProgram.noSharedEconomies}<br>
+          • <b>רישוי (H5):</b> ${RULES.licensing.negotiable}<br>
+          • ${RULES.licensing.fullVsRestricted}<br>
+          • ${RULES.licensing.speedUpOwn}<br><br>
+          <b style="color:var(--purple)">סיכון dud / lemon (§4.3 · §4.9)</b><br>
+          • ${RULES.lemonRisk.exists}<br>
+          • ${RULES.lemonRisk.asymmetry}<br>
+          • ${RULES.lemonRisk.laggingPcHalvesChipMarket}<br>
+          • ${RULES.lemonRisk.oemBlindness}<br>
+          • ${RULES.lemonRisk.obsolescence}<br><br>
+          <b style="color:var(--purple)">שיפור שיטות — מנוף נפרד ממו״פ (§4.7 · §7)</b><br>
+          • ${RULES.methodsImprovement.what}<br>
+          • <b>${RULES.methodsImprovement.notTransferable}</b><br>
+          • ${RULES.methodsImprovement.chipsMoreThanPcs}<br>
+          • ${RULES.methodsImprovement.regionalPattern}<br>
+          • ${RULES.methodsImprovement.scale}<br><br>
+          <b style="color:var(--purple)">עקומת הניצולת (§4.7)</b><br>
+          • ${RULES.utilisation.curve}<br>
+          • ${RULES.utilisation.optimalVsMaximal}<br>
+          • ${RULES.utilisation.stableRateIsPremium}<br>
+          • ${RULES.utilisation.lowOutputWorseForChips}<br>
+          • ${RULES.utilisation.varCostBand}<br>
+          • ${RULES.utilisation.mrForOptimal}<br><br>
+          <b style="color:var(--purple)">טריאנגולציה של אומדנים (§4.10.5)</b><br>
+          • ${RULES.mrTriangulation.rangeIsHonest}<br>
+          • <b>${RULES.mrTriangulation.orderAgainNarrows}</b><br>
+          • ${RULES.mrTriangulation.intersectAcrossQuarters}<br>
+          • ${RULES.mrTriangulation.debigHistory}<br><br>
+          <b style="color:var(--purple)">שותפויות בהערכה (§2)</b><br>
+          • ${RULES.partnerships.criterion}<br>
+          • ${RULES.partnerships.futureEmphasis}<br>
+          • ${RULES.partnerships.ownGoalsCount}<br>
+          • ${RULES.partnerships.revisionIsCredit}
         </div></details>
     </div></div>`;
 }
@@ -4207,16 +4452,35 @@ function renderDemandEngine(){
     <div class="small muted" style="margin-top:8px">קלוט רבעונים עם נתוני מכירות (MR17&28) ומחירים — המנוע ילמד את גמישות הביקוש ויזהה מגמות. עד אז ההמלצות על פריורים וחוקי-משחק.</div></div>`;
   const el=ls.priceElast.toFixed(2);
   const anchors=Object.entries(S.learning.anchors||{}).sort((a,b)=>b[1].units-a[1].units).slice(0,3);
+  /* R-47 · A single quarter's range is as wide as that quarter's uncertainty. The guide says the
+     true answer always lies inside the range, so ranges from several quarters for a market that
+     did not move must intersect — and the intersection is tighter than any of them. A pair that
+     does NOT intersect is information too: the market itself moved. */
+  const tri=(region,product)=>{
+    const rs=enteredQuarters().map(q=>{
+      const mi=S.quarters[q].marketIntel||{}; const sales=mi.sales||[];
+      const tot=sales.filter(s=>s.region===region&&s.product===product).reduce((a,s)=>a+s.units,0);
+      if(!tot) return null;
+      const pd=predictDemand(region,product,{price:ourPriceFor(S.quarters[q],product)||undefined});
+      return pd?{low:pd.low, high:pd.high, q}:null;
+    }).filter(Boolean);
+    return rs.length>1?intersectRanges(rs):null;
+  };
   const rows=anchors.map(([k,a])=>{ const [region,product]=k.split('|'); const rn=(REGIONS.find(r=>r.id===region)||{}).name||region;
     const pd=predictDemand(region,product,{price:a.price,tech:a.tech});
-    return `<tr><td><b>${esc(rn)}</b> · ${product==='X'?'Chip':'PC'}</td><td class="num">${a.price?fmt(Math.round(a.price)):'—'}</td><td class="num">${fmt(a.units)}</td><td class="num">${pd?fmt(pd.units):'—'}</td><td class="num small">${pd?fmt(pd.low)+'–'+fmt(pd.high):'—'}</td></tr>`; }).join('');
+    const ix=tri(region,product);
+    return `<tr><td><b>${esc(rn)}</b> · ${product==='X'?'Chip':'PC'}</td><td class="num">${a.price?fmt(Math.round(a.price)):'—'}</td><td class="num">${fmt(a.units)}</td><td class="num">${pd?fmt(pd.units):'—'}</td><td class="num small">${pd?fmt(pd.low)+'–'+fmt(pd.high):'—'}</td>
+      <td class="small" style="text-align:start;white-space:normal;line-height:1.6">${ix
+        ? (ix.disjoint?`<span class="tag a">לא מצטלב</span> ${ix.note}`
+           :`<b>${fmt(ix.low)}–${fmt(ix.high)}</b>${ix.narrowedBy>0?` <span class="tag g">צר ב-${fmt(Math.round(ix.narrowedBy))}</span>`:''}<div class="small muted">${ix.note}</div>`)
+        : '<span class="muted">נדרשים ≥2 רבעונים</span>'}</td></tr>`; }).join('');
   return `<div class="card" style="margin-top:16px">
     <div class="ch">${head}</div>
     <div class="cb">
       <div class="small" style="line-height:1.9;margin-bottom:10px">
         גמישות מחיר מוערכת: <b class="num">${ls.priceObs>0?el:est(el,'פריור מהמדריך §5.3 — הדירוג בין אזורים מהמקור, המספר אומדן עד שיכויל מתצפיות מחיר אמיתיות')}</b> ${ls.priceObs>0?`<span class="tag g">מכויל · ${ls.priceObs} תצפיות</span>`:'<span class="tag a">פריור — לא מכויל</span>'} — <span class="muted">−1% מחיר ≈ +${(ls.priceElast*-1).toFixed(2)}% ביקוש.</span>
       </div>
-      ${rows?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>שוק</th><th>מחיר נצפה</th><th>יח׳ נצפות</th><th>תחזית</th><th>טווח</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
+      ${rows?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>שוק</th><th>מחיר נצפה</th><th>יח׳ נצפות</th><th>תחזית</th><th>טווח</th><th>חיתוך טווחים (§4.10.5)</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
       ${ls.trends.length?`<div style="margin-top:12px"><b class="small">${IC('trendUp')} מגמות מתחרים:</b><ul style="padding-inline-start:20px;line-height:1.8;margin:6px 0 0">${ls.trends.map(t=>`<li class="small">${esc(t.msg)}</li>`).join('')}</ul></div>`:''}
       ${ls.gaps.length?`<div class="tag a" style="margin-top:12px;display:block;line-height:1.7"><b>${IC('search')} המחקר המשתלם לקנות עכשיו:</b><br>${ls.gaps.map(g=>`• ${esc(g.mr)} — ${esc(g.why)}`).join('<br>')}</div>`:`<div class="tag g" style="margin-top:12px">${IC('check')} אין פערי מידע קריטיים — הביקוש מכויל.</div>`}
     </div></div>`;
@@ -5559,6 +5823,14 @@ function renderChecklist(box,targetQ,sc){
   const phantoms=phantomSales(sc,targetQ), ptrans=phantomTransfers(sc,targetQ);
   const gl=gradeLimitGuard(), ol=officeLegality(sc,targetQ), otg=officeTimingGuard(sc,targetQ);
   const dov=demandOverreach(buildActionPlan(S.activeQuarter,targetQ));
+  /* R-24 · Where each planned volume sits on the unit-cost parabola. Not a legality check except
+     at the top end — below optimal is legal and merely expensive, and that is worth saying because
+     a half-loaded plant is the most common way to make a plan look cheap and cost more per unit. */
+  const util=(()=>{ const lev=sc&&sc.levers[targetQ]; if(!lev) return [];
+    const out=[]; REGIONS.filter(r=>r.id!=='hq').forEach(r=>['X','Y'].forEach(p=>{
+      const planned=activeLines(lev,r.id).filter(l=>l.product===p).reduce((a,l)=>a+(l.production||0),0);
+      const u=utilisationPosition(p,r.id,planned); if(u) out.push({...u, name:`${r.name} · ${p}`, planned});
+    })); return out; })();
   const items=[
     {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
     {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · ${phantoms[0].product}: מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
@@ -5574,6 +5846,7 @@ function renderChecklist(box,targetQ,sc){
     {t:`עד 2 דרגות למוצר באזור (§4.9)${gl.length?` · ${gl[0].regionName}/${gl[0].product} כבר ב-${gl[0].count}`:''}`,ok:!gl.some(g=>g.over)},
     {t:`הרכב משרדי מכירות חוקי (Data Log 04)${ol.length?` · ${ol[0].region} ${ol[0].n}`:''}`,ok:ol.length===0},
     {t:`נפח המכירות אינו נשען על משרדים שנפתחים רק עכשיו (§4.6)${otg.length?` · ${otg[0].region} ${otg[0].from}→${otg[0].to}`:''}`,ok:otg.length===0},
+    {t:`הייצור אינו מעל הקיבולת המקסימלית באף אזור (§4.7)${util.filter(u=>u.zone==='over-max')[0]?` · ${util.filter(u=>u.zone==='over-max')[0].name}`:''}`,ok:!util.some(u=>u.zone==='over-max')},
     {t:`אין המלצה שחורגת מהביקוש הנצפה${dov.length?` · ${fmt(dov[0].qty)} מול תקרה ${fmt(dov[0].ceiling)}`:''}`,ok:dov.length===0},
   ];
   box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
@@ -5585,6 +5858,9 @@ function renderChecklist(box,targetQ,sc){
     ${dov.length?`<div class="tag r" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>המלצה חורגת מהביקוש:</b> ${dov.map(d=>`"${esc(d.title.slice(0,44))}" — ${fmt(d.qty)} יח׳ ב${(REGIONS.find(r=>r.id===d.region)||{}).name||d.region} מול תקרה ${fmt(d.ceiling)} (${esc(d.src)})`).join(' · ')}. כמות מעבר לתקרה פשוט לא תימכר — היא תישאר במלאי ותצבור עלות אחזקה.</div>`:''}
     ${ol.length?`<div class="tag r" style="margin-top:8px">${IC('warn')} <b>הרכב משרדים לא חוקי:</b> ${ol.map(o=>`${o.region}: ${o.n} — ${o.why}`).join(' · ')}.</div>`:''}
     ${otg.length?`<div class="tag a" style="display:block;margin-top:8px;line-height:1.75;white-space:normal">${IC('warn')} <b>תזמון פתיחת משרדים (§4.6 — "Create/Change A CSO Takes A Q"):</b> ${otg.map(o=>`<b>${o.region}</b> ${o.from}→${o.to} — ${o.why}`).join('<br>')}<br><span class="muted">${esc(RULES.offices.twoQuartersToEfficiency.replace(/<[^>]+>/g,''))}</span></div>`:''}
+    ${util.length?`<div class="cb" style="margin-top:8px"><div class="small" style="line-height:1.8">${IC('sliders')} <b>מיקום על עקומת עלות היחידה (§4.7):</b><br>
+      ${util.map(u=>`<b>${esc(u.name)}</b> — ${fmt(u.planned)} יח׳: <span class="tag ${u.zone==='over-max'?'r':(u.zone==='optimal'?'g':'a')}">${u.zone==='optimal'?'באופטימום':(u.zone==='over-max'?'מעל המקסימום':(u.zone==='above-optimal'?'מעל האופטימום':'מתחת לאופטימום'))}</span> ${u.note}${u.known?'':` <span class="small" style="color:var(--amber)">(הקיבולת האופטימלית טרם נמדדה — ${u.src.replace(/<[^>]+>/g,'')})</span>`}`).join('<br>')}
+      </div></div>`:''}
     ${caps.length?`<div class="tag a" style="margin-top:8px">${IC('warn')} חריגת קיבולת: ${caps.map(c=>`${c.name} ${c.product} ${fmt(c.prod)} יח׳ > ${fmt(c.cap)}/מפעל → נדרשים ${c.plants} מפעלים`).join(' · ')}.</div>`:''}
     <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;
 }
@@ -5735,7 +6011,17 @@ function goalTab(t){
             ${IC('warn')} <b style="color:var(--red)">${bad.length} מספרי קיבולת אינם מופיעים בדף המודפס של Data Log 03</b> — הם הגיעו מקובץ ה-xlsx ששוחזר ב-OCR. הדף המודפס נושא <b>שלושה</b> מספרים בטבלת הקיבולת: 50.000 · 25.000 · 18.000.
             <br>${bad.map(b=>`<b>${b.p} · ${b.r.name}</b> = ${unver(fmt((DATALOG.capacity[b.p]||{})[b.r.id]||0),b.w)}`).join(' · ')}
             <br><b>למה זה חשוב:</b> קיבולת X באירופה היא הבסיס לכל תוכנית ה-30,000 X3. ודאו את שלושת המספרים מול העמוד המודפס לפני שמסתמכים עליהם.
-            <br>${IC('info')} כמו כן — הטבלה כותרתה <b>MAXIMAL</b> capacity, לא optimal. עלות היחידה היא פרבולה שהמינימום שלה ב<b>קיבולת האופטימלית</b>, וייצור מעליה עולה יותר (§4.7). <b>MR24</b> (24K) נותן את היקף הייצור האופטימלי לפי אזור ומוצר.</div></div>`:''; })()}
+            <br>${IC('info')} כמו כן — הטבלה כותרתה <b>MAXIMAL</b> capacity, לא optimal. עלות היחידה היא פרבולה שהמינימום שלה ב<b>קיבולת האופטימלית</b>, וייצור מעליה עולה יותר (§4.7).</div></div>`:''; })()}
+        ${(()=>{ // R-24: the optimal-capacity figure MR24 supplies, and nothing invented until it does
+          const cell=(p,rid)=>{ const o=optimalCapacity(p,rid), cur=(((S.config||{}).optimalCapacity||{})[p]||{})[rid];
+            return `<td><input class="f" type="number" min="0" style="max-width:95px" value="${cur>0?cur:''}" placeholder="${o.units?fmt(o.units):'?'}" oninput="setOptimalCapacity('${p}','${rid}',this.value)">
+              <div class="small ${o.known?'muted':''}" style="line-height:1.5;${o.known?'':'color:var(--amber)'}">${o.known?'MR24':'אומדן כיוון'}</div></td>`; };
+          return `<details class="fverd" style="margin-top:12px"><summary>${IC('sliders')} קיבולת אופטימלית — היכן מינימום עלות היחידה (MR24) ⌄</summary>
+            <div class="small muted" style="line-height:1.8;padding:8px 2px">${RULES.utilisation.curve}<br>${RULES.utilisation.mrForOptimal}<br>
+              <b>עד שתזינו את MR24</b> המנוע משתמש באומדן כיוון בלבד, לפי הפער שהמדריך מתאר (${RULES.utilisation.optimalVsMaximal.replace(/<[^>]+>/g,'')}) — והוא מסומן כלא-נמדד בכל מקום שבו הוא מופיע.</div>
+            <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>מוצר</th>${REGIONS.filter(r=>r.id!=='hq').map(r=>`<th>${esc(r.name)}</th>`).join('')}</tr></thead><tbody>
+              ${['X','Y'].map(p=>`<tr><td><b>${p==='X'?'שבב (X)':'מחשב (Y)'}</b></td>${REGIONS.filter(r=>r.id!=='hq').map(r=>cell(p,r.id)).join('')}</tr>`).join('')}
+            </tbody></table></div></details>`; })()}
         ${(()=>{ const cx=capacityForProduct('X'), cy=capacityForProduct('Y');
           return `<div class="small" style="margin-top:10px;line-height:1.8">
             <b>קיבולת שבבים (X):</b> ${cx.known?(cx.units?`${fmt(cx.units)} יח׳/רבעון`:'<span style="color:var(--red)">0 — אין מפעל שבבים</span>'):'<span style="color:var(--amber)">לא ידוע</span>'} ·

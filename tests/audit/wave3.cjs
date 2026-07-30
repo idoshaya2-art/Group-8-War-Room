@@ -33,7 +33,10 @@ const pipe=await page.evaluate(()=>{
 ck('D-02 · a plant built in Q4 is NOT on stream in Q4', pipe.q4===1, `X plants Q4 = ${pipe.q4}`);
 ck('D-02 · it is on stream from Q5 onward', pipe.q5===2 && pipe.q6===2, `Q5 ${pipe.q5} · Q6 ${pipe.q6}`);
 
-// ---------- lead times: a grade only moves in a quarter funded at or above the legal minimum
+/* techPath's one-grade-per-quarter projection is kept as the raw mechanic (a grade cannot move in
+   an unfunded quarter) but is NO LONGER what the rolling plan uses: §4.3 resets the probability to
+   zero after every patent, so a steady spend does not yield a grade per quarter. The corrected
+   behaviour is asserted in wave4.cjs; here we only pin the funding floor. */
 const tech=await page.evaluate(()=>{
   const mk=(amount)=>{ const lev={}; nextQuarters('Q3').forEach(q=>{ lev[q]={rd:0,rdX:amount,rdY:0,regions:{}};
       REGIONS.forEach(x=>lev[q].regions[x.id]={production:0,unitCost:0,sales:0,advertising:0,invest:0,transferIn:0,product:'Y',model:'Standard',newFac:0,offices:0}); });
@@ -41,9 +44,8 @@ const tech=await page.evaluate(()=>{
   const min=DATALOG.rdMinPerQuarter.X;
   return { min, funded:mk(min), starved:mk(min-1) };
 });
-ck('D-02 · funding R&D at the minimum steps the grade one per quarter',
-  tech.funded.Q4.X===1 && tech.funded.Q5.X===2 && tech.funded.Q6.X===3,
-  `Q4 ${tech.funded.Q4.X} · Q5 ${tech.funded.Q5.X} · Q6 ${tech.funded.Q6.X}`);
+ck('D-02 · a quarter funded at the legal minimum can move a grade',
+  tech.funded.Q4.X===1, `Q4 = ${tech.funded.Q4.X}`);
 ck('D-02 · funding below the legal minimum moves nothing',
   tech.starved.Q6.X===0, `Q6 = ${tech.starved.Q6.X}`);
 
@@ -56,10 +58,12 @@ const cp=await page.evaluate(()=>{
 });
 ck('D-02 · production for the Q5 contract is flagged as starting in Q4',
   cp.now.includes('contract@Q5<-Q4'), cp.now.join(' | '));
-ck('D-02 · at grade X0, an X3 commitment is reported as already missed — R&D needed to start in Q1',
-  cp.missed.includes('tech@Q5<-Q1'), cp.missed.join(' | '));
-ck('D-02 · the Q6 tranche is missed too, with its own earlier start date',
-  cp.missed.includes('tech@Q6<-Q2'), cp.missed.join(' | '));
+/* Wave 3 asserted the start dates Q1 and Q2 here, from a one-grade-per-quarter lead time. With the
+   §4.3 reset modelled (wave 4) a three-grade climb needs five funded quarters, so the start date
+   for a Q5 delivery falls before Q1 — the commitment was never reachable by own R&D at all. The
+   exact dates are asserted in wave4.cjs; what belongs here is that both tranches are missed. */
+ck('D-02 · at grade X0, both X3 tranches are reported as already missed',
+  cp.missed.filter(x=>/^tech@/.test(x)).length===2, cp.missed.join(' | '));
 
 // ---------- and it responds to state: reaching the grade clears the missed items
 const cleared=await page.evaluate(()=>{
