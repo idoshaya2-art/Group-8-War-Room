@@ -239,6 +239,11 @@ details.sec.ref .secbody .tbl td{padding:6px 8px;font-size:12.5px}
 .tag.r{background:var(--redbg);color:var(--red);border-color:transparent}
 .tag.a{background:var(--amberbg);color:var(--amber);border-color:transparent}
 .tag.b{background:rgba(79,140,255,.15);color:var(--accent2);border-color:transparent}
+/* A verdict inside a dense table is a status, but fifteen filled pills at once is exactly the
+   noise the pill rule exists to prevent. Same colour grammar, no capsule: the colour and the
+   glyph carry the state, and the eye can still scan a column of them. */
+.pv6{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:800;white-space:nowrap}
+.pv6.ok{color:var(--sig-ok)} .pv6.warn{color:var(--sig-warn)} .pv6.block{color:var(--sig-block)} .pv6.na{color:var(--muted)}
 
 .btn{background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:9px;padding:9px 15px;font-weight:700;font-size:14px;transition:.15s;display:inline-flex;align-items:center;gap:7px}
 .btn:hover{background:#243157;border-color:var(--accent)}
@@ -471,7 +476,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.0 · שש לשוניות';
+const APP_VERSION = 'v12.1 · התוכנית הכתובה (v6) בלשונית ההחלטות';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3540,6 +3545,10 @@ function bodyDecisions(c){
       <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
       <b>3.</b> חלופות ב<b>"אופציות אחרות"</b> · נימוק ותלויות ב<b>"למה, ומה התלויות"</b>. כל מספר מחושב במנוע.`)}
     ${renderWhatBreaksFirst(q)}
+    <!-- The written plan (v6) as the BASELINE, not as a replacement for the engine's list.
+         The team decided on paper; this shows that decision line by line with whatever the
+         engine can still say about it today, and says plainly where it can say nothing. -->
+    ${(()=>{ try{ return renderPlanV6(q,targetQ); }catch(e){ return ''; } })()}
     ${insightList?`<div class="read"><span class="rh">מה שכדאי לדעת לפני שמחליטים</span>${insightList}</div>`:''}
     ${renderCriticalPath(q,targetQ)}
     <details class="sec" style="margin-bottom:14px"><summary>${IC('calendar')} הנתיב המתגלגל ${targetQ}→Q9 — מה חייב להיות נכון בכל רבעון, ומתי להתחיל</summary>
@@ -5353,6 +5362,579 @@ window.openMRCatalog=()=>{
     `<button class="btn primary" onclick="closeModal();go('sim')">${IC('sliders')} להזנת H1-2 בסימולטור</button>`);
 };
 /* ==========================================================================
+   PLAN_V6 — the team's written plan Q4→Q9 (version 6), encoded as STRUCTURE
+   rather than prose, so the engine can stand beside each line and say whether it
+   holds. The v5 document below is still embedded as a document — it is what
+   downloadPlanDoc hands back. This is a different thing: every row here is a
+   claim with an address in the engine, and the ones the engine can actually test
+   carry a verdict.
+
+   Three rules govern what is here:
+   1. Nothing is invented. Every figure is the plan's own. Where the engine
+      disagrees, the plan's number stays on screen next to the engine's.
+   2. A check that cannot be run says so. "לא נבדק" is a legitimate verdict and is
+      counted separately from "תואם" — an action the engine cannot test is not an
+      action the engine approves.
+   3. The Data Log is the referee. Where a plan line cites [DL-xx], the check reads
+      the same constant out of DATALOG instead of restating it, so a change to the
+      Data Log moves the verdict rather than leaving a stale claim behind.
+   ========================================================================== */
+const PLAN_V6_VERSION = 6;
+const PLAN_V6 = {
+  title:'תוכנית מנצחת Q4–Q9 — גרסה 6',
+  headline:'ברזיל כמנוע מרווח · אירופה כבסיס ייצור · אפס הלוואות חדשות',
+  caveat:'כ-70% מהרווח בתוכנית מגיע מברזיל, וההנחה המרכזית היא תקרת ביקוש של 14,000 יח׳ לרבעון שם. תקרה של 10,000 מורידה את העודפים בסיום לכ-9 מיליון SF; 16,000 מעלה אותם לכ-15 מיליון. MR24 — הרכישה הראשונה ב-Q4 — הופך את המספר הזה מהערכה לידיעה.',
+  question:'האם קיים מס על העברת הון בהחזרת מזומן מברזיל (שורת CAPITAL TRANSFER TAX בדוח)? התוכנית מעבירה 1,600,000 BRL לאירופה ב-Q4. אם קיים מס — החלופה היא הלוואה בין-חברתית (H4) מהחברה-הבת למטה במקום החזרת הון.',
+  // ---- section א · the seven data-audit corrections that produced v6
+  corrections:[
+    {n:1, was:'ההלוואה טופלה כריבית בלבד, ואז פירעון מלא ב-Q6', found:'המאזנים: 883,490 → 764,650 → 643,433. ההפרשים נותנים יחס 1.02 — הלוואת שפיצר של 1,000,000 SF ב-2% לרבעון, 8 תשלומים של 136,510', impact:'חמישה תשלומים נותרו: Q4–Q8, כשורה קבועה בכל רצפה', check:'spitzer'},
+    {n:2, was:'פחת ועלויות קבועות: 250,000 EUR לרבעון', found:'פירוק שורת Q3: שבבים 120,000 = פחת 80,000 + קבוע 40,000 — מפעל שבבים אחד בלבד היה פעיל; השני נכנס ב-Q4', impact:'מ-Q4: פחת 240,000 + קבוע 104,000 = 344,000 EUR לרבעון. פער מצטבר של 564,000 EUR שלא נספר', check:null},
+    {n:3, was:'מו״פ מחשבים: 400,000 SF לדרגה, ללא השהיה', found:'בפועל Q1 300,000 ו-Q2 350,000 (סה״כ 650,000), והדרגה Y1 הופיעה רק בדוח Q3. השבבים הגיבו מיידית: 500,000 → דרגה, פעמיים', impact:'דרגת מחשב עולה כ-650,000 SF ומגיעה בהשהיה של רבעון', check:'rdRamp'},
+    {n:4, was:'דמי אחסנה חושבו כ-8 EUR ליחידה', found:'המדריך: החיוב נצבר בקצב מואץ ככל שהכמות גדלה, ומהר יותר למחשבים. ה-Datalog מציין שזהו "היסוד הליניארי" בלבד', impact:'תחשיבי המלאי היו מוטים לטובת החזקה. נימוק חדש: פיצול מלאי בין שני אזורים זול מריכוזו באחד', check:'carrying'},
+    {n:5, was:'"שיפור שיטות" לא הוזכר כלל', found:'קיימת שורת METHODS IMPROVEMENT בדוח; המדריך מסביר שזו השקעה שמפחיתה עלויות ייצור משתנות ופועלת בהדרגה', impact:'נכנס כשורה קבועה של 100,000 EUR לרבעון מ-Q5', check:null},
+    {n:6, was:'עלויות הייצור הונחו קבועות עד Q9', found:'המדריך: עלויות משתנות גדלות עם התיישנות המפעלים, ומהר יותר בשבבים', impact:'שיפור השיטות הוא התרופה; MR18 (אומדן התיישנות) נכנס לרשימת המחקרים', check:null},
+    {n:7, was:'אחסנה בברזיל תוארה כ"היקרה במשחק"', found:'16 BRL = 8 SF, מול 8 EUR = 12 SF באירופה ו-10 USD = 10 SF בארה״ב', impact:'ברזיל היא דווקא המקום הזול ביותר להחזיק בו מחשבים. בלבול בין מטבע מקומי לבסיס', check:'carryCompare'},
+  ],
+  // ---- section ב · why Brazil, per unit, in SF
+  brazilMargin:{
+    rows:[
+      ['מחיר בפרנקים','180.0','400.0'],
+      ['עלות ייצור','−64.3','−64.3'],
+      ['שינוע יבשתי מאירופה','0','−27.0'],
+      ['ערוץ (ארגון עצמי / סוכנים)','−18.0','−80.0'],
+      ['פרסום ליחידה','−22.0','−15.0'],
+      ['שיעור מס','40%','30%'],
+      ['תרומה נטו ליחידה','45.4 SF','149.6 SF'],
+    ],
+    note:'המרצה רמז לא להקים מפעל בברזיל — לא לאסור מכירה לשוק הברזילאי. שינוע מאירופה עולה 18 EUR ליחידה מול מפעל ב-1,600,000 BRL; השינוע זול יותר בכל אופק רלוונטי. ערוץ: סוכנים ולא משרדים — הם גובים רק על מה שנמכר.',
+    check:'channelCost',
+  },
+  // ---- section ג · what happens to the 35,000 PCs already in stock
+  allocation:{
+    rows:[
+      ['אירופה — צרכני','16,000','Q4','120 EUR','ארגון מכירות עצמי','45.4','726,400'],
+      ['ברזיל — שינוע יבשתי ב-Q4','14,000','Q5','800 BRL','סוכנים + פרסום','149.6','2,094,400'],
+      ['אירופה — דגם Standard','5,000','Q5','115 EUR','ארגון עצמי','41.0','205,000'],
+      ['סה״כ','35,000','','','','','3,025,800'],
+    ],
+    note:'השינוע היבשתי חוסך רבעון של דמי אחסנה: החיוב חל רק על סחורה שהייתה במלאי בתחילת הרבעון וגם נותרה בסופו. הטסה כן מחויבת, ועולה 60 EUR ליחידה במקום 30. 5,000 היחידות שנשמרות אינן שארית — הן דגם ה-Standard של Q5 לצד ה-Y1 Deluxe.',
+    check:'stockAllocation',
+  },
+  // ---- section ד · the corrected grade schedule
+  grades:[
+    {q:'Q4', rdX:500000, rdY:70000,  grade:'X3', produce:'22,000 Y1 + 52,000 X2', europe:'Y0 @ 120 (דגם יחיד — חדירה)', brazil:'—'},
+    {q:'Q5', rdX:500000, rdY:350000, grade:'X4', produce:'6,000 Y0 + 16,000 Y1 + 62,000 X3', europe:'Y0 @ 115 / Y1 @ 150', brazil:'Y0 @ 800'},
+    {q:'Q6', rdX:40000,  rdY:350000, grade:'Y2', produce:'8,000 Y1 + 14,000 Y2 + 44,000 X4', europe:'Y0 @ 115 / Y1 @ 155', brazil:'Y1 @ 880'},
+    {q:'Q7', rdX:40000,  rdY:350000, grade:'—',  produce:'8,000 Y1 + 14,000 Y2 + 44,000 X4', europe:'Y1 @ 150 / Y2 @ 185', brazil:'Y2 @ 950'},
+    {q:'Q8', rdX:40000,  rdY:350000, grade:'Y3', produce:'8,000 Y2 + 14,000 Y3 + 44,000 X4', europe:'Y1 @ 150 / Y2 @ 185', brazil:'Y2 @ 950'},
+    {q:'Q9', rdX:40000,  rdY:70000,  grade:'—',  produce:'אפס', europe:'Y2 @ 180 / Y3 @ 225', brazil:'Y3 @ 1,050'},
+  ],
+  gradeRule:'שני כללים בכל שורה: (1) שתי דרגות שונות במלאי כדי שיהיו שני דגמים; (2) כל מחשב מיוצר עם שבב אחד בלבד — הזוגות היעילים לפי [DL-02] הם X2→Y0-Y1, X3→Y1-Y2, X4→Y1-Y3, X5→Y3-Y4. ייצור Y2 עם X2 דורש שני שבבים ומוחק את הרווח.',
+  // ---- section ה · the quarterly plan
+  quarters:{
+    Q4:{
+      subtitle:'רבעון ההשקעה: חדירה לאירופה, שינוע לברזיל, מו״פ מלא',
+      floor:[
+        ['מינימום חוקי בקופת המטה','20,000 SF',20000,'[DL-10]'],
+        ['A/P אירופה P4','341,030 EUR',511545,'[Q3-BS]'],
+        ['A/P ברזיל P4','9,288 BRL',4644,'[Q3-BS]'],
+        ['תשלום הלוואת שפיצר (12,869 ריבית + 123,641 קרן)','136,510 SF',136510,'חושב מהמאזנים; 5 תשלומים נותרו'],
+        ['פחת ועלויות קבועות — 4 מפעלים פעילים','344,000 EUR',516000,'מ-Q4 שני מפעלי השבבים פעילים'],
+        ['ארגון מכירות עצמי (מרכזי + 3 אזוריים)','100,000 EUR',150000,'[DL-04]; המרכזי נוסף אוטומטית'],
+        ['מו״פ שבבים — הרמה שהוכחה ב-Q1–Q2','500,000 SF',500000,'יעד X3 לחוזה'],
+        ['מו״פ מחשבים — רצפת עקביות','70,000 SF',70000,'[DL-06]'],
+        ['ריבית אשראי ספקים אירופה','28,508 EUR',42762,'[DL-07]'],
+        ['שינוע 14,000 יח׳ לברזיל','270,000 EUR',405000,'[DL-05]: 4,000×30 + 10,000×15'],
+        ['דמי אחסנה על 5,000 יח׳ שיישמרו','40,000 EUR',60000,'יסוד ליניארי בלבד — החיוב בפועל גבוה יותר'],
+        ['מס','0 — נזקף ל-A/P1 ומשולם ב-Q5',0,'[DL-09]'],
+        ['התחייבות חוזית: ייצור 30,000 שבבים לאספקת Q5','350,400 EUR',525600,'[חוזה, סעיף 5]'],
+      ],
+      floorTotal:2942061,
+      sources:'מזומן 1,067,452 + מזומן ממכירות Q4 (50% מ-1,920,000 EUR = 1,440,000 SF) = 2,507,452 SF. הפער נסגר בדחיית פירעון אשראי הספקים ל-Q5 (עלות: 28,508 EUR ריבית) ובקיצוץ הפרסום ל-250,000 EUR. אפס הלוואות חדשות.',
+      actions:[
+        {n:1,  what:'חילוץ מזומן מברזיל: העברת 1,600,000 BRL לאירופה', form:'A3-1 + A3-3', value:'+529,067 EUR נטו (עמלה 0.8%). משאירים ~495,000 BRL בברזיל לתשלום סוכנים ופרסום ב-Q5', check:'brazilCash'},
+        {n:2,  what:'סגירת גירעון ה-EUR במטה: המרת 338,790 SF ל-225,860 EUR', form:'W3', value:'עמלה 0.4%; חוסך ריבית שלילית של 8,470 SF לרבעון — מאומת מדוחות Q2 ו-Q3', check:null},
+        {n:3,  what:'תשלום A/P P4 בשני האזורים', form:'אוטומטי', value:'−341,030 EUR ו-−9,288 BRL', check:null},
+        {n:4,  what:'תשלום הלוואת שפיצר', form:'A3-2', value:'−136,510 SF. אין פירעון מוקדם — 2% היא הריבית הזולה במשחק', check:'spitzer'},
+        {n:5,  what:'אשראי הספקים: תשלום ריבית בלבד; הקרן נפרעת ב-Q5', form:'—', value:'−28,508 EUR. זול מכל חלופת מימון', check:'supplierInterest'},
+        {n:6,  what:'העברת 400,000 EUR מאירופה למטה', form:'A3-1', value:'+600,000 SF למימון המו״פ', check:'hqTransfer'},
+        {n:7,  what:'מו״פ: שבבים 500,000 SF (יעד X3) · מחשבים 70,000 SF', form:'H1-1', value:'−570,000 SF. מבטל את קנס העקביות מ-Q3', check:'rdChipGrade'},
+        {n:8,  what:'מחקרי שוק: MR24 (קיבולת אופטימלית), MR21 (הסתברות פטנט X), MR18 (התיישנות מפעלים) + 17/28/74 חינם', form:'H1-2', value:'−60,000 SF. MR24 יהפוך את תקרת הביקוש ממשוערת לידועה', check:'mr24'},
+        {n:9,  what:'תמחור: Y0 באירופה 120 EUR', form:'A1-2', value:'מחיר חדירה. ללא הזנת מחיר — הסחורה נשארת במלאי [מדריך 4.10.1]', check:null},
+        {n:10, what:'פרסום אירופה: 250,000 EUR', form:'A1-2', value:'המנוף היחיד נגד קשיי חדירה; השפעה מיידית', check:null},
+        {n:11, what:'מכירה: 16,000 יח׳ Y0 באירופה', form:'A1-2', value:'+1,920,000 EUR', check:'europeVolume'},
+        {n:12, what:'שינוע יבשתי: 14,000 יח׳ Y0 לברזיל', form:'H6 / A4', value:'−270,000 EUR. אין דמי אחסנה ברבעון המשלוח', check:'freightBrazil'},
+        {n:13, what:'שמירת 5,000 יח׳ Y0 כדגם Standard ל-Q5', form:'—', value:'−40,000 EUR אחסנה; מאפשר שני דגמים ב-Q5', check:'carrying'},
+        {n:14, what:'ייצור: 52,000 שבבי X2 (30,000 לחוזה + 22,000 לצריכה) ו-22,000 מחשבי Y1', form:'A2-3 / A2-4', value:'−1,333,000 EUR', check:'productionQ4'},
+        {n:15, what:'פתיחת מגעים: הרחבת חוזה השבבים (H6) ורישוי X3 (H5)', form:'H6 / H5', value:'נכס "שותפויות" לרכיב הפוטנציאל בציון', check:null},
+      ],
+      close:[
+        ['מכירות אירופה','1,920,000 EUR (16,000 יח׳)'],
+        ['תוצאה מאוחדת','−652,080 SF'],
+        ['עודפים מצטברים','−3,081,373 SF'],
+        ['מלאי','5,000 Y0 + 22,000 Y1 + 30,000 X2 באירופה · 14,000 Y0 בברזיל'],
+        ['הלוואות חדשות','0'],
+        ['דרגות','X3 (בכפוף למו״פ) / Y1'],
+      ],
+      closeNote:'זהו רבעון ההשקעה, והוא מפסיד — 570,000 SF מו״פ, 405,000 SF שינוע ו-516,000 SF פחת וקבועות מול 16,000 יחידות מכירה בלבד. כל שלושת הסעיפים משתלמים מ-Q5. זהו ההפסד האחרון בתוכנית.',
+    },
+    Q5:{
+      subtitle:'ברזיל נפתחת, החוזה מסופק, כל החוב היקר נפרע',
+      floor:[
+        ['מינימום קופת מטה','',20000,''],
+        ['A/P אירופה P5','',491444,'[Q3-BS]'],
+        ['מס Q4','0 (הפסד)',0,'[DL-09]'],
+        ['תשלום שפיצר (10,396 ריבית + 126,114 קרן)','',136510,'לוח סילוקין'],
+        ['פחת ועלויות קבועות','',516000,''],
+        ['ארגון מכירות אירופה','',150000,'[DL-04]'],
+        ['מו״פ (500,000 שבבים + 350,000 מחשבים)','',850000,'[DL-06]'],
+        ['שיפור שיטות','',150000,'METHODS IMPROVEMENT'],
+        ['סוכנים ופרסום בברזיל','',1470000,'[DL-04]'],
+        ['שינוע 14,000 יח׳ לברזיל','',405000,'[DL-05]'],
+        ['דמי אחסנה','',84000,'[DL-06]'],
+        ['התחייבות חוזית: אספקת 30,000 שבבים','מהמלאי שיוצר ב-Q4',0,'[חוזה, סעיף 5]'],
+      ],
+      floorTotal:4272954,
+      sources:'גבייה מ-Q4 384,000 EUR + מזומן ממכירות Q5 (50% מ-4,175,000 EUR באירופה + 30% מ-11,200,000 BRL בברזיל) = ~6,313,000 SF ← מכוסה, ומאפשר גם פירעון מלא של אשראי הספקים.',
+      actions:[
+        {n:1,  what:'אספקת החוזה: 30,000 שבבי X2 לפי סעיף 5', form:'H6', value:'+900,000 EUR; תרומה +549,600 EUR', check:'contract'},
+        {n:2,  what:'פירעון מלא של אשראי הספקים באירופה ובמטה', form:'A3-1 / A3-2', value:'−475,139 EUR ו-−424,170 SF. עלותם בפועל ב-Q3 הייתה 8.85% — יקר מכל חלופה', check:'supplierInterest'},
+        {n:3,  what:'תשלום שפיצר', form:'A3-2', value:'−136,510 SF', check:'spitzer'},
+        {n:4,  what:'ברזיל: תמחור Y0 ב-800 BRL — מחיר מלא ללא הנחה', form:'A1-2', value:'אף חברה אינה מוכרת מחשבים בברזיל [MR17&28]; התקרה אינה נלחצת ב-14,000 יח׳', check:'brazilPriceCap'},
+        {n:5,  what:'ברזיל: פרסום 700,000 BRL', form:'A1-2', value:'חובה ולא תוספת — עם סוכנים זהו כלי הקידום היחיד', check:null},
+        {n:6,  what:'ברזיל: מכירה 14,000 יח׳ דרך סוכנים', form:'A1-2', value:'+11,200,000 BRL. עמלה 160 BRL ליח׳; גבייה 30/30/40', check:'brazilVolume'},
+        {n:7,  what:'אירופה: Standard Y0 ב-115 · Deluxe Y1 ב-150', form:'A1-2', value:'שתי דרגות שונות = שני דגמים אמיתיים [מדריך 4.3]', check:null},
+        {n:8,  what:'אירופה: מכירה 5,000 + 18,000 = 23,000 יח׳', form:'A1-2', value:'+3,275,000 EUR', check:'europeVolume'},
+        {n:9,  what:'מו״פ: שבבים 500,000 SF (יעד X4) · מחשבים 350,000 SF', form:'H1-1', value:'דרגת מחשב דורשת ~650,000 SF מצטבר ומגיעה בהשהיה', check:'rdRamp'},
+        {n:10, what:'שיפור שיטות: 100,000 EUR', form:'H1-1', value:'נגד התיישנות המפעלים — במיוחד בשבבים', check:null},
+        {n:11, what:'ייצור: 62,000 שבבי X3 (30,000 לאספקת Q6) ו-22,000 מחשבים בשתי דרגות', form:'A2-3 / A2-4', value:'כל דרגה במפעל נפרד — ללא עלויות הפרעה [מדריך III:8]', check:'productionQ5'},
+        {n:12, what:'שינוע 14,000 יח׳ לברזיל למכירות Q6', form:'H6 / A4', value:'−270,000 EUR', check:'freightBrazil'},
+        {n:13, what:'מחקרי שוק: MR19, MR22, MR11', form:'H1-2', value:'מעקב אחרי כניסת חברות 5, 6 ו-10 לשוק המחשבים', check:null},
+      ],
+      close:[
+        ['רווח נקי אירופה','+829,100 EUR'],
+        ['רווח נקי ברזיל','+3,800,000 BRL'],
+        ['תוצאה מאוחדת','+2,223,254 SF'],
+        ['עודפים מצטברים','−858,119 SF'],
+        ['חוב','אפס אשראי ספקים · יתרת שפיצר 393,678 SF'],
+        ['דרגות','X4 / Y1'],
+      ],
+      closeNote:'',
+    },
+  },
+  // ---- Q6–Q9 · the steady state
+  steady:{
+    label:'Q6–Q9',
+    subtitle:'מצב יציב: ברזיל במרווח, אירופה בנפח',
+    floor:[
+      ['מינימום קופת מטה','',20000,'[DL-10]'],
+      ['תשלום שפיצר (Q6–Q8 בלבד; ב-Q9 אפס)','',136510,'לוח סילוקין'],
+      ['פחת ועלויות קבועות','',516000,''],
+      ['ארגון מכירות אירופה','',150000,'[DL-04]'],
+      ['מו״פ','195,000–585,000',0,'[DL-06]'],
+      ['שיפור שיטות','',150000,''],
+      ['סוכנים ופרסום בברזיל','',1470000,''],
+      ['שינוע לברזיל','',405000,'[DL-05]'],
+      ['דמי אחסנה','',300000,'[DL-06]'],
+      ['מס מהרבעון הקודם','1,000,000–1,900,000',0,'[DL-09]'],
+    ],
+    floorTotal:null,
+    sources:'הרצפה מכוסה בכל הרבעונים מהתזרים השוטף בלבד. הלוואת השפיצר נסגרת מעצמה בסוף Q8.',
+    actions:[
+      {n:1,  what:'אספקת החוזה השני: 30,000 שבבי X3', form:'Q6', value:'+990,000 EUR; תרומה +606,300. החוזה הושלם — נכס מוניטין', check:'contract'},
+      {n:2,  what:'רישוי X3 ולאחר מכן X4 לחברות 3 ו-9', form:'Q6–Q9', value:'+150,000 עד 200,000 SF לרבעון; הכנסה טהורה ללא עלות ייצור. רישוי אפשרי רבעון לאחר השגת הדרגה [DL-08]', check:null},
+      {n:3,  what:'ברזיל: 14,000 יח׳ לרבעון, מחיר עולה עם הדרגה — 880 → 950 → 1,050 BRL', form:'Q6–Q9', value:'~2,200,000–2,700,000 SF רווח נקי לרבעון. מקסימום מותר לדרגות Y0–Y3: 1,400 BRL', check:'brazilPriceCap'},
+      {n:4,  what:'אירופה: שני דגמים, 22,000 יח׳ לרבעון', form:'Q6–Q9', value:'Standard 8,000 + Deluxe 14,000. פרמיית MR41 של 24% לדרגה מול 9.5% בעלות', check:'europeVolume'},
+      {n:5,  what:'מכירת שבבים צרכניים באירופה: 5,000 יח׳', form:'Q7–Q9', value:'שוק השבבים הוא כרבע משוק המחשבים [מדריך 5.2] — היקף צנוע בכוונה', check:null},
+      {n:6,  what:'הקצאת קיבולת: ברזיל ראשונה, אירופה אחריה', form:'Q6–Q9', value:'14,000 + 22,000 = 36,000 = הקיבולת המלאה. אין צורך במפעל רביעי', check:'capacityY'},
+      {n:7,  what:'ייצור: אפס', form:'Q9', value:'סחורה שתיוצר ב-Q9 לא תימכר לעולם', check:null},
+      {n:8,  what:'מו״פ: רצפות בלבד מ-Q8', form:'Q8–Q9', value:'השקעה מעבר לרצפה לא תספיק להבשיל [DL-08]', check:'rdFloors'},
+      {n:9,  what:'עודפים לאג״ח ממשלת ברזיל (4.5%)', form:'Q6–Q9', value:'התשואה הבטוחה הגבוהה במשחק. רק אחרי שאירופה נקייה מחוב — חיסול חוב ב-6% שווה יותר מהשקעה ב-4.5%', check:'brazilBonds'},
+      {n:10, what:'בדיקה משולשת: מחיר מוזן לכל דגם בכל אזור', form:'Q9', value:'ללא מחיר — אפס מכירות [מדריך 4.10.1]', check:null},
+    ],
+    close:[
+      ['Q6','+3,037,964 SF','+2,179,845 SF ← חציית קו האפס'],
+      ['Q7','+3,309,694 SF','+5,489,539 SF'],
+      ['Q8','+3,727,000 SF','+9,216,539 SF'],
+      ['Q9','+4,140,000 SF','+13,356,539 SF'],
+    ],
+  },
+  // ---- section ו · the financial summary
+  finance:[
+    {q:'פתיחה', eu:'—', br:'—', deal:'—', netEU:'—', netBR:'—', hq:'—', consol:'—', cum:-2429293},
+    {q:'Q4', eu:'16,000', br:'—', deal:'—', netEU:'+9,412 EUR', netBR:'—', hq:'−666,198', consol:-652080, cum:-3081373},
+    {q:'Q5', eu:'23,000', br:'14,000', deal:'30,000 X2', netEU:'+829,100 EUR', netBR:'+3,800,000 BRL', hq:'−920,396', consol:2223254, cum:-858119},
+    {q:'Q6', eu:'22,000', br:'14,000', deal:'30,000 X3 + רישוי', netEU:'+743,892 EUR', netBR:'+4,460,000 BRL', hq:'−307,874', consol:3037964, cum:2179845},
+    {q:'Q7', eu:'22,000', br:'14,000', deal:'רישוי', netEU:'+723,330 EUR', netBR:'+4,940,000 BRL', hq:'−245,301', consol:3309694, cum:5489539},
+    {q:'Q8', eu:'22,000', br:'14,000', deal:'רישוי', netEU:'+733,000 EUR', netBR:'+5,000,000 BRL', hq:'+127,000', consol:3727000, cum:9216539},
+    {q:'Q9', eu:'22,000', br:'14,000', deal:'רישוי', netEU:'+833,000 EUR', netBR:'+5,400,000 BRL', hq:'+190,000', consol:4140000, cum:13356539},
+  ],
+  financeNote:'רווח מצטבר Q4–Q9: +15,785,832 SF. עודפים בסיום: +13,356,539 SF. אפס הלוואות חדשות; הלוואת השפיצר נסגרת ב-Q8.',
+  // ---- section ז · risks, each with a measurable trigger
+  risks:[
+    {risk:'תקרת ברזיל נמוכה מ-14,000', trigger:'מכירות Q5 בברזיל מתחת ל-11,000 יח׳', fix:'הפחתת השינוע ל-10,000 יח׳ לרבעון; הפניית ההפרש לדגם ה-Standard באירופה; העלאת מחיר ברזיל ל-850', last:'Q6', check:'brazilVolume'},
+    {risk:'קשיי חדירה באירופה', trigger:'מכירות Q4 מתחת ל-13,000 יח׳', fix:'מחיר Q5 ל-110 EUR ל-Standard; פרסום +30%; הגדלת השינוע לברזיל ל-16,000', last:'Q5', check:'europeVolume'},
+    {risk:'כשל מו״פ X3', trigger:'דוח Q4 עדיין מציג X2', fix:'אספקת Q6 גם היא X2 לפי סעיף 5; מו״פ שבבים ל-550,000 SF ב-Q5; לוח הדרגות נדחה ברבעון', last:'Q5', check:'rdChipGrade'},
+    {risk:'כשל מו״פ Y2', trigger:'דוח Q6 עדיין מציג Y1', fix:'ה-Standard נשאר Y0 גם ב-Q7. אין לייצר Y2 עם X2 — דורש 2 שבבים ומוחק את הרווח [DL-02]', last:'Q7', check:'chipPair'},
+    {risk:'התיישנות מהירה מהצפוי', trigger:'MR18 מציג התיישנות מעל 5% לרבעון', fix:'הכפלת שיפור השיטות ל-200,000 EUR לרבעון; עדיפות למפעלי השבבים', last:'Q6', check:null},
+    {risk:'חברה 6 נכנסת בעוצמה לאירופה', trigger:'מחיר PC של חברה 6 מופיע ב-MR17&28 או MR11', fix:'הגנה בדרגה ובפרסום ולא בהורדת מחיר; הסטת נפח נוסף לברזיל שבה אין מתחרים', last:'מתמשך', check:null},
+    {risk:'תזרים שלילי צפוי', trigger:'חיזוי יתרה אזורית שלילית לרבעון הבא', fix:'קיצוץ מיידי — לא הלוואה. סדר הקיצוץ: פרסום, שיפור שיטות, ייצור, מו״פ מחשבים. מו״פ שבבים ותשלום השפיצר מוגנים', last:'כל רבעון', check:'cashBreach'},
+    {risk:'מלאי מצטבר', trigger:'מלאי סוף רבעון עולה על מכירות הרבעון הבא', fix:'קיצוץ ייצור מיידי. החיוב מואץ עם הכמות — פיצול בין אירופה לברזיל זול מריכוז באזור אחד', last:'כל רבעון', check:'carryCompare'},
+  ],
+};
+
+/* Every check below reads live state or DATALOG and returns one of four verdicts.
+   `na` means the engine has nothing to test the claim against — it is NOT approval. */
+const PLAN_V6_STATES = {
+  ok:   {tag:'g', label:'תואם',     glyph:'✓', col:'var(--sig-ok)'},
+  warn: {tag:'a', label:'שים לב',   glyph:'!', col:'var(--sig-warn)'},
+  block:{tag:'r', label:'סותר',     glyph:'✕', col:'var(--sig-block)'},
+  na:   {tag:'b', label:'לא נבדק',  glyph:'·', col:'var(--muted)'},
+};
+/* The verdict marker used inside tables — see .pv6 in the stylesheet for why it is not a pill. */
+function planV6Mark(state){ const s=PLAN_V6_STATES[state]; return `<span class="pv6 ${state}">${s.glyph} ${s.label}</span>`; }
+const PLAN_V6_CHECKS = {
+  // the Spitzer amortisation the plan reverse-engineered from three balance sheets
+  spitzer(){
+    const L=643433, pay=136510, r=0.02;
+    const f=S.quarters[S.activeQuarter].financial;
+    const i1=Math.round(L*r), p1=pay-i1, bal1=L-p1;
+    const i2=Math.round(bal1*r), bal2=bal1-(pay-i2);
+    const arith = Math.abs(i1-12869)<=2 && Math.abs(i2-10396)<=2 && Math.abs(bal2-393678)<=5;
+    const actual=Math.round(f.loans||0);
+    const head = arith
+      ? `לוח הסילוקין עקבי: 2% על ${fmt(L)} = ${fmt(i1)} ריבית + ${fmt(p1)} קרן = ${fmt(pay)}, יתרה ${fmt(bal1)}; ברבעון שאחריו ${fmt(i2)} ריבית ויתרה ${fmt(bal2)} — בדיוק המספרים שבתוכנית.`
+      : `אריתמטיקת הסילוקין בתוכנית אינה מסתדרת מול 2% לרבעון.`;
+    if(!actual) return {state:'na', txt:`${head} אך לא הוזנה יתרת הלוואה ב-${S.activeQuarter}, ולכן אין מול מה לאמת אותו.`};
+    const match=Math.abs(actual-L)<=1000;
+    return {state: (arith&&match)?'ok':(arith?'warn':'block'),
+      txt:`${head} ${match?`היתרה בפועל ${fmt(actual)} SF תואמת.`:`אך היתרה בפועל היא ${fmt(actual)} SF ולא ${fmt(L)} — לוח התשלומים כולו זז.`}`};
+  },
+  // Data Log 07 supplier-credit rate, against the plan's 28,508 EUR
+  supplierInterest(){
+    const t=DATALOG.interest.supplierCredit, principal=475139;
+    const rate = principal>=t.switchover.europe ? t.above.europe : t.below.europe;
+    const calc=Math.round(principal*rate/100);
+    const ok=Math.abs(calc-28508)<=50;
+    return {state: ok?'ok':'warn',
+      txt:`Data Log 07: אשראי ספקים באירופה מתחת ל-${fmt(t.switchover.europe)} EUR נושא ${t.below.europe}% לרבעון (מעליו ${t.above.europe}%). ${fmt(principal)} × ${rate}% = ${fmt(calc)} EUR${ok?' — בדיוק הסכום שבתוכנית. דחיית הקרן לרבעון עולה את זה ולא יותר.':` — התוכנית כותבת 28,508.`}`};
+  },
+  hqTransfer(){
+    const fx=fxRate('EUR'), sf=Math.round(400000*fx);
+    return {state: sf===600000?'ok':'warn',
+      txt:`400,000 EUR × ${fx} SF/EUR = ${fmt(sf)} SF${sf===600000?' — תואם.':` — התוכנית כותבת 600,000 SF, כלומר שער ${(600000/400000).toFixed(2)}.`}`};
+  },
+  rdFloors(){
+    const X=DATALOG.rdMinPerQuarter.X, Y=DATALOG.rdMinPerQuarter.Y;
+    const ok = X===40000 && Y===70000;
+    return {state: ok?'ok':'warn',
+      txt:`Data Log 06: הרצפה החוקית לרבעון היא ${fmt(X)} SF לשבב ו-${fmt(Y)} SF למחשב. ${ok?'המספרים שהתוכנית מכנה "רצפה" הם בדיוק אלה.':'התוכנית מניחה 40,000/70,000 — ב-Data Log רשומים מספרים אחרים.'} רבעון ללא מימון מאפס את הרמפה (§4.3).`};
+  },
+  // the plan's own correction #3: a PC grade costs ~650,000 SF and arrives a quarter late
+  rdRamp(){
+    const need=rdQuartersForNextGrade(0), decayed=rdQuartersForNextGrade(1);
+    return {state:'warn',
+      txt:`המנוע מודל את אותה תופעה כרמפה ולא כמחיר: הדרגה הראשונה דורשת ${need} רבעונים ממומנים ברצף, השנייה ${decayed}, וההסתברות מתאפסת אחרי כל פטנט (R-15, §4.3). התוכנית מתרגמת זאת לסכום מצטבר (~650,000 SF) ולהשהיה של רבעון — אותה מסקנה, יחידת מדידה אחרת. שתיהן אומרות: רבעון שבו המו״פ לא מומן מוחק את ההתקדמות.`};
+  },
+  rdChipGrade(){
+    const op=S.quarters[S.activeQuarter].operational, now=op.techX||0;
+    if(now>=3) return {state:'ok', txt:`דרגת השבב בפועל היא X${now} — היעד שהתוכנית מציבה ל-Q4 כבר הושג.`};
+    const gap=3-now, qs=rdQuartersForGrades(gap,0);
+    return {state:'warn',
+      txt:`בפועל X${now}; התוכנית מניחה X3 בסוף Q4 — ${gap} ${gap===1?'דרגה':'דרגות'} ברבעון אחד. לפי הרמפה שהמנוע מודד נדרשים ${qs} רבעונים ממומנים ברצף. זהו בדיוק הסיכון שהתוכנית עצמה מכנה "כשל מו״פ X3", והחוזה תלוי בו.`};
+  },
+  mr24(){
+    const br=optimalCapacity('Y','brazil'), eu=optimalCapacity('Y','europe');
+    if(br.known&&eu.known) return {state:'ok', txt:`MR24 הוזן: אופטימום ${fmt(eu.units)} יח׳ באירופה ו-${fmt(br.units)} בברזיל. תקרת ה-14,000 של התוכנית נמדדת מולם ולא מוערכת.`};
+    return {state:'warn',
+      txt:`MR24 טרם הוזן, ולכן המנוע עדיין עובד על אומדן כיוון בלבד (אירופה ~${fmt(eu.units||0)}, ברזיל ~${fmt(br.units||0)} יח׳ למפעל). התוכנית עצמה תולה 70% מהרווח בתקרה של 14,000 בברזיל — זו הרכישה שהופכת את המספר הזה מהערכה לידיעה, והיא הראשונה ברשימה מסיבה טובה.`};
+  },
+  // Data Log 05 freight, computed by the engine rather than restated
+  freightBrazil(){
+    let lc=null; try{ lc=freightCostLC('europe','brazil','Y',14000,'surface'); }catch(e){}
+    if(lc==null) return {state:'na', txt:'לא ניתן לחשב עלות שינוע מהמנוע.'};
+    const sf=Math.round(lc*fxRate('EUR')), ok=Math.abs(lc-270000)<=1000;
+    const air=(()=>{ try{ return freightCostLC('europe','brazil','Y',14000,'air'); }catch(e){ return null; } })();
+    return {state: ok?'ok':'warn',
+      txt:`Data Log 05 דרך המנוע: שינוע יבשתי של 14,000 מחשבים אירופה→ברזיל = ${fmt(lc)} EUR (${fmt(sf)} SF)${ok?' — בדיוק 270,000 EUR כפי שהתוכנית מפרקת ל-4,000×30 + 10,000×15.':` — התוכנית כותבת 270,000 EUR.`}${air!=null?` הטסה של אותה כמות: ${fmt(air)} EUR, פי ${(air/lc).toFixed(1)}.`:''}`};
+  },
+  carrying(){
+    const eu=DATALOG.carryingCostPerUnit.Y.europe;
+    const calc=Math.round(5000*eu), ok=Math.abs(calc-40000)<=100;
+    return {state: ok?'warn':'block',
+      txt:`Data Log 06: ${eu} EUR ליחידת מחשב באירופה × 5,000 = ${fmt(calc)} EUR${ok?' — תואם את שורת הרצפה.':` מול ${fmt(40000)} בתוכנית.`} <b>אבל</b> התוכנית עצמה מסייגת (תיקון 4): זהו היסוד הליניארי בלבד, והחיוב האמיתי מואץ עם הכמות. המספר הזה הוא רצפה של עלות, לא אומדן שלה.`};
+  },
+  carryCompare(){
+    const t=DATALOG.carryingCostPerUnit.Y;
+    const eu=t.europe*fxRate('EUR'), br=t.brazil*fxRate('BRL'), us=t.us*fxRate('USD');
+    const cheapest = (br<=eu&&br<=us) ? 'ברזיל' : (eu<=us?'אירופה':'ארה״ב');
+    return {state: cheapest==='ברזיל'?'ok':'block',
+      txt:`Data Log 06 בפרנקים: אירופה ${t.europe} EUR = ${eu} SF · ברזיל ${t.brazil} BRL = ${br} SF · ארה״ב ${t.us} USD = ${us} SF. הזול ביותר הוא <b>${cheapest}</b>${cheapest==='ברזיל'?' — בדיוק כפי שתיקון 7 קובע. פיצול מלאי בין שני אזורים אכן זול מריכוזו באירופה.':' — מה שסותר את תיקון 7.'}`};
+  },
+  chipPair(){
+    const M=DATALOG.chipPerPC;
+    const x3y1=M[3][1], x3y2=M[3][2], x2y2=M[2][2], x4y3=M[4][3];
+    const claim = x3y1===1 && x3y2===1 && x2y2===2 && x4y3===1;
+    return {state: claim?'ok':'block',
+      txt:`Data Log 02 (מטריצת שבבים למחשב): X3→Y1 = ${x3y1} · X3→Y2 = ${x3y2} · X4→Y3 = ${x4y3} · X2→Y2 = ${x2y2}. ${claim?'הזוגות שהתוכנית מכנה "יעילים" הם אכן 1:1, והאזהרה נכונה — Y2 על X2 דורש שני שבבים ומוחק את הרווח.':'הזוגות בתוכנית אינם תואמים את המטריצה — יש לבדוק מחדש את לוח הדרגות.'}`};
+  },
+  capacityY(){
+    const c=capacityForProduct('Y');
+    if(!c.known) return {state:'na', txt:'פילוח המפעלים X/Y לא הוצהר, ולכן אין קיבולת מחשבים לבדוק מולה. הצהירו אותו בלשונית הנתונים.'};
+    const need=36000, ok=c.units>=need;
+    return {state: ok?'ok':'block',
+      txt:`קיבולת המחשבים המוצהרת: ${fmt(c.units)} יח׳/רבעון. התוכנית מקצה 14,000 לברזיל + 22,000 לאירופה = ${fmt(need)}${ok?` — נכנס, עם ${fmt(c.units-need)} יח׳ מרווח. הקביעה "אין צורך במפעל רביעי" עומדת.`:` — חסרות ${fmt(need-c.units)} יח׳ קיבולת. או מפעל נוסף, או קיצוץ באחד השווקים.`}`};
+  },
+  productionQ4(){
+    const cx=capacityForProduct('X'), cy=capacityForProduct('Y');
+    const parts=[];
+    let st='ok';
+    if(cx.known){ const ok=cx.units>=52000; if(!ok) st='block';
+      parts.push(`שבבים: ${fmt(52000)} מתוכננים מול קיבולת ${fmt(cx.units)} — ${ok?'נכנס':`חסרות ${fmt(52000-cx.units)} יח׳`}`); }
+    else { st='na'; parts.push('קיבולת שבבים לא ידועה — פילוח המפעלים לא הוצהר'); }
+    if(cy.known){ const ok=cy.units>=22000; if(!ok&&st!=='na') st='block';
+      parts.push(`מחשבים: ${fmt(22000)} מול קיבולת ${fmt(cy.units)} — ${ok?'נכנס':`חסרות ${fmt(22000-cy.units)} יח׳`}`); }
+    else if(st!=='na'){ st='na'; parts.push('קיבולת מחשבים לא ידועה'); }
+    const M=DATALOG.chipPerPC;
+    parts.push(`צימוד: 22,000 מחשבי Y1 על שבבי X2 דורשים ${M[2][1]} שבבים ליחידה = ${fmt(22000*M[2][1])} — התוכנית מקצה 22,000 לצריכה עצמית${M[2][1]===1?', כלומר 1:1 ✓':' — לא מספיק'}`);
+    if(M[2][1]!==1&&st==='ok') st='block';
+    return {state:st, txt:parts.join('. ')+'.'};
+  },
+  productionQ5(){
+    const cx=capacityForProduct('X'), M=DATALOG.chipPerPC;
+    const need=62000;
+    if(!cx.known) return {state:'na', txt:`62,000 שבבי X3 מתוכננים; פילוח המפעלים לא הוצהר ולכן אין קיבולת שבבים לבדוק מולה.`};
+    const ok=cx.units>=need;
+    return {state: ok?'ok':'block',
+      txt:`62,000 שבבי X3 מול קיבולת ${fmt(cx.units)} — ${ok?`נכנס (${fmt(cx.units-need)} מרווח)`:`חסרות ${fmt(need-cx.units)} יח׳`}. מתוכם 30,000 לחוזה Q6 ו-32,000 לצריכת המחשבים; ביחס X3→Y1 של ${M[3][1]}:1 זה מכסה ${fmt(Math.floor(32000/(M[3][1]||1)))} מחשבים מול 22,000 שהתוכנית מייצרת.`};
+  },
+  contract(){
+    let cs=[]; try{ cs=contractPlan(); }catch(e){ return {state:'na', txt:'לא ניתן לחשב את מצב ההתחייבויות.'}; }
+    if(!cs.length) return {state:'na', txt:'לא הוגדרו התחייבויות חוזיות בפרמטרים, ולכן אין מה לבדוק מול סעיף 5.'};
+    const bad=cs.filter(c=>c.gap>0);
+    return {state: bad.length?'block':'ok',
+      txt: bad.length
+        ? bad.map(c=>`${c.prod}${c.grade} ל-${c.deliveryQuarter}: חסרות ${fmt(c.gap)} יח׳, מועד הייצור ${c.productionQuarter}${c.startNow?' — כלומר עכשיו':''}`).join(' · ')+'. התוכנית מניחה שהאספקה מכוסה מהמלאי שיוצר ברבעון הקודם; המנוע לא מוצא אותו.'
+        : cs.map(c=>`${c.prod}${c.grade} ל-${c.deliveryQuarter} — מכוסה מהמלאי`).join(' · ')+'.'};
+  },
+  noNewLoans(){
+    const f=S.quarters[S.activeQuarter].financial, L=Math.round(f.loans||0);
+    if(!L) return {state:'ok', txt:'אין חוב רשום — הקו האדום של התוכנית נשמר.'};
+    const spitzer=643433;
+    return {state: L<=spitzer+1000?'ok':'block',
+      txt: L<=spitzer+1000
+        ? `${fmt(L)} SF — יתרת השפיצר בלבד, ללא הלוואה חדשה. הקו האדום נשמר.`
+        : `${fmt(L)} SF חוב מול ${fmt(spitzer)} של השפיצר — ${fmt(L-spitzer)} SF מעבר לתוכנית. כל הלוואה חדשה סותרת את הקו האדום שלה.`};
+  },
+  brazilCash(){
+    const c=Math.round(S.quarters[S.activeQuarter].financial.cash.brazil||0), need=1600000;
+    if(!c) return {state:'na', txt:`לא הוזן מזומן בברזיל ל-${S.activeQuarter} — אין מול מה לבדוק העברה של ${fmt(need)} BRL.`};
+    return {state: c>=need?'ok':'block',
+      txt: c>=need
+        ? `בקופת ברזיל ${fmt(c)} BRL — מספיק להעברה של ${fmt(need)}, ונשארים ${fmt(c-need)} BRL לסוכנים ולפרסום ב-Q5, בדיוק כפי שהתוכנית מתכננת.`
+        : `בקופת ברזיל ${fmt(c)} BRL בלבד; התוכנית מעבירה ${fmt(need)} — חסרים ${fmt(need-c)} BRL. וגם: שאלת ה-CAPITAL TRANSFER TAX למרצה עדיין פתוחה.`};
+  },
+  // the finding that costs the most: Data Log 04 selling cost vs the plan's channel figure
+  channelCost(){
+    const T=DATALOG.sellingCostPerUnit;
+    const euY=T.yOnly.europe, euBoth=T.xyY.europe, brY=T.yOnly.brazil;
+    const euSF=euY*fxRate('EUR'), euBothSF=euBoth*fxRate('EUR'), brSF=brY*fxRate('BRL');
+    const brOk=Math.abs(brSF-80)<=1;
+    const euGap=Math.round(Math.min(euSF,euBothSF)-18);
+    return {state: euGap>5?'block':'ok',
+      txt:`Data Log 04, עלות מכירה ליחידה: אירופה ${euY} EUR למוכר מחשבים בלבד (= ${euSF} SF) או ${euBoth} EUR למוכר שני מוצרים (= ${euBothSF} SF); ברזיל ${brY} BRL (= ${brSF} SF). הטבלה בתוכנית רושמת <b>80 SF לברזיל</b>${brOk?' — תואם בדיוק':' — לא תואם'}, אבל <b>18 SF לאירופה</b>, שהם ${euGap>0?`${fmt(euGap)} SF ליחידה פחות`:'לא פחות'} ממה שה-Data Log קובע. על 22,000 יחידות לרבעון זה ${fmt(Math.abs(euGap)*22000)} SF — התרומה של אירופה (45.4 SF ליחידה) קטנה בהתאם, ופער ברזיל↔אירופה גדול <b>יותר</b> ולא פחות. המסקנה של התוכנית מתחזקת; המספר שלה לאירופה לא.`};
+  },
+  brazilPriceCap(){
+    const cap=DATALOG.maxPCPriceY0toY3;
+    const planned=[800,880,950,1050], over=planned.filter(p=>p>cap);
+    return {state: over.length?'block':'ok',
+      txt:`Data Log 04/10: המחיר המקסימלי למחשב בדרגות Y0–Y3 הוא ${fmt(cap)} BRL. התוכנית מתמחרת ${planned.map(p=>fmt(p)).join(' → ')} ${over.length?`— ${over.map(p=>fmt(p)).join(', ')} מעל התקרה`:`— כולם מתחת לתקרה, הגבוה שבהם ב-${Math.round((1-1050/cap)*100)}% מתחתיה. יש מרווח להעלאה אם הביקוש יאשר.`}`};
+  },
+  brazilVolume(){
+    const price=800*fxRate('BRL');
+    let dc=null; try{ dc=demandCeiling('brazil','Y',price); }catch(e){}
+    if(!dc) return {state:'na', txt:'לא ניתן לחשב תקרת ביקוש לברזיל.'};
+    const need=14000, ok=dc.units>=need;
+    return {state: ok?(dc.calibrated?'ok':'warn'):'block',
+      txt:`${dc.src}. התוכנית מוכרת ${fmt(need)} יח׳ — ${ok?'בתוך התקרה':`מעל התקרה ב-${fmt(need-dc.units)} יח׳`}. ${dc.calibrated?'':'<b>התקרה עדיין לא נמדדה</b> — MR24 הוא מה שהופך אותה למספר. וזו ההנחה שעליה תלויים 70% מהרווח בתוכנית.'}`};
+  },
+  europeVolume(){
+    let a=null,dc=null; try{ a=priceAnchors('europe','Y'); dc=demandCeiling('europe','Y',(a&&a.base)||120*fxRate('EUR')); }catch(e){}
+    if(!dc) return {state:'na', txt:'לא ניתן לחשב תקרת ביקוש לאירופה.'};
+    const peak=23000, ok=dc.units>=peak;
+    return {state: ok?(dc.calibrated?'ok':'warn'):'warn',
+      txt:`${dc.src}. הנפח הגבוה ביותר שהתוכנית מוכרת באירופה הוא ${fmt(peak)} יח׳ (Q5) — ${ok?'בתוך התקרה':`מעל התקרה ב-${fmt(peak-dc.units)} יח׳; התוכנית תולה זאת באפקט שני הדגמים, שהמנוע אינו מודד בנפרד`}. ${dc.calibrated?'':'התקרה עדיין אינה מכוילת מתצפיות.'}`};
+  },
+  brazilBonds(){
+    const g=DATALOG.interest.govSecurities.brazil, loan=DATALOG.interest.supplierCredit.below.europe;
+    const right = loan>g;
+    return {state: right?'ok':'warn',
+      txt:`Data Log 07: אג״ח ממשלת ברזיל ${g}% לרבעון מול אשראי ספקים באירופה ${loan}%. ${right?`ההיררכיה שהתוכנית קובעת נכונה — חיסול חוב ב-${loan}% שווה יותר מהשקעה ב-${g}%, ולכן ההשקעה רק אחרי שאירופה נקייה.`:'ההיררכיה בתוכנית אינה נגזרת מהמספרים האלה.'}`};
+  },
+  stockAllocation(){
+    const op=S.quarters[S.activeQuarter].operational;
+    const y=(op.inventory||[]).filter(i=>(i.product||'Y')==='Y').reduce((a,i)=>a+(i.qty||0),0);
+    if(!y) return {state:'na', txt:'לא הוזן מלאי מחשבים לרבעון הבסיס, ולכן אין מול מה לבדוק את הקצאת 35,000 היחידות.'};
+    const ok=Math.abs(y-35000)<=500;
+    return {state: ok?'ok':'warn',
+      txt:`במלאי בפועל ${fmt(y)} מחשבים${ok?' — התוכנית מקצה בדיוק את הכמות הזו (16,000 + 14,000 + 5,000).':` — התוכנית מקצה 35,000, פער של ${fmt(Math.abs(y-35000))} יח׳. ההקצאה כולה זזה.`}`};
+  },
+  cashBreach(){
+    let w=null; try{ w=whatBreaksFirst(S.activeQuarter, (S.scenarios[0]||{}).levers||null); }catch(e){}
+    if(!w) return {state:'na', txt:'לא ניתן להריץ את חיזוי התזרים.'};
+    if(w.ok) return {state:'ok', txt:'החיזוי אינו מוצא רבעון שנשבר — הטריגר הזה כבוי כרגע.'};
+    return {state:'block',
+      txt:`החיזוי שובר ב-<b>${w.q}</b>, פער ${fmt(w.gap)} SF. הטריגר של התוכנית פעיל <b>עכשיו</b>, וסדר הקיצוץ שהיא קובעת (פרסום → שיפור שיטות → ייצור → מו״פ מחשבים, כשמו״פ שבבים והשפיצר מוגנים) הוא מה שיש להפעיל — לא הלוואה.`};
+  },
+  floorQ4(){ return PLAN_V6_CHECKS._floor(2942061,'Q4'); },
+  floorQ5(){ return PLAN_V6_CHECKS._floor(4272954,'Q5'); },
+  _floor(planTotal,label){
+    let fc=null; try{ fc=floorComponents(S.activeQuarter); }catch(e){}
+    if(!fc) return {state:'na', txt:'לא ניתן לגזור רצפה מהמצב הנוכחי.'};
+    const d=fc.total-planTotal, pct=planTotal?Math.abs(d)/planTotal*100:0;
+    return {state: pct<=15?'ok':'warn',
+      txt:`המנוע גוזר רצפה של ${fmt(fc.total)} SF מהמצב בפועל (מתוכם ${fmt(fc.mandatory)} בלתי-נמנעים) מול ${fmt(planTotal)} SF שהתוכנית מחשבת ל-${label} — פער ${d>=0?'+':''}${fmt(d)} (${pct.toFixed(0)}%). הגדרות שונות: התוכנית סופרת בתוך הרצפה גם A/P, שינוע וייצור לחוזה, שהמנוע סופר בנפרד כדי לא לנכות פעמיים את מה שההחלטות עצמן מקצות. פער אינו בהכרח סתירה — אבל הוא כן אומר שאין להשוות את שני המספרים ישירות.`};
+  },
+};
+function planV6Check(id){
+  if(!id) return {state:'na', txt:'פעולת הזנה — אין לה מדד במנוע. בצעו אותה לפי התוכנית.'};
+  const fn=PLAN_V6_CHECKS[id];
+  if(typeof fn!=='function') return {state:'na', txt:'אין בדיקה רשומה לשורה הזו.'};
+  try{ return fn(); }catch(e){ return {state:'na', txt:'הבדיקה נכשלה על המצב הנוכחי: '+(e&&e.message||e)}; }
+}
+/* Which block of the plan governs the quarter being decided. Q4 and Q5 have their own
+   chronologies; from Q6 the plan is one repeating steady state, and says so. */
+function planV6For(targetQ){
+  if(PLAN_V6.quarters[targetQ]) return {key:targetQ, label:targetQ, ...PLAN_V6.quarters[targetQ]};
+  if(qIndex(targetQ)>=qIndex('Q6')) return {key:'steady', label:PLAN_V6.steady.label, ...PLAN_V6.steady};
+  return null;
+}
+function planV6Tally(actions){
+  const t={ok:0,warn:0,block:0,na:0};
+  actions.forEach(a=>{ t[planV6Check(a.check).state]++; });
+  return t;
+}
+function planV6Row(a, idx){
+  const v=planV6Check(a.check);
+  return `<tr>
+    <td class="num" style="opacity:.6">${a.n!=null?a.n:(idx+1)}</td>
+    <td style="text-align:start;white-space:normal;min-width:190px"><b>${esc(a.what)}</b>
+      <div class="small muted" style="white-space:normal;line-height:1.6;margin-top:3px">${esc(a.value||'')}</div></td>
+    <td style="white-space:nowrap">${a.form&&a.form!=='—'?`<span class="form">${esc(a.form)}</span>`:'<span class="small muted">—</span>'}</td>
+    <td style="text-align:start;white-space:normal;min-width:230px">
+      ${planV6Mark(v.state)}
+      <div class="small" style="white-space:normal;line-height:1.7;margin-top:4px;color:var(--muted)">${v.txt}</div></td>
+  </tr>`;
+}
+/* The written plan as the baseline of the decisions tab. It does NOT replace the engine's own
+   list below it — the two are deliberately separate: this is what the team committed to on
+   paper, and beside every line, whether the engine can still stand behind it today. */
+function renderPlanV6(base, targetQ){
+  const blk=planV6For(targetQ);
+  if(!blk) return '';
+  const tally=planV6Tally(blk.actions);
+  const gradeRow=PLAN_V6.grades.find(g=>g.q===targetQ);
+  const op=S.quarters[base].operational;
+  const floorChk=blk.key==='Q4'?planV6Check('floorQ4'):(blk.key==='Q5'?planV6Check('floorQ5'):null);
+  const loans=planV6Check('noNewLoans'), breach=planV6Check('cashBreach');
+  const sum=(k)=>tally[k];
+  return `<div class="read" style="margin-bottom:16px">
+    <div class="between" style="flex-wrap:wrap;gap:8px">
+      <span class="rh">${IC('clipboard')} התוכנית הכתובה — גרסה ${PLAN_V6_VERSION} · ${esc(blk.label)}</span>
+      <span class="small" style="display:flex;gap:12px;flex-wrap:wrap">
+        ${['ok','warn','block','na'].map(k=>`<span class="pv6 ${k}">${PLAN_V6_STATES[k].glyph} <b class="num">${sum(k)}</b> ${PLAN_V6_STATES[k].label}</span>`).join('')}
+      </span>
+    </div>
+    <div class="small muted" style="margin-top:7px;line-height:1.8">
+      <b style="color:var(--txt)">${esc(PLAN_V6.headline)}</b> — ${esc(blk.subtitle||'')}.
+      זהו הבסיס שהצוות כתב, ולצד כל שורה מה שהמנוע יכול לומר עליה <b>היום</b>.
+      <b>"לא נבדק" אינו אישור</b> — הוא אומר שאין לשורה מדד במנוע.
+      רשימת ההחלטות שהמנוע בונה בעצמו נמצאת בהמשך העמוד, והיא לא מוחלפת בזו.
+    </div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+      <span class="tag ${PLAN_V6_STATES[loans.state].tag}">חוב: ${PLAN_V6_STATES[loans.state].label}</span>
+      <span class="tag ${PLAN_V6_STATES[breach.state].tag}">תזרים: ${PLAN_V6_STATES[breach.state].label}</span>
+      ${gradeRow?`<span class="tag ${(op.techX||0)>=parseInt((gradeRow.grade.match(/X(\d)/)||[])[1]||0)?'g':'a'}">דרגות בפועל X${op.techX||0}/Y${op.techY||0} · יעד ${esc(gradeRow.grade)}</span>`:''}
+    </div>
+    <div style="overflow-x:auto;margin-top:12px"><table class="tbl compact">
+      <thead><tr><th>#</th><th>הפעולה לפי התוכנית</th><th>טופס</th><th>מה המנוע אומר עליה</th></tr></thead>
+      <tbody>${blk.actions.map(planV6Row).join('')}</tbody></table></div>
+    ${gradeRow?`<div class="small muted" style="margin-top:10px;line-height:1.8">${IC('cpu')} <b>לוח הדרגות ל-${esc(gradeRow.q)}:</b>
+      מו״פ שבבים <b class="num">${fmt(gradeRow.rdX)}</b> SF · מחשבים <b class="num">${fmt(gradeRow.rdY)}</b> SF · דרגה בסוף <b>${esc(gradeRow.grade)}</b> ·
+      ייצור <b>${esc(gradeRow.produce)}</b> · אירופה ${esc(gradeRow.europe)} · ברזיל ${esc(gradeRow.brazil)}.</div>`:''}
+    <details class="fverd" style="margin-top:12px"><summary>${IC('dollar')} רצפת הרבעון לפי התוכנית — ${blk.floorTotal?fmt(blk.floorTotal)+' SF':'טווח'} ⌄</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact">
+        <thead><tr><th>רכיב</th><th>סכום</th><th>ב-SF</th><th>מקור</th></tr></thead><tbody>
+        ${blk.floor.map(r=>`<tr><td style="text-align:start;white-space:normal">${esc(r[0])}</td>
+          <td class="small" style="text-align:start;white-space:nowrap">${esc(r[1]||'')}</td>
+          <td class="num">${r[2]?fmt(r[2]):'—'}</td>
+          <td class="small muted" style="text-align:start;white-space:normal">${esc(r[3]||'')}</td></tr>`).join('')}
+        ${blk.floorTotal?`<tr style="background:rgba(139,124,255,.08)"><td><b>סה״כ לפי התוכנית</b></td><td></td><td class="num"><b>${fmt(blk.floorTotal)}</b></td><td></td></tr>`:''}
+      </tbody></table></div>
+      <div class="small muted" style="margin-top:8px;line-height:1.7"><b>מקורות לפי התוכנית:</b> ${esc(blk.sources)}</div>
+      ${floorChk?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.7;background:var(--bg2);border:1px solid var(--line)">
+        ${planV6Mark(floorChk.state)} ${floorChk.txt}</div>`:''}
+    </details>
+    ${blk.close?`<details class="fverd" style="margin-top:8px"><summary>${IC('trendUp')} מצב הסגירה שהתוכנית מבטיחה ⌄</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact"><tbody>
+        ${blk.close.map(r=>`<tr>${r.map((cell,i)=>`<td style="text-align:start;white-space:normal"${i===0?'':' class="small"'}>${i===0?`<b>${esc(cell)}</b>`:esc(cell)}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div>
+      ${blk.closeNote?`<div class="small muted" style="margin-top:8px;line-height:1.7">${esc(blk.closeNote)}</div>`:''}</details>`:''}
+    <details class="fverd" style="margin-top:8px"><summary>${IC('warn')} טריגרי הסיכון — ומה מהם פעיל עכשיו ⌄</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact">
+        <thead><tr><th>סיכון</th><th>טריגר מדיד</th><th>התאמה מיידית</th><th>רבעון אחרון</th><th>מדידה</th></tr></thead><tbody>
+        ${PLAN_V6.risks.map(r=>{ const v=planV6Check(r.check);
+          return `<tr><td style="text-align:start;white-space:normal"><b>${esc(r.risk)}</b></td>
+            <td class="small" style="text-align:start;white-space:normal">${esc(r.trigger)}</td>
+            <td class="small" style="text-align:start;white-space:normal">${esc(r.fix)}</td>
+            <td class="small">${esc(r.last)}</td>
+            <td style="text-align:start;white-space:normal">${planV6Mark(v.state)}
+              <div class="small muted" style="line-height:1.6;margin-top:3px;max-width:320px">${r.check?v.txt:'הטריגר נמדד מדוח שוק ולא מהמנוע.'}</div></td></tr>`; }).join('')}
+      </tbody></table></div></details>
+    <details class="fverd" style="margin-top:8px"><summary>${IC('book')} הרקע שהתוכנית עומדת עליו — שבעת התיקונים, ברזיל, והקצאת המלאי ⌄</summary>
+      <div class="small muted" style="margin-top:8px;line-height:1.8"><b>${IC('warn')} ההסתייגות של התוכנית עצמה:</b> ${esc(PLAN_V6.caveat)}</div>
+      <div style="overflow-x:auto;margin-top:10px"><table class="tbl compact">
+        <thead><tr><th>#</th><th>מה היה שגוי</th><th>העובדה שנמצאה</th><th>ההשלכה</th><th>המנוע</th></tr></thead><tbody>
+        ${PLAN_V6.corrections.map(c=>{ const v=planV6Check(c.check);
+          return `<tr><td class="num" style="opacity:.6">${c.n}</td>
+            <td class="small" style="text-align:start;white-space:normal">${esc(c.was)}</td>
+            <td class="small" style="text-align:start;white-space:normal">${esc(c.found)}</td>
+            <td class="small" style="text-align:start;white-space:normal">${esc(c.impact)}</td>
+            <td style="text-align:start;white-space:normal">${planV6Mark(v.state)}
+              <div class="small muted" style="line-height:1.6;margin-top:3px;max-width:300px">${c.check?v.txt:'—'}</div></td></tr>`; }).join('')}
+      </tbody></table></div>
+      <div style="overflow-x:auto;margin-top:12px"><table class="tbl compact">
+        <thead><tr><th>רכיב ליחידת מחשב</th><th>אירופה @ 120 EUR</th><th>ברזיל @ 800 BRL</th></tr></thead><tbody>
+        ${PLAN_V6.brazilMargin.rows.map(r=>`<tr><td style="text-align:start">${esc(r[0])}</td><td class="num">${esc(r[1])}</td><td class="num">${esc(r[2])}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="small muted" style="margin-top:8px;line-height:1.8">${esc(PLAN_V6.brazilMargin.note)}</div>
+      ${(()=>{ const v=planV6Check(PLAN_V6.brazilMargin.check);
+        return `<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.7;background:var(--bg2);border:1px solid var(--line)">
+          ${planV6Mark(v.state)} ${v.txt}</div>`; })()}
+      <div style="overflow-x:auto;margin-top:12px"><table class="tbl compact">
+        <thead><tr><th>יעד</th><th>כמות</th><th>רבעון מכירה</th><th>מחיר</th><th>ערוץ</th><th>תרומה ליח׳ (SF)</th><th>סה״כ (SF)</th></tr></thead><tbody>
+        ${PLAN_V6.allocation.rows.map(r=>`<tr>${r.map((cell,i)=>`<td${i===0?' style="text-align:start"':' class="num"'}>${esc(cell)}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div>
+      <div class="small muted" style="margin-top:8px;line-height:1.8">${esc(PLAN_V6.allocation.note)}</div>
+      <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')} ${esc(PLAN_V6.gradeRule)}</div>
+      <div class="small" style="margin-top:10px;padding:9px 11px;border-radius:8px;line-height:1.7;background:rgba(255,176,32,.09);border:1px solid rgba(255,176,32,.28)">
+        ${IC('warn')} <b>השאלה שנותרה למרצה לפני הגשת Q4:</b> ${esc(PLAN_V6.question)}</div>
+    </details>
+    <details class="fverd" style="margin-top:8px"><summary>${IC('trendUp')} סיכום פיננסי Q4→Q9 לפי התוכנית ⌄</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact">
+        <thead><tr><th>רבעון</th><th>אירופה (יח׳)</th><th>ברזיל (יח׳)</th><th>חוזה/רישוי</th><th>נקי אירופה</th><th>נקי ברזיל</th><th>מטה (SF)</th><th>מאוחד (SF)</th><th>עודפים (SF)</th></tr></thead><tbody>
+        ${PLAN_V6.finance.map(r=>`<tr${r.q===targetQ?' style="background:rgba(139,124,255,.10)"':''}>
+          <td><b>${esc(r.q)}</b></td><td class="num">${esc(r.eu)}</td><td class="num">${esc(r.br)}</td>
+          <td class="small" style="text-align:start;white-space:normal">${esc(r.deal)}</td>
+          <td class="small num">${esc(r.netEU)}</td><td class="small num">${esc(r.netBR)}</td>
+          <td class="small num">${esc(r.hq)}</td>
+          <td class="num" style="color:${typeof r.consol==='number'?(r.consol<0?'var(--sig-block)':'var(--sig-ok)'):'inherit'}">${typeof r.consol==='number'?(r.consol>=0?'+':'')+fmt(r.consol):esc(r.consol)}</td>
+          <td class="num" style="color:${r.cum<0?'var(--sig-block)':'var(--sig-ok)'}">${r.cum>=0?'+':''}${fmt(r.cum)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="small muted" style="margin-top:8px;line-height:1.8">${esc(PLAN_V6.financeNote)}</div></details>
+  </div>`;
+}
+/* ==========================================================================
    THE WRITTEN PLAN (Q4-Q9 v5) — the team's own strategy document, embedded so the tool
    can hand it back and, more usefully, hand back an UPDATED copy in the same layout with
    an explicit record of what the engine now disagrees with.
@@ -5365,15 +5947,19 @@ const PLAN_DOC_VERSION = 5;
 const PLAN_DOC_FILE = 'docs/plan-Q4-Q9-v5.docx';
 
 /* What the engine now knows that the written plan predates. Each row is a concrete anchor
-   the plan states, checked against what the tool computes today. */
+   the plan states, checked against what the tool computes today.
+   The anchors are v6's, not v5's — v6 is the plan the team is running, and it is loaded as
+   structure in PLAN_V6 above (the .docx below is still v5, which is the last version the team
+   chose to publish). Where the two versions disagree, this table follows v6. */
 function planDeltas(){
   const base=S.activeQuarter, op=S.quarters[base].operational, f=S.quarters[base].financial;
   const rows=[]; const add=(topic,planned,now,changed,note)=>rows.push({topic,planned,now,changed,note});
-  // cash floor — the plan states a Q4 floor of 2,135,269 SF
+  // cash floor — v6 states a Q4 floor of 2,942,061 SF (v5 said 2,135,269; the difference is the
+  // Spitzer instalment, the second chip plant's depreciation and the freight to Brazil)
   let floorNow=null; try{ floorNow=floorComponents(base); }catch(e){}
   if(floorNow) add(`רצפת מזומן בסוף ${base} (מממנת את ${floorNow.fundsQuarter||'הרבעון הבא'})`,
-    '2,135,269 SF (תוכנית, לרבעון Q4)', fmt(floorNow.total)+' SF',
-    Math.abs(floorNow.total-2135269)>50000,
+    '2,942,061 SF (תוכנית v6, לרבעון Q4)', fmt(floorNow.total)+' SF',
+    Math.abs(floorNow.total-2942061)>50000,
     'המנוע גוזר את הרצפה מהמצב בפועל ומפרק אותה למרכיבים (לשונית יעדים). התוכנית כוללת בה גם תשלומי A/P שהמנוע סופר בנפרד — לכן פער אינו בהכרח סתירה, אלא הגדרה שונה של מה נכנס לרצפה.');
   // contracts
   contractPlan().forEach(c=>{
@@ -5385,8 +5971,9 @@ function planDeltas(){
       r?`מסלול מומלץ: ${r.best.name}`:'');
   });
   // technology
-  add('דרגת שבב (X)','X3 בסוף Q4 (תוכנית)','X'+(op.techX||0),(op.techX||0)<3,'דרגה עולה ≤1 לרבעון ומבשילה רבעון קדימה');
-  add('דרגת מחשב (Y)','Y2 בסוף Q5 (תוכנית)','Y'+(op.techY||0),false,'');
+  add('דרגת שבב (X)','X3 בסוף Q4 (תוכנית v6)','X'+(op.techX||0),(op.techX||0)<3,'דרגה עולה ≤1 לרבעון ומבשילה רבעון קדימה');
+  add('דרגת מחשב (Y)','Y2 בסוף Q6 (תוכנית v6)','Y'+(op.techY||0),false,
+    'v6 דחתה את דרגת המחשב מ-Q5 ל-Q6: תיקון 3 מצא שדרגת מחשב עולה ~650,000 SF ומגיעה בהשהיה של רבעון');
   // plants — the plan assumes two chip plants and two PC plants in Europe
   const cx=capacityForProduct('X'), cy=capacityForProduct('Y');
   add('מפעלים באירופה','2 שבבים + 2 מחשבים (תוכנית)',
@@ -5401,9 +5988,17 @@ function planDeltas(){
   const sp=scoreProxy(null);
   add('ציון Q9','—',`${sp.value.toFixed(0)}/100 · עבר ${sp.pastHalf.toFixed(0)} · עתיד ${sp.potentialHalf.toFixed(0)}`,false,
     'המחצית החלשה היא זו שכדאי להזיז');
-  // debt — the plan promises zero new loans
-  add('חוב','אפס הלוואות חדשות לאורך התוכנית',fmt(f.loans||0)+' SF בפועל',(f.loans||0)>0,
-    (f.loans||0)>0?'קו אדום של התוכנית — כל הלוואה חדשה סותרת אותו':'');
+  // Brazil — v6's whole thesis, and the assumption it warns about itself
+  const bdc=(()=>{ try{ return demandCeiling('brazil','Y',800*fxRate('BRL')); }catch(e){ return null; } })();
+  if(bdc) add('ספיגת שוק — מחשבים בברזיל','14,000 יח׳/רבעון מ-Q5 (תוכנית v6)',
+    fmt(bdc.units)+' יח׳/רבעון', !bdc.calibrated || bdc.units<14000,
+    bdc.calibrated?bdc.src:`${bdc.src}. התוכנית עצמה מסייגת: 70% מהרווח תלוי במספר הזה, ו-MR24 הוא מה שהופך אותו למדידה.`);
+  // debt — v6 keeps the Spitzer loan and amortises it; the red line is zero NEW loans
+  const spitzer=643433, L=Math.round(f.loans||0);
+  add('חוב','אפס הלוואות חדשות; שפיצר 643,433 SF נפרע ב-5 תשלומים Q4–Q8 (תוכנית v6)',
+    fmt(L)+' SF בפועל', L>spitzer+1000,
+    L>spitzer+1000?'קו אדום של התוכנית — כל הלוואה מעבר לשפיצר סותרת אותו'
+      :'v6 אינה פורעת את השפיצר מוקדם: 2% לרבעון היא הריבית הזולה במשחק');
   return rows;
 }
 function planDocHTML(mode){
@@ -5631,8 +6226,9 @@ function bodySubmit(c){
     <div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--purple)">
       <div class="between" style="flex-wrap:wrap;gap:8px">
         <div>
-          <b>${IC('clipboard')} תוכנית העל הכתובה — Q4→Q9 (גרסה ${PLAN_DOC_VERSION})</b>
-          <div class="small muted" style="margin-top:5px;line-height:1.7">המסמך המקורי של הצוות, ולצידו עותק מעודכן <b>באותו מבנה</b> שהמנוע מוסיף לו טבלת "מה השתנה" מול המצב בפועל.</div>
+          <b>${IC('clipboard')} תוכנית העל הכתובה — Q4→Q9 (מסמך גרסה ${PLAN_DOC_VERSION})</b>
+          <div class="small muted" style="margin-top:5px;line-height:1.7">המסמך המקורי של הצוות, ולצידו עותק מעודכן <b>באותו מבנה</b> שהמנוע מוסיף לו טבלת "מה השתנה" מול המצב בפועל.
+          <br>${IC('info')} <b>התוכנית הפעילה היא גרסה ${PLAN_V6_VERSION}</b>, והיא טעונה כמבנה בלשונית <b>ההחלטות הרבעוניות</b> — שם כל פעולה מוצגת לצד מה שהמנוע יכול לומר עליה. הקובץ להורדה כאן הוא גרסה ${PLAN_DOC_VERSION}, הגרסה האחרונה שהצוות בחר לפרסם; טבלת "מה השתנה" למטה כבר עובדת מול עוגני גרסה ${PLAN_V6_VERSION}.</div>
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <a class="btn" href="${PLAN_DOC_FILE}" download>${IC('download')} המקורי (.docx)</a>

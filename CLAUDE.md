@@ -40,8 +40,16 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **537 checks, 0 failures.** If the count drops, a suite stopped
-running rather than started passing — find out which.
+Measured baseline: **536 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+lines. Measure it the same way every time, or the comparison is meaningless:
+
+```
+bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
+```
+
+(Counting the `✓` lines instead gives **562**, because three suites print ticks without a PASS
+summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
+rather than started passing — find out which.
 
 ## The shell is six tabs
 
@@ -61,6 +69,28 @@ engine ignores.
 `tests/audit/` pins the findings in `docs/findings-v10.2.md`: one suite per wave, each
 asserting the behaviour its fix was verified against, so a later change cannot quietly
 reopen a closed finding.
+
+## The written plan lives in the decisions tab, as structure
+
+`PLAN_V6` encodes the team's plan Q4→Q9 (version 6) as data — the fifteen Q4 actions in order,
+the Q5 thirteen, the floor line items, the grade schedule, the per-quarter financials and the risk
+triggers — and `PLAN_V6_CHECKS` puts an engine verdict beside each line. Three rules hold there:
+
+- **Nothing is invented.** Every number on screen is the plan's own; the engine's number appears
+  next to it, never instead of it.
+- **`na` is not approval.** A line the engine cannot measure reports "not checked" and is counted
+  separately from "matches". A check that throws degrades to `na` too — `tests/audit/planv6.cjs`
+  asserts this by making one throw on purpose.
+- **The Data Log is the referee.** A check that tests a `[DL-xx]` claim reads the constant out of
+  `DATALOG` (or runs `freightCostLC` / `capacityForProduct`) instead of restating the prose.
+
+One verdict is a genuine disagreement and must stay loud: the plan's per-unit Europe channel cost
+of **18 SF** is below Data Log 04's selling cost of **40 EUR** (Y-only) or **33 EUR** (X+Y) — about
+**31 SF a unit**, ~690,000 SF a quarter at 22,000 units. It does not overturn the plan's Brazil
+conclusion — it widens the Brazil↔Europe gap — but Europe's 45.4 SF contribution is overstated.
+
+`PLAN_DOC` (v5) is still the *document* the submission tab hands back; v6 is deliberately **not**
+committed as a file. `planDeltas()` compares against v6's anchors.
 
 ## What is settled, and what the app still does not claim to know
 
