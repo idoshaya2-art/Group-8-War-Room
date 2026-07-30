@@ -467,7 +467,7 @@ button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v11.2 · מערכת עיצוב מלאה';
+const APP_VERSION = 'v11.3 · קיבולת מאומתת';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -508,7 +508,8 @@ const DATALOG = {
      18.000 on the Y row. Column positions were calibrated against the acquisition-cost table on
      the same page, where the mapping is unambiguous and matches plantAcqCost below exactly. On
      that calibration the three printed figures are X-US, Y-US and Y-EU. The other three below came
-     from the OCR-reconstructed xlsx, not from the printed page — see CAPACITY_UNVERIFIED. */
+     from an OCR reconstruction and were carried as unverified until the team confirmed all six
+     against their printed copy on 2026-07-30 — see CAPACITY_VERIFIED. */
   capacity:{ X:{ us:50000, europe:35000, brazil:12000 }, Y:{ us:25000, europe:18000, brazil:14000 } }, // 03 units/plant/Q
   plantAcqCost:{ X:{ us:2000000, europe:1000000, brazil:1600000 }, Y:{ us:1800000, europe:800000, brazil:1600000 } }, // 03 LC Q1
   plantFixedCost:{ X:{ us:[80000,110000,120000], europe:[40000,54000,64000], brazil:[60000,100000,120000] },
@@ -986,10 +987,13 @@ function est(html, why){ return `<span class="est" title="${esc(why||'אומדן
    source states it". Neither fits a number that came out of an OCR-reconstructed file and is NOT
    on the printed page — that is not an estimate, it is an unverified reading, and the difference
    matters when a plan is built on it. */
-const CAPACITY_UNVERIFIED={
-  X:{ europe:'הדף המודפס של Data Log 03 נושא שלושה מספרים בלבד בטבלת הקיבולת (50.000 · 25.000 · 18.000). 35,000 אינו מופיע בו — הוא הגיע מקובץ ה-xlsx ששוחזר ב-OCR.',
-      brazil:'12,000 אינו מופיע בדף המודפס של Data Log 03 — מקורו בשחזור ה-OCR.' },
-  Y:{ brazil:'14,000 אינו מופיע בדף המודפס של Data Log 03 — מקורו בשחזור ה-OCR.' } };
+/* CLOSED 2026-07-30. Three of the six figures could not be read off the printed page from here:
+   text extraction does not preserve the column alignment of that table, and the numbers sit
+   midway between two headings, so the mapping was a geometric inference rather than a reading.
+   The team confirmed all six against their own copy. The mechanism stays — the next figure that
+   arrives from a reconstruction rather than a source belongs here. */
+const CAPACITY_UNVERIFIED={};
+const CAPACITY_VERIFIED='כל ששת מספרי הקיבולת אומתו ע״י הצוות מול ה-Data Log המודפס (30/07/2026). שלושה מהם — X-אירופה, X-ברזיל, Y-ברזיל — הגיעו במקור משחזור OCR ולא ניתן היה לקרוא אותם מכאן, ולכן סומנו כלא-מאומתים עד לאישור.';
 const capUnverified=(product,rid)=>((CAPACITY_UNVERIFIED[product]||{})[rid])||null;
 /* Wrap a figure the sources do not confirm. Deliberately louder than `est`: an unverified number
    should look different from a calibrated one, because the fix is different (go read the page). */
@@ -6215,6 +6219,7 @@ function goalTab(t){
             <td class="small muted" style="text-align:start;white-space:normal">${r.declared?`X ${(r.x||0)?`${r.x}×${capacityFigure('X',r.rid)}`:'0'} · Y ${(r.y||0)?`${r.y}×${capacityFigure('Y',r.rid)}`:'0'} יח׳/רבעון${r.mismatch?` <b style="color:var(--red)">— סכום ${r.sum} ≠ ${r.total} בדוח</b>`:''}`:'לא הוצהר'}</td></tr>`).join('')}
         </tbody></table></div>
         ${(()=>{ const bad=[]; ['X','Y'].forEach(p=>REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const w=capUnverified(p,r.id); if(w) bad.push({p,r,w}); }));
+          if(!bad.length) return `<div class="note is-ok" style="margin-top:10px">${IC('check')} ${CAPACITY_VERIFIED}</div>`;
           return bad.length?`<div class="cb" style="margin-top:10px;border-inline-start:3px solid var(--red)"><div class="small" style="line-height:1.8">
             ${IC('warn')} <b style="color:var(--red)">${bad.length} מספרי קיבולת אינם מופיעים בדף המודפס של Data Log 03</b> — הם הגיעו מקובץ ה-xlsx ששוחזר ב-OCR. הדף המודפס נושא <b>שלושה</b> מספרים בטבלת הקיבולת: 50.000 · 25.000 · 18.000.
             <br>${bad.map(b=>`<b>${b.p} · ${b.r.name}</b> = ${unver(fmt((DATALOG.capacity[b.p]||{})[b.r.id]||0),b.w)}`).join(' · ')}

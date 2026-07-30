@@ -34,10 +34,18 @@ const r=await page.evaluate(()=>{
   o.r10={ hasRule:/רק בסוף הרבעון/.test(RULES.offices.changeTakesAQuarter),
     twoQ:/שני רבעונים/.test(RULES.offices.twoQuartersToEfficiency) };
   // ---- I-1 · unverified capacity figures are named, and only the unsourced ones
+  /* H-1 closed on 2026-07-30: the team confirmed all six capacity figures against their printed
+     Data Log, so the flagged set is empty. What still has to hold is the MECHANISM — a figure
+     listed as unverified must render with the marker, one that is not must render plain — so the
+     next reconstruction-sourced number cannot slip in silently. Tested against a temporary entry
+     rather than against a permanently-doubted figure. */
   o.i1={ flagged:Object.entries(CAPACITY_UNVERIFIED).flatMap(([p,m])=>Object.keys(m).map(r=>p+'-'+r)).sort(),
-    printedAreSilent:[capUnverified('X','us'),capUnverified('Y','us'),capUnverified('Y','europe')],
-    wrapsWithMarker:/class="unver"/.test(capacityFigure('X','europe')),
-    leavesSourcedPlain:!/class="unver"/.test(capacityFigure('X','us')) };
+    verifiedNote:typeof CAPACITY_VERIFIED==='string' && CAPACITY_VERIFIED.length>40,
+    plainWhenVerified:!/class="unver"/.test(capacityFigure('X','europe')),
+    marksWhenFlagged:(()=>{ CAPACITY_UNVERIFIED.X={europe:'בדיקה'};
+      const out=/class="unver"/.test(capacityFigure('X','europe')); delete CAPACITY_UNVERIFIED.X; return out; })(),
+    leavesOthersPlain:(()=>{ CAPACITY_UNVERIFIED.X={europe:'בדיקה'};
+      const out=!/class="unver"/.test(capacityFigure('X','us')); delete CAPACITY_UNVERIFIED.X; return out; })() };
   // ---- I-5 · MR29+MR30 are cheap; the booklet's cost column is what we hold
   o.i5={ mr29:MR_COST('MR29'), mr30:MR_COST('MR30'), mr24:MR_COST('MR24'), mr81:MR_COST('MR81'),
     mr3:MR_COST('MR3'), free:[MR_COST('MR17'),MR_COST('MR28'),MR_COST('MR74')] };
@@ -76,12 +84,12 @@ ck('R-49 · both booklet templates are itemised', r.r49.sale>=8 && r.r49.coop>=5
 ck('R-10 · a sales-organisation change takes effect only at quarter end', r.r10.hasRule===true);
 ck('R-10 · the two-quarter efficiency rule is encoded', r.r10.twoQ===true);
 
-ck('I-1 · exactly the three figures absent from the printed page are flagged',
-  JSON.stringify(r.i1.flagged)==='["X-brazil","X-europe","Y-brazil"]', r.i1.flagged.join(','));
-ck('I-1 · the three printed figures are NOT flagged',
-  r.i1.printedAreSilent.every(x=>x===null));
-ck('I-1 · an unverified figure renders with the marker', r.i1.wrapsWithMarker===true);
-ck('I-1 · a sourced figure renders plain', r.i1.leavesSourcedPlain===true);
+ck('H-1 · no capacity figure is left unverified — the team confirmed all six',
+  r.i1.flagged.length===0, r.i1.flagged.join(',')||'none');
+ck('H-1 · how they were verified is recorded, not just that they were', r.i1.verifiedNote===true);
+ck('I-1 · a verified figure renders plain', r.i1.plainWhenVerified===true);
+ck('I-1 · the marker still fires for a figure that IS flagged', r.i1.marksWhenFlagged===true);
+ck('I-1 · flagging one figure does not mark the others', r.i1.leavesOthersPlain===true);
 
 ck('I-5 · MR29 + MR30 together cost 7K, per the booklet cost column',
   r.i5.mr29===2 && r.i5.mr30===5, `${r.i5.mr29} + ${r.i5.mr30}`);

@@ -47,13 +47,18 @@ running rather than started passing — find out which.
 asserting the behaviour its fix was verified against, so a later change cannot quietly
 reopen a closed finding.
 
-## Two things the app deliberately does not claim to know
+## What is settled, and what the app still does not claim to know
 
-- Three of the six plant-capacity figures in `DATALOG.capacity` are **not** on the
-  printed Data Log page (which carries only `50.000`, `25.000`, `18.000`). They came
-  from an OCR reconstruction and render with the `unver` marker. `CAPACITY_UNVERIFIED`
-  holds the reason for each. X-Europe is the one the 30,000-unit X3 commitment rests
-  on — it needs a human to check page 2 against the print.
+- Plant capacity is settled: the team confirmed all six figures against their printed
+  Data Log on 2026-07-30, so `CAPACITY_UNVERIFIED` is empty and `CAPACITY_VERIFIED`
+  records how. Keep the mechanism — three of those figures came from an OCR
+  reconstruction and could not be read from a text extraction of the page, and the
+  next figure that arrives that way belongs in it.
+  Europe holds 2 chip plants and 2 PC plants (Q3 report, `PLANTS BUILT AND BUILDING`),
+  so chip capacity is 70,000 a quarter against a 30,000 commitment. **Capacity was
+  never the constraint on the X3 contract — the grade is.** The same report gives
+  `MAX. OWNED GRADE` and `MAX. PRODUCIBLE GRADE` for chips as **2**, and the contract
+  needs X3.
 - Optimal capacity is not in the Data Log at all; that table is *maximal*. `MR24`
   measures it, and there is a field for its answer. Until it is entered the engine says
   "not measured" rather than treating maximal as optimal.
