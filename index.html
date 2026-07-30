@@ -731,6 +731,9 @@ function defaultState(){
     learning:{ obs:0, updatedAt:null, confidence:0, market:{}, anchors:{},
       elast:{price:-1.8, tech:0.6, adv:0.25, priceObs:0}, trends:[], gaps:[] },
     masterPlan:{ snapshots:[] },
+    // I-4: what we expected of each quarter, recorded when its plan was committed, so the
+    // report can be compared against it later. Keyed by quarter; absent means never forecast.
+    forecasts:{},
     meta:{lastEditor:'', lastEdited:0},
   };
 }
@@ -838,6 +841,13 @@ const capUnverified=(product,rid)=>((CAPACITY_UNVERIFIED[product]||{})[rid])||nu
 /* Wrap a figure the sources do not confirm. Deliberately louder than `est`: an unverified number
    should look different from a calibrated one, because the fix is different (go read the page). */
 function unver(html, why){ return `<span class="unver" title="${esc(why)}">${html}<sup>?</sup></span>`; }
+/* Does a capacity total lean on any figure the printed page does not carry? If it does, the
+   total inherits the doubt — a derived number is only as sourced as its inputs. */
+function anyCapUnverifiedInUse(plantsByRegion){
+  if(!plantsByRegion) return false;
+  return Object.entries(plantsByRegion).some(([rid,byProd])=>
+    ['X','Y'].some(p=>((byProd||{})[p]||0)>0 && capUnverified(p,rid)));
+}
 function capacityFigure(product,rid){
   const v=(DATALOG.capacity[product]||{})[rid]||0, why=capUnverified(product,rid);
   return why?unver(fmt(v),why):fmt(v);
@@ -1624,6 +1634,26 @@ function shareCapacityCeiling(){
   const units=capX.units+capY.units; if(units<=0) return {pct:0, units:0, market, src:'אין מפעלים'};
   return { pct:Math.min(100,units/market*100), units, market, src:'קיבולת מפעלים בפועל / שוק נצפה (MR)' };
 }
+/* After-tax P&L a single quarter's levers add. projectedNetAdd sums this across the horizon;
+   anything comparing against ONE quarter's reported net profit needs this, not the sum. */
+function projectedNetForQuarter(base,levers,q){
+  if(!levers||!levers[q]) return null;
+  const p=S.config.params, loans=S.quarters[base].financial.loans||0;
+  const lev=levers[q]; const rd=lev.rd||0; let net=0;
+  REGIONS.forEach(r=>{ if(r.id==='hq') return; const rl=(lev.regions&&lev.regions[r.id])||{};
+    const offCost=(rl.offices||0)*(p.officeCost||0);
+    const _ls=activeLines(lev,r.id), _both=sellsBothIn(lev,r.id);
+    const sellCost=_ls.reduce((a,l)=>a+(l.qtySold||0)*sellingCostLC(r.id,l.product,_both),0);
+    const _sales=_ls.reduce((a,l)=>a+l.sales,0)||(rl.sales||0);
+    const _pcost=_ls.reduce((a,l)=>a+l.production*l.unitCost,0)||((rl.production||0)*(rl.unitCost||0));
+    const _adv=_ls.reduce((a,l)=>a+l.advertising,0)||(rl.advertising||0);
+    const pretax=_sales-_pcost-_adv-offCost-sellCost;
+    net += pretax - (pretax>0?pretax*((p.tax[r.id]||0)/100):0); });
+  net -= rd;
+  try{ net -= depreciationSF(); }catch(e){}
+  net -= loans*((p.interest&&p.interest.bank||0)/100);
+  return Math.round(net);
+}
 function projectedNetAdd(base,levers){ // after-tax P&L added by a scenario's future-quarter levers (WS-2 tax applied)
   if(!levers) return 0; const p=S.config.params, loans=S.quarters[base].financial.loans||0; let add=0;
   nextQuarters(base).forEach(q=>{ const lev=levers[q]; if(!lev) return; const rd=lev.rd||0; let net=0;
@@ -2150,6 +2180,215 @@ window.applyRecommendedGoals=()=>{ const rec=window._goalRec; if(!rec)return; co
   g.techXTarget=rec.techXTarget; g.techYTarget=rec.techYTarget; g.q9Share=rec.q9Share;
   g.scoreTargets={...g.scoreTargets,...rec.scoreTargets};
   save(); toast('היעדים עודכנו לפי התוצאות ✓','g'); goalTab('floors'); };
+
+/* ==========================================================================
+   D-02 · THE ROLLING PLAN Q(base+1) → Q9.
+   The engine only ever planned the next quarter: buildActionPlan was called from six
+   places and every one passed nextQuarters(q)[0]. Q5-Q9 existed as three things —
+   endpoint targets, a cash projection, and a static Word document — so half the score
+   (future potential) was being planned outside the tool.
+   What was missing is not more numbers per quarter. It is the BACK-CALCULATION: a
+   milestone in Q7 is only reachable if something starts in a specific earlier quarter,
+   because every mechanism in this game has a lead time. So the path below carries, for
+   each future quarter, what must be true there — and for each of those, the quarter the
+   work has to begin. When that quarter has already passed, the milestone is missed, and
+   saying so early is the whole point.
+   Lead times, all sourced and already encoded elsewhere in this file:
+     plant built in Q      → on stream Q+1        (Data Log 03 / §4.7)
+     produced in Q         → sellable Q+1         (Data Log 08 / RULES.lags.productionToSale)
+     contract delivery Q   → production Q-1       (contractPlan.productionQuarter)
+     grade +1 per quarter  → G grades need G Qs    (RULES.rd / DATALOG.rdMinPerQuarter)
+     office change in Q    → in force end of Q    (§4.6, RULES.offices.changeTakesAQuarter)
+     surface transfer      → one quarter          (RULES.lags.surfaceTransfer)
+   ========================================================================== */
+/* On-stream plants per product for every quarter in the horizon. A plant decided in Q is
+   paid for in Q and produces from Q+1, so the pipeline is the declared split today plus
+   every newFac the plan commits, shifted one quarter forward. */
+function plantPipeline(base, levers){
+  const out={}; const split=plantSplit();
+  const cur={}; REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    cur[r.id]={ X:(split[r.id]&&split[r.id].X)||0, Y:(split[r.id]&&split[r.id].Y)||0 }; });
+  let running=JSON.parse(JSON.stringify(cur));
+  nextQuarters(base).forEach((q,i)=>{
+    out[q]=JSON.parse(JSON.stringify(running));
+    // whatever this quarter builds joins the NEXT quarter's on-stream count
+    const lev=(levers&&levers[q])||{};
+    REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+      const rl=(lev.regions&&lev.regions[r.id])||{};
+      const built=Math.max(0,Math.round(rl.newFac||0));
+      if(built>0){ const p=(rl.product==='X')?'X':'Y'; running[r.id][p]+=built; }
+    });
+  });
+  return out;
+}
+/* Expected grade per quarter, rather than only the end state projectedTechAt returns.
+   A grade rises by at most one per quarter and only in a quarter that funds R&D at or
+   above the legal minimum, so the path is a step function the plan can be checked against. */
+function techPath(base, levers){
+  const op=S.quarters[base].operational;
+  const out={}; let tx=op.techX||0, ty=op.techY||0;
+  nextQuarters(base).forEach(q=>{
+    const lev=(levers&&levers[q])||{};
+    const total=lev.rd||0;
+    const sx=(lev.rdX!=null)?lev.rdX:null, sy=(lev.rdY!=null)?lev.rdY:null;
+    let spendX=sx, spendY=sy;
+    if(spendX==null&&spendY==null){ spendY=total; spendX=0; }
+    // A grade only moves if the quarter funded that product at or above the legal minimum.
+    if((spendX||0)>=DATALOG.rdMinPerQuarter.X) tx=Math.min(9,tx+1);
+    if((spendY||0)>=DATALOG.rdMinPerQuarter.Y) ty=Math.min(9,ty+1);
+    out[q]={X:tx, Y:ty};
+  });
+  return out;
+}
+/* Which quarter must the work start in, for a milestone that has to be true in `atQ`? */
+function startQuarterFor(atQ, leadQuarters){
+  const i=qIndex(atQ)-Math.max(0,leadQuarters);
+  return i>=0?QUARTERS[i]:null;
+}
+/* The path itself. One row per future quarter: what must be true there, and for each of
+   those, when the work has to begin — or that it is already too late. */
+function rollingPlan(base, levers){
+  const nq=nextQuarters(base); if(!nq.length) return [];
+  const proj=projectCashflow(base, levers||null);
+  const byQ={}; proj.forEach(p=>byQ[p.q]=p);
+  const pipe=plantPipeline(base, levers);
+  const tech=techPath(base, levers);
+  const contracts=contractPlan();
+  const g=S.config.goals;
+  const firstActionable=nq[0];
+  const rows=nq.map(q=>{
+    const cash=byQ[q]||null;
+    const plants=pipe[q]||{};
+    const capX=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((plants[r.id]||{}).X||0)*((DATALOG.capacity.X||{})[r.id]||0),0);
+    const capY=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((plants[r.id]||{}).Y||0)*((DATALOG.capacity.Y||{})[r.id]||0),0);
+    const due=contracts.filter(c=>c.deliveryQuarter===q);
+    const must=[];
+    // 1 · contract deliveries — production one quarter earlier
+    due.forEach(c=>{
+      const gap=(c.bindingGap!=null?c.bindingGap:c.gap)||0;
+      must.push({ kind:'contract',
+        what:`אספקת ${fmt(c.qty)} ${c.product}${c.grade!=null?c.grade:''} לפי חוזה`,
+        startQ:c.productionQuarter, lead:1, open:gap>0,
+        why:gap>0?`חסרים ${fmt(gap)} יח׳ — הייצור חייב לקרות ב-${c.productionQuarter}`
+                 :'מכוסה מהמלאי הקיים',
+        form:'H6 / A2-2' });
+    });
+    // 2 · the tech grade a commitment or a target needs by this quarter
+    due.filter(c=>c.grade>0).forEach(c=>{
+      const have=(c.product==='X'?(S.quarters[base].operational.techX||0):(S.quarters[base].operational.techY||0));
+      const need=c.grade-have;
+      if(need>0) must.push({ kind:'tech',
+        what:`דרגת ${c.product}${c.grade} כדי לייצר לחוזה`,
+        startQ:startQuarterFor(c.productionQuarter, need), lead:need, open:true,
+        why:`חסרות ${need} דרגות · דרגה עולה ≤1/רבעון, ולכן המו״פ חייב להתחיל ${need} רבעונים לפני הייצור`,
+        form:'H1-1' });
+    });
+    // 3 · capacity for what this quarter plans to produce
+    ['X','Y'].forEach(p=>{
+      const lev=(levers&&levers[q])||{};
+      const planned=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
+        a+activeLines(lev,r.id).filter(l=>l.product===p).reduce((b,l)=>b+(l.production||0),0),0);
+      const cap=p==='X'?capX:capY;
+      if(planned>cap) must.push({ kind:'capacity',
+        what:`קיבולת ל-${fmt(planned)} יח׳ ${p}`,
+        startQ:startQuarterFor(q,1), lead:1, open:true,
+        why:`מתוכנן ${fmt(planned)} מול קיבולת ${fmt(cap)} — מפעל נבנה רבעון אחד ומייצר רק מהרבעון שאחריו`,
+        form:'A2-1' });
+    });
+    // 4 · goods sold here had to be produced in the quarter before
+    const levHere=(levers&&levers[q])||{};
+    const soldHere=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
+      a+activeLines(levHere,r.id).reduce((b,l)=>b+(l.qtySold||0),0),0);
+    if(soldHere>0 && qIndex(q)>qIndex(firstActionable)) must.push({ kind:'produce',
+      what:`${fmt(soldHere)} יח׳ למכירה`,
+      startQ:startQuarterFor(q,1), lead:1, open:true,
+      why:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — מה שנמכר כאן חייב להיות מיוצר ברבעון שלפני',
+      form:'A2-2' });
+    return { q, cash, plants, capX, capY, tech:tech[q]||null, due, must,
+      isNext:q===firstActionable };
+  });
+  // mark each requirement: already missed, must start now, or still has slack
+  rows.forEach(row=>row.must.forEach(m=>{
+    if(!m.startQ){ m.status='missed'; m.slack=null; return; }
+    const d=qIndex(m.startQ)-qIndex(firstActionable);
+    m.slack=d;
+    m.status = d<0 ? 'missed' : (d===0 ? 'now' : 'later');
+  }));
+  return rows;
+}
+/* The subset that decides this quarter: what must start now, and what is already lost.
+   This is the answer to "which of my Q4 decisions are really Q7 decisions". */
+function criticalPath(base, levers){
+  const rows=rollingPlan(base, levers);
+  const now=[], missed=[];
+  rows.forEach(r=>r.must.forEach(m=>{
+    if(!m.open) return;
+    const item={...m, forQ:r.q};
+    if(m.status==='missed') missed.push(item); else if(m.status==='now') now.push(item);
+  }));
+  const order={contract:0, tech:1, capacity:2, produce:3};
+  const by=(a,b)=>(order[a.kind]-order[b.kind])||(qIndex(a.forQ)-qIndex(b.forQ));
+  return { now:now.sort(by), missed:missed.sort(by), rows };
+}
+
+/* ==========================================================================
+   I-4 · FORECAST vs ACTUAL.
+   Nothing in the app ever measured whether its own projection was right. The demand
+   model calibrates elasticity from observed share, but there was no "we predicted this
+   quarter's profit and were off by X" — so the engine could be systematically wrong in
+   the same direction for six quarters and nobody would see it.
+   A forecast is captured when a plan is committed for a quarter, and compared against
+   the report once that quarter is ingested. Only quarters that have BOTH are reported;
+   nothing is inferred for a quarter that was never forecast.
+   ========================================================================== */
+function captureForecast(q, sc){
+  if(!q||!sc) return null;
+  const base=S.activeQuarter;
+  const proj=projectCashflow(base, sc.levers||null).find(p=>p.q===q);
+  // Per-quarter, not the horizon sum: this is compared against ONE quarter's reported net profit.
+  const net=projectedNetForQuarter(base, sc.levers||null, q);
+  const lev=(sc.levers&&sc.levers[q])||{};
+  const units=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
+    a+activeLines(lev,r.id).reduce((b,l)=>b+(l.qtySold||0),0),0);
+  const f={ q, madeAt:Date.now(), fromQuarter:base, scenario:sc.name||'',
+    unifiedCash:proj?Math.round(proj.unified):null,
+    netProfit:(net==null?null:net), unitsSold:Math.round(units) };
+  S.forecasts=S.forecasts||{}; S.forecasts[q]=f; save(true);
+  return f;
+}
+/* One quarter's variance, or null when we cannot honestly compute one. */
+function forecastVariance(q){
+  const f=(S.forecasts||{})[q]; const Q=S.quarters[q];
+  if(!f||!Q||!Q.entered) return null;
+  const pct=(pred,act)=>(pred==null||!isFinite(pred)||Math.abs(pred)<1)?null:Math.round((act-pred)/Math.abs(pred)*100);
+  const actUnified=REGIONS.reduce((a,r)=>a+(Q.financial.cash[r.id]||0)*fxRate(r.cur),0);
+  const rows=[];
+  if(f.unifiedCash!=null) rows.push({metric:'מזומן מאוחד', pred:f.unifiedCash, act:Math.round(actUnified), err:pct(f.unifiedCash,actUnified)});
+  if(f.netProfit!=null) rows.push({metric:'רווח נקי', pred:f.netProfit, act:Math.round(Q.financial.netProfit||0), err:pct(f.netProfit,Q.financial.netProfit||0)});
+  // Revenue is deliberately NOT compared. The plan states sales in local currency per area, the
+  // report states a consolidated figure, and I could not confirm from the sources which basis the
+  // parsed revenue row is on. Comparing them would produce a confident number on an unchecked unit
+  // assumption, which is worse than not reporting it. Cash, profit and units are all unambiguous.
+  const ourUnits=((Q.marketIntel||{}).sales||[]).filter(s=>s.company===OUR_CO).reduce((a,s)=>a+s.units,0);
+  if(f.unitsSold && ourUnits) rows.push({metric:'יחידות שנמכרו', pred:f.unitsSold, act:ourUnits, err:pct(f.unitsSold,ourUnits)});
+  return rows.length?{q, madeAt:f.madeAt, scenario:f.scenario, rows}:null;
+}
+/* Every quarter we both forecast and then ingested, plus the one thing this is for:
+   is the engine biased in a consistent direction? */
+function forecastAccuracy(){
+  const list=QUARTERS.map(forecastVariance).filter(Boolean);
+  if(!list.length) return {list:[], bias:null};
+  const byMetric={};
+  list.forEach(v=>v.rows.forEach(r=>{ if(r.err==null) return; (byMetric[r.metric]=byMetric[r.metric]||[]).push(r.err); }));
+  const bias=Object.entries(byMetric).map(([metric,errs])=>{
+    const mean=errs.reduce((a,b)=>a+b,0)/errs.length;
+    // A single measurement is never a bias. The precedence here bit me: without the parentheses
+    // `n>1 && all>0 || all<0` reported one negative reading as a consistent direction.
+    const sameSign=errs.length>1 && (errs.every(e=>e>0)||errs.every(e=>e<0));
+    return {metric, n:errs.length, meanErr:Math.round(mean), consistent:sameSign};
+  });
+  return {list, bias};
+}
 
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
 function computeAlerts(q){
@@ -2721,8 +2960,11 @@ PAGE_RENDER.plan = (c)=>{
       <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
       <b>3.</b> חלופות ב<b>"אופציות אחרות"</b> · נימוק ותלויות ב<b>"למה, ומה התלויות"</b>. כל מספר מחושב במנוע.`)}
     ${insightList?`<div class="card pad" style="margin-bottom:14px"><b class="small">${IC('search')} מה שכדאי לדעת לפני שמחליטים</b>${insightList}</div>`:''}
+    ${renderCriticalPath(q,targetQ)}
+    <details class="sec" style="margin-bottom:14px"><summary>${IC('calendar')} הנתיב המתגלגל ${targetQ}→Q9 — מה חייב להיות נכון בכל רבעון, ומתי להתחיל</summary>
+      <div class="secbody">${renderRollingPlan(q,targetQ)}</div></details>
     <details class="sec" style="margin-bottom:14px"><summary>${IC('trendUp')} רקע אסטרטגי — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
-      <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}</div></details>
+      <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}${renderForecastAccuracy()}</div></details>
     <details class="sec" style="margin-bottom:18px"><summary>${IC('cpu')} חוות דעת שנייה מהיועץ (אינה משנה את הרשימה)</summary>
       <div class="secbody">${renderAdvisorCard(q,targetQ)}</div></details>
 
@@ -2821,6 +3063,67 @@ function maturationAdvice(q){
   out.push({ok:true, t:'נתח שוק / דרגה', d:'נמדדים ב-Q9 (מחצית הפוטנציאל) — בנה מוקדם, מתגמל בכל שלב'});
   return {n,out};
 }
+/* D-02 · The critical path, above the decisions rather than buried in a section. Two questions
+   only: what has to start THIS quarter for a later quarter to work, and what is already lost. */
+function renderCriticalPath(q,targetQ){
+  const sc=selectedExportScenario&&selectedExportScenario();
+  let cp; try{ cp=criticalPath(q, sc?sc.levers:null); }catch(e){ return ''; }
+  if(!cp.now.length && !cp.missed.length) return '';
+  const kindLabel={contract:'התחייבות',tech:'מו״פ',capacity:'קיבולת',produce:'ייצור'};
+  const item=(m,tone)=>`<li style="margin-bottom:8px;line-height:1.75">
+    <span class="tag ${tone}">${kindLabel[m.kind]||m.kind}</span>
+    <b>${esc(m.what)}</b> — נדרש ב-<b>${m.forQ}</b>${m.form?` <span class="form">${esc(m.form)}</span>`:''}
+    <div class="small muted" style="margin-top:2px">${m.why}</div></li>`;
+  return `<div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid ${cp.missed.length?'var(--red)':'var(--amber)'}">
+    <div class="between" style="flex-wrap:wrap;gap:8px">
+      <b>${IC('warn')} הנתיב הקריטי — החלטות של ${targetQ} שהן באמת החלטות של רבעונים מאוחרים</b>
+      <span class="row" style="gap:6px">${cp.missed.length?`<span class="tag r">${cp.missed.length} כבר איחרנו</span>`:''}${cp.now.length?`<span class="tag a">${cp.now.length} חייבות להתחיל ב-${targetQ}</span>`:''}</span></div>
+    ${cp.missed.length?`<div style="margin-top:10px"><b class="small" style="color:var(--red)">איחרנו את מועד ההתחלה — היעד הזה לא יושג בזמן:</b>
+      <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.missed.map(m=>item(m,'r')).join('')}</ul>
+      <div class="small muted" style="margin-top:6px">${IC('info')} כשמועד ההתחלה עבר, השאלה אינה "איך נספיק" אלא <b>מה החלופה</b> — רכישה מחברה אחרת, דרגה נמוכה לפי סעיף 5, או הזזת היעד.</div></div>`:''}
+    ${cp.now.length?`<div style="margin-top:${cp.missed.length?'12':'10'}px"><b class="small" style="color:var(--amber)">חייב להתחיל ב-${targetQ}, אחרת המועד יאבד:</b>
+      <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.now.map(m=>item(m,'a')).join('')}</ul></div>`:''}
+  </div>`;
+}
+/* The path table. One row per quarter to Q9 — cash, grade, capacity, commitments — plus the
+   requirements that quarter creates for earlier ones. */
+function renderRollingPlan(q,targetQ){
+  const sc=selectedExportScenario&&selectedExportScenario();
+  let rows; try{ rows=rollingPlan(q, sc?sc.levers:null); }catch(e){ return `<div class="small muted">לא ניתן לחשב נתיב — ${esc(e.message)}</div>`; }
+  if(!rows.length) return `<div class="small muted">אין רבעונים נותרים לתכנון.</div>`;
+  const st={missed:'<span class="tag r">איחרנו</span>',now:'<span class="tag a">להתחיל עכשיו</span>',later:'<span class="tag b">יש זמן</span>'};
+  return `<div class="small muted" style="line-height:1.8;margin-bottom:10px">${IC('info')} כל שורה = רבעון עתידי. <b>"מה חייב להיות נכון"</b> נגזר מההתחייבויות, מהיעדים ומהמנופים בתרחיש הנבחר${sc?` (<b>${esc(sc.name)}</b>)`:' (טרם נבחר תרחיש — העמודות מציגות את המצב ללא תוכנית)'}. עמודת <b>"להתחיל ב-"</b> היא זמן ההובלה לאחור: מפעל רבעון · ייצור→מכירה רבעון · דרגה ≤1/רבעון.</div>
+  <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+    <th>רבעון</th><th>מזומן מאוחד</th><th>רצפה</th><th>דרגות X/Y</th><th>קיבולת X/Y</th><th>התחייבויות</th><th>מה חייב להיות נכון — ומתי להתחיל</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr${r.cash&&r.cash.breach?' style="background:rgba(255,93,108,.07)"':''}>
+    <td><b>${r.q}</b>${r.isNext?' <span class="tag b">הבא</span>':''}</td>
+    <td class="num">${r.cash?fmt(Math.round(r.cash.unified)):'—'}${r.cash&&r.cash.breach?' <span class="tag r">שבירה</span>':''}</td>
+    <td class="num small muted">${r.cash?fmt(r.cash.floor):'—'}</td>
+    <td class="num">${r.tech?`X${r.tech.X} / Y${r.tech.Y}`:'—'}</td>
+    <td class="num small">${fmt(r.capX)} / ${fmt(r.capY)}${anyCapUnverifiedInUse(r.plants)?' <sup style="color:var(--red)" title="נגזר ממספר קיבולת שאינו מופיע בדף המודפס של Data Log 03">?</sup>':''}</td>
+    <td class="small" style="text-align:start;white-space:normal">${r.due.length?r.due.map(c=>`${fmt(c.qty)} ${c.product}${c.grade!=null?c.grade:''}`).join('<br>'):'—'}</td>
+    <td class="small" style="text-align:start;white-space:normal;line-height:1.7;min-width:280px">${r.must.length
+      ? r.must.map(m=>`${st[m.status]||''} <b>${esc(m.what)}</b>${m.startQ?` — להתחיל ב-<b>${m.startQ}</b>`:' — <b>אין רבעון התחלה בטווח</b>'}<div class="small muted">${m.why}</div>`).join('<div style="height:6px"></div>')
+      : '<span class="muted">אין דרישה חדשה</span>'}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+/* I-4 · Was the engine right? Only quarters with both a stored forecast and an ingested report. */
+function renderForecastAccuracy(){
+  let fa; try{ fa=forecastAccuracy(); }catch(e){ return ''; }
+  if(!fa.list.length) return `<div class="cb" style="margin-top:12px"><div class="small muted">${IC('info')} <b>דיוק התחזית</b> — טרם נשמרה תחזית לרבעון שנקלט מאז. תחזית נשמרת ברגע שמעבירים תוכנית לתרחיש, ומושווית לדוח כשהרבעון נקלט.</div></div>`;
+  const sgn=v=>v>0?`+${v}%`:`${v}%`;
+  return `<div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('scale')} דיוק התחזית מול הדוח</h3>
+      <span class="small muted">${fa.list.length} רבעונים עם תחזית ותוצאה</span></div>
+    <div class="cb" style="overflow-x:auto"><table class="tbl"><thead><tr><th>רבעון</th><th>מדד</th><th>נחזה</th><th>בפועל</th><th>סטייה</th></tr></thead><tbody>
+    ${fa.list.map(v=>v.rows.map((r,i)=>`<tr><td>${i===0?`<b>${v.q}</b>`:''}</td><td style="text-align:start">${esc(r.metric)}</td>
+      <td class="num">${fmt(r.pred)}</td><td class="num">${fmt(r.act)}</td>
+      <td class="num" style="color:${r.err==null?'var(--muted)':(Math.abs(r.err)<=15?'var(--green)':(Math.abs(r.err)<=40?'var(--amber)':'var(--red)'))}">${r.err==null?'—':sgn(r.err)}</td></tr>`).join('')).join('')}
+    </tbody></table>
+    ${fa.bias&&fa.bias.length?`<div class="small" style="margin-top:10px;line-height:1.8">${IC('info')} <b>הטיה:</b>
+      ${fa.bias.map(b=>`${esc(b.metric)} — סטייה ממוצעת <b>${sgn(b.meanErr)}</b> על ${b.n} מדידות${b.consistent&&b.n>1?` <span class="tag a">עקבית בכיוון אחד</span>`:''}`).join(' · ')}
+      <br><span class="muted">סטייה עקבית בכיוון אחד היא הדבר שכדאי לתקן — היא אומרת שהמנוע טועה בשיטתיות, לא שהעולם רועש.</span></div>`:''}
+    </div></div>`;
+}
 function renderRoadmap(q){
   const mat=maturationAdvice(q); const mp=masterPlanStatus();
   const cells=QUARTERS.map(x=>{ const done=S.quarters[x].entered, cur=x===q; const sn=mp.snaps.find(s=>s.q===x);
@@ -2893,6 +3196,9 @@ window.applyRecConfirm=(idx)=>{
   // Stay on the decisions page. Jumping to the simulator after every send broke the flow of
   // working down the list; the card marks itself sent instead.
   markSent(rec._key||window._recKeys?.[idx]);
+  // I-4: the moment a plan is committed for a quarter is the only honest moment to record what
+  // we expect from it. Re-capturing on every send keeps the forecast matched to the final plan.
+  try{ captureForecast(tq, sc); }catch(e){}
   closeModal(); save();
   toast('הועבר ל"'+sc.name+'" ✓ — נשארת בהחלטות','g');
   if(currentPage==='plan') go('plan'); else { go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60); }
@@ -3764,7 +4070,15 @@ window.addInventory=()=>{ S.quarters[S.activeQuarter].operational.inventory.push
 window.setInv=(i,k,v)=>{ const it=S.quarters[S.activeQuarter].operational.inventory[i]; it[k]=(k==='product'||k==='grade')?v:(parseFloat(v)||0); save(true);
   if(k==='price'||k==='qty'){ const el=$(`#invTable tbody tr:nth-child(${i+1}) td:nth-child(5) input`); if(el)el.style.borderColor=(!(it.price>0)&&it.qty>0)?'var(--red)':''; } };
 window.delInv=(i)=>{ S.quarters[S.activeQuarter].operational.inventory.splice(i,1); save(); renderInventoryTable(); };
-window.confirmQuarter=()=>{ S.quarters[S.activeQuarter].entered=true; updateLearning(); updateMasterPlan(); save(); toast('רבעון '+S.activeQuarter+' אושר ונקלט — מנוע הביקוש ותוכנית-האב עודכנו ✓','g'); renderQuarterSelect(); go('dashboard'); };
+window.confirmQuarter=()=>{ const q=S.activeQuarter;
+  S.quarters[q].entered=true; updateLearning(); updateMasterPlan(); save();
+  // I-4: ingestion is the moment the forecast for this quarter becomes checkable. Saying it out
+  // loud here — rather than only in a panel — is what turns a projection into a calibration.
+  let v=null; try{ v=forecastVariance(q); }catch(e){}
+  if(v){ const worst=v.rows.filter(r=>r.err!=null).sort((a,b)=>Math.abs(b.err)-Math.abs(a.err))[0];
+    toast(`רבעון ${q} נקלט ✓ — דיוק התחזית: ${worst?`${worst.metric} סטה ב-${worst.err>0?'+':''}${worst.err}%`:'נמדד'}`, worst&&Math.abs(worst.err)>40?'a':'g');
+  } else toast('רבעון '+q+' אושר ונקלט — מנוע הביקוש ותוכנית-האב עודכנו ✓','g');
+  renderQuarterSelect(); go('dashboard'); };
 
 /* ----- CASHFLOW (F4) ----- */
 /* ----- INTEL (F5 basic) ----- */

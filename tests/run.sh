@@ -8,7 +8,7 @@ for t in dead-code audit-fixes decisions rules-coverage rules-orderings rules-be
 done
 # Audit-derived suites: each one pins a finding from docs/findings-v10.2.md to the behaviour its
 # fix was verified against, so a later change cannot quietly reopen it.
-for t in audit/wave1 audit/wave1-clean audit/wave2 audit/rt_xss; do
+for t in audit/wave1 audit/wave1-clean audit/wave2 audit/wave3 audit/rt_xss; do
   node "$t.cjs" || fail=1
 done
 echo
