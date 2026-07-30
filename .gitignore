@@ -1,2 +1,8 @@
 node_modules/
 package-lock.json
+
+# This repository is PUBLIC and deploys to GitHub Pages. Course materials — the INTOPIA
+# User Guide, the Data Log, the course booklet — are the course's own copyrighted documents
+# and must never be committed here. Keep them locally; cite them by section in the docs.
+docs/sources/
+*.pdf
