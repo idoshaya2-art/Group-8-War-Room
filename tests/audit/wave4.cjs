@@ -122,10 +122,10 @@ ck('R-25 · methods improvement is local, non-tradeable and auto-applied',
 ck('all seven wave-4 rule blocks are marked as sourced', text.allSourced===true);
 
 // ---------- it reaches the screen
-await page.evaluate(()=>go('intel')); await page.waitForTimeout(800);
+await page.evaluate(()=>go('rules')); await page.waitForTimeout(900);
 const shown=await page.evaluate(()=>{
-  const d=[...document.querySelectorAll('details')].find(x=>/כללים שנוספו מהמדריך/.test(x.textContent));
-  if(d) d.open=true;
+  // The rules tab renders every block as a disclosure. Opening them is part of reading them.
+  document.querySelectorAll('details').forEach(x=>x.open=true);
   const t=document.body.innerText;
   return { reset:/מתאפסת/.test(t), dud:/dud/i.test(t), methods:/שיפור שיטות|שיפור תהליך/.test(t),
     parabola:/פרבולה/.test(t), triangulation:/חיתוך/.test(t), partnerships:/systems-building/.test(t) };

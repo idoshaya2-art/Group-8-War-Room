@@ -75,13 +75,21 @@ await page.evaluate(()=>go('plan')); await page.waitForTimeout(800);
 const dens=await page.evaluate(()=>{
   const c=document.querySelector('.content');
   const heights=[...c.querySelectorAll('.act')].map(a=>Math.round(a.getBoundingClientRect().height));
+  // offsetParent is still truthy for content inside a closed <details> in Chromium, so ask the
+  // DOM directly whether an ancestor disclosure is shut.
+  const shown=el=>!el.closest('details:not([open])');
   return { tags:c.querySelectorAll('.tag').length,
-    tagText:[...c.querySelectorAll('.tag')].map(t=>t.innerText.trim()).filter(Boolean),
+    visibleTags:[...c.querySelectorAll('.tag')].filter(shown).length,
+    tagText:[...c.querySelectorAll('.tag')].filter(shown).map(t=>t.innerText.trim()).filter(Boolean),
     figures:c.querySelectorAll('.figure').length, notes:c.querySelectorAll('.note').length,
     tallest:Math.max(...heights,0), pageH:Math.round(c.getBoundingClientRect().height),
     openRefTables:[...c.querySelectorAll('details.fverd[open]')].length };
 });
-ck('C · pills are rare enough to mean something', dens.tags<=22, `${dens.tags} tags`);
+/* Count what competes for attention, not what exists in the DOM. The decisions tab now carries
+   the goals editor, the scenario editor and the AI panel as collapsed disclosures, and a pill
+   inside a closed disclosure is not shouting at anyone. */
+ck('C · pills are rare enough to mean something', dens.visibleTags<=22,
+  `${dens.visibleTags} visible of ${dens.tags} in the DOM`);
 ck('C · no pill holds a bare figure — figures have their own role',
   !dens.tagText.some(t=>/^[+\-−⚠\s]*[\d,]+(\s*SF)?$/.test(t)) && dens.figures>0,
   `${dens.figures} figures outside pills`);

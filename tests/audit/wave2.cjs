@@ -118,12 +118,14 @@ ck('R-10 · opening offices and booking the volume in the same quarter is caught
 ck('R-10 · keeping the same office count raises nothing', guard.sameCount===0);
 
 // ---- the new rule text actually reaches the screen
-await page.evaluate(()=>go('intel')); await page.waitForTimeout(800);
+await page.evaluate(()=>go('rules')); await page.waitForTimeout(900);
 const shown=await page.evaluate(()=>{
-  const d=[...document.querySelectorAll('details')].find(x=>/כללים שנוספו מהמדריך/.test(x.textContent));
-  if(d) d.open=true;
+  // The rules tab renders every block as a disclosure. Opening them is part of reading them.
+  document.querySelectorAll('details').forEach(x=>x.open=true);
   const t=document.body.innerText;
-  return { hasSection:!!d, expediting:/expediting/.test(t), citi:/CitiBank/.test(t),
+  // "rendered, not just encoded" now means the rules tab built blocks out of RULES itself.
+  return { hasSection:document.querySelectorAll('.content details.ref').length>=6,
+    expediting:/expediting/.test(t), citi:/CitiBank/.test(t),
     cso:/רק בסוף הרבעון/.test(t), brl:/1,400/.test(t), mr24:/MR24/.test(t) };
 });
 ck('the new rules are rendered, not just encoded', shown.hasSection===true);

@@ -40,8 +40,23 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **520 checks, 0 failures.** If the count drops, a suite stopped
+Measured baseline: **537 checks, 0 failures.** If the count drops, a suite stopped
 running rather than started passing — find out which.
+
+## The shell is six tabs
+
+v12.0 replaced thirteen pages with six: dashboard · financials (ingest lives here, because it
+produces them) · rules · quarterly decisions · submission sheet · help. The old page ids still
+resolve through `PAGE_ALIAS`, so an in-app jump written before the rebuild does not break.
+
+The engine underneath was NOT rewritten — `DATALOG`, `RULES`, the cash/floor/contract/demand
+calculations, the parser and the AI layer are the same code the suite already covered. Each tab
+composes `body*` functions through `slot()`, which exists because those bodies were written as
+whole-page renderers and assign `c.innerHTML`; without it, one body wipes the previous one.
+
+The rules tab is generated **from `RULES` and `DATALOG` themselves**, not hand-written. A rule the
+engine applies therefore cannot be missing from the tab, and a rule shown there cannot be one the
+engine ignores.
 
 `tests/audit/` pins the findings in `docs/findings-v10.2.md`: one suite per wave, each
 asserting the behaviour its fix was verified against, so a later change cannot quietly

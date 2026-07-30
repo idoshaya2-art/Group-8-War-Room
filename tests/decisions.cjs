@@ -47,7 +47,7 @@ const after=await page.evaluate(()=>({page:currentPage, scenarios:S.scenarios.le
   // The counter stopped being a green pill when figures were demoted out of pills — it is now
   // part of the muted count line in the decisions header. Same counter, no longer a status badge.
   progress:document.body.innerText.split('\n').map(x=>x.trim()).filter(x=>/הועברו/.test(x))[0]||''}));
-ck('sending does NOT navigate away from the decisions', after.page==='plan', 'landed on '+after.page);
+ck('sending does NOT navigate away from the decisions', after.page==='decide', 'landed on '+after.page);
 ck('the action is marked as sent', after.checked===1);
 ck('a progress counter appears', /הועברו/.test(after.progress), after.progress);
 ck('the scenario really was created', after.scenarios===1);

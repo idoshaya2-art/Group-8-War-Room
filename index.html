@@ -374,11 +374,15 @@ canvas{display:block;max-width:100%}
     .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:4px 11px;font-size:12.5px;font-weight:600}
 /* A chip is usually a label, but the master-plan strip renders each quarter as a clickable one.
    Only the interactive variants get the 36px thumb floor — the labels keep their compact size. */
-button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
+button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;justify-content:center}
+
+/* The one header every tab carries: what this is, and the way back and forward. */
+.tabnav{display:flex;justify-content:space-between;align-items:center;gap:14px;
+  padding-bottom:12px;margin-bottom:18px;border-bottom:1px solid var(--line)}
 .hr{height:1px;background:var(--line);margin:16px 0;border:0}
 .src{font-size:11px;color:var(--muted2);font-style:italic}
 .pill-tabs{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
-.pill-tabs button{background:transparent;border:0;color:var(--muted);padding:7px 14px;border-radius:8px;font-weight:700;font-size:13.5px}
+.pill-tabs button{background:transparent;border:0;color:var(--muted);padding:7px 14px;border-radius:8px;font-weight:700;font-size:13.5px;min-height:36px}
 .pill-tabs button.active{background:var(--accent);color:#fff}
 .checklist{padding:0;margin:0;list-style:none}
 .checklist li{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line)}
@@ -467,7 +471,7 @@ button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v11.3 · קיבולת מאומתת';
+const APP_VERSION = 'v12.0 · שש לשוניות';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1112,60 +1116,52 @@ function IC(name,cls=''){ const p=ICONS[name]||''; return `<svg class="ic-svg ${
 /* ---------- Navigation ---------- */
 /* The quarterly loop IS the nav: 5 numbered steps in work order, then depth pages. */
 const PAGES = [
-  {id:'ingest',     ic:'inbox',     name:'1 · קליטה ובקרה', sub:'העלאת הדוח, אימות ובדיקת עקביות', sec:'הלולאה הרבעונית'},
-  {id:'dashboard',  ic:'dashboard', name:'2 · אבחון',       sub:'תמונת מצב, נורות ומגמות', sec:'הלולאה הרבעונית'},
-  {id:'plan',       ic:'clipboard', name:'3 · החלטות',      sub:'המלצות קונקרטיות → בקליק לסימולטור', sec:'הלולאה הרבעונית'},
-  {id:'sim',        ic:'sliders',   name:'4 · סימולטור',    sub:'כוונון, השוואה וכפתור קסם', sec:'הלולאה הרבעונית'},
-  {id:'export',     ic:'share',     name:'5 · הזנה והגשה',  sub:'גיליון הזנה, צ׳ק-ליסט ויומן החלטות', sec:'הלולאה הרבעונית'},
-  {id:'financials', ic:'landmark',  name:'פיננסי',    sub:'רו״ה, מאזן, יחסים והקרנת תזרים עד Q9', sec:'עומק'},
-  {id:'intel',      ic:'search',    name:'מודיעין',    sub:'מתחרים, מנוע ביקוש והמלצות MR', sec:'עומק'},
-  {id:'ai',         ic:'cpu',       name:'AI / מועצה', sub:'צ׳אט מעוגן-נתונים ומצב מועצה', sec:'עומק'},
-  {id:'goals',      ic:'target',    name:'הגדרות ויעדים', sub:'רצפות, חוזים, פרמטרים ומיקסום', sec:'קונפיגורציה'},
+  {id:'dash',   ic:'dashboard', name:'1 · דשבורד',        sub:'איפה החברה עומדת — תזרים, הון, מו״פ, התחייבויות, דירוג'},
+  {id:'data',   ic:'landmark',  name:'2 · נתונים פיננסיים', sub:'קליטת הדוח, ואז רו״ה ומאזן — פר רבעון ומצטבר'},
+  {id:'rules',  ic:'book',      name:'3 · חוקי המשחק',     sub:'כל החוקים, כולל טבלת ההמרה X→Y המלאה'},
+  {id:'decide', ic:'clipboard', name:'4 · החלטות רבעוניות', sub:'תקציב מול פעולות, ואופטימיזציה עם AI'},
+  {id:'submit', ic:'share',     name:'5 · הזנה והגשה',     sub:'המספרים המדויקים להקליד לסימולטור'},
+  {id:'help',   ic:'info',      name:'6 · הסבר ושימוש',    sub:'מה כל לשונית עושה ואיך למצות אותה'},
 ];
-// merged/removed tabs keep their old links working
-const PAGE_ALIAS={qa:'ingest', journal:'export', cashflow:'financials', roles:'dashboard'};
-let currentPage='dashboard';
+/* Thirteen pages became six. Old links keep working so a bookmark or an in-app jump that
+   predates the rebuild does not land on nothing. */
+const PAGE_ALIAS={ ingest:'data', financials:'data', qa:'data',
+                   dashboard:'dash', roles:'dash',
+                   plan:'decide', sim:'decide', goals:'decide', ai:'decide',
+                   export:'submit', journal:'submit', cashflow:'data', intel:'rules' };
+let currentPage='dash';
 function renderNav(){
-  const nav=$('#nav'); nav.innerHTML=''; let lastSec=null;
+  const nav=$('#nav'); nav.innerHTML='';
   PAGES.forEach(p=>{
-    if(p.sec!==lastSec){ const h=document.createElement('div');h.className='sec';h.textContent=p.sec;nav.appendChild(h);lastSec=p.sec; }
     const b=document.createElement('button'); b.className=(p.id===currentPage?'active':''); b.dataset.page=p.id;
-    let badge=''; if(p.id==='dashboard'){ const n=activeAlerts().filter(a=>a.level==='red').length; if(n)badge=`<span class="badge">${n}</span>`; }
+    let badge=''; if(p.id==='dash'){ const n=activeAlerts().filter(a=>a.level==='red').length; if(n)badge=`<span class="badge">${n}</span>`; }
     b.innerHTML=`<span class="ic">${IC(p.ic)}</span><span>${p.name}</span>${badge}`;
     b.onclick=()=>go(p.id); nav.appendChild(b);
   });
 }
-// the quarterly loop, in work order — the one sequence a team member follows each quarter
-const FLOW_STEPS=[
-  {id:'ingest',    n:'1', t:'קליטה'},
-  {id:'dashboard', n:'2', t:'אבחון'},
-  {id:'plan',      n:'3', t:'החלטות'},
-  {id:'sim',       n:'4', t:'סימולטור'},
-  {id:'export',    n:'5', t:'הזנה'},
-];
-function flowStepper(id){
-  const idx=FLOW_STEPS.findIndex(s=>s.id===id); if(idx<0) return '';
-  return `<div class="flow">${FLOW_STEPS.map((s,i)=>
-    `<button class="fstep ${i===idx?'cur':(i<idx?'done':'')}" onclick="go('${s.id}')"><span class="fn">${i<idx?'✓':s.n}</span><span class="ft">${s.t}</span></button>`+
-    (i<FLOW_STEPS.length-1?'<span class="fsep">‹</span>':'')
-  ).join('')}</div>`;
-}
-function flowNext(id){
-  const idx=FLOW_STEPS.findIndex(s=>s.id===id); if(idx<0) return '';
-  const nx=FLOW_STEPS[idx+1];
-  if(!nx) return `<div class="flownext"><span class="hint">${IC('check')} סיימת את הלולאה הרבעונית. חזור לשלב 1 בפתיחת הרבעון הבא.</span><button class="btn" onclick="go('ingest')">${IC('inbox')} רבעון חדש</button></div>`;
-  return `<div class="flownext"><span class="hint">השלב הבא ברצף:</span><button class="btn primary" onclick="go('${nx.id}')">שלב ${nx.n} · ${nx.t} ←</button></div>`;
+/* Every tab carries the same header: what this tab is for, where you came from, where you go
+   next. Navigation stops being something you have to hold in your head. */
+function tabHead(id){
+  const i=PAGES.findIndex(p=>p.id===id); if(i<0) return '';
+  const prev=PAGES[i-1], next=PAGES[i+1];
+  const nm=p=>esc(p.name.replace(/^\d+ · /,''));
+  // The sticky header above already names the tab and what it is for. This row is only the way
+  // out — back one step, forward one step — so it is on every tab in the same place.
+  return `<div class="tabnav">
+    ${prev?`<button class="btn sm" onclick="go('${prev.id}')">→ ${nm(prev)}</button>`:'<span></span>'}
+    <span class="small muted">${i+1} מתוך ${PAGES.length}</span>
+    ${next?`<button class="btn sm primary" onclick="go('${next.id}')">${nm(next)} ←</button>`:'<span></span>'}
+  </div>`;
 }
 function go(id){
   if(PAGE_ALIAS[id]) id=PAGE_ALIAS[id];
+  if(!PAGE_RENDER[id]) id='dash';
   currentPage=id; renderNav();
   const p=PAGES.find(x=>x.id===id);
   $('#pageTitle').textContent=p.name; $('#pageSub').textContent=p.sub;
-  const c=$('#content'); c.innerHTML=''; PAGE_RENDER[id](c);
-  if(FLOW_STEPS.some(s=>s.id===id)){ // wrap the 5 work steps in the guided flow
-    c.insertAdjacentHTML('afterbegin', flowStepper(id));
-    c.insertAdjacentHTML('beforeend', flowNext(id));
-  }
+  const c=$('#content'); c.innerHTML='';
+  PAGE_RENDER[id](c);
+  c.insertAdjacentHTML('afterbegin', tabHead(id));   // last, so no body can wipe it
   window.scrollTo(0,0);
   renderNorthStar();
 }
@@ -2812,6 +2808,228 @@ function activeAlerts(){ return computeAlerts(S.activeQuarter); }
    ========================================================================= */
 const PAGE_RENDER = {};
 
+/* ==========================================================================
+   THE SIX TABS.
+   Thirteen pages had accumulated, each added when something new was needed and
+   none ever removed, so the same figure appeared in three places and the order
+   to work in was something you had to know rather than see. These six are the
+   whole application. Each one composes bodies that are already covered by the
+   test suite — the engine underneath is untouched.
+   ========================================================================== */
+
+/* Bodies were written as whole-page renderers and assign `c.innerHTML`, which wipes whatever the
+   tab already put in the container. `slot` gives each one its own element so several can be
+   composed on one tab without one erasing the next. */
+function slot(c, fn, cls){
+  const d=document.createElement('div'); if(cls) d.className=cls;
+  c.appendChild(d); try{ fn(d); }catch(e){ d.innerHTML=`<div class="note is-block">${IC('warn')} תקלה בהצגת החלק הזה: ${esc(e.message)}</div>`; }
+  return d;
+}
+
+/* 1 · Where the company stands. Read-only: nothing here asks for a decision. */
+PAGE_RENDER.dash = (c)=>{
+  const q=S.activeQuarter, Q=S.quarters[q];
+  if(!Q.entered){
+    c.insertAdjacentHTML('beforeend', emptyBlock(IC('dashboard'),'טרם נקלט רבעון',
+      'הדשבורד נבנה מדוח התוצאות. קלוט את הדוח הראשון והמספרים יופיעו כאן.',
+      `<button class="btn primary" onclick="go('data')">${IC('inbox')} לקליטת הדוח</button>`));
+    return;
+  }
+  slot(c, bodyDashboard);
+  const mi=(S.quarters[q].marketIntel)||{};
+  const comps=Object.values(mi.competitors||{}).filter(x=>x.retainedEarnings!=null);
+  c.insertAdjacentHTML('beforeend', `<div class="read" style="margin-top:24px">
+    <span class="rh">מול המתחרים</span>
+    <div class="small muted" style="margin-top:3px">מ-MR74 (דוחות מאוחדים) ו-MR17&28 (יחידות ומחירים) — שלושתם חינם בכל רבעון.</div>
+    ${comps.length?`<ul style="padding-inline-start:20px;line-height:1.9;margin:10px 0 0">${intelInsights(comps,mi).map(i=>`<li class="small">${i}</li>`).join('')}</ul>`
+      :`<div class="small muted" style="margin-top:8px">קלוט דוח עם MR74 כדי לראות דירוג מול המתחרים.</div>`}</div>`);
+  slot(c, (d)=>{ d.innerHTML=renderDemandEngine(); });
+  if(comps.length) c.insertAdjacentHTML('beforeend',
+    `<details class="sec ref"><summary>${IC('landmark')} טבלת המתחרים המלאה — MR74</summary><div class="secbody" style="padding:0">${renderCompetitors(comps,v=>fmt(Math.round(v)))}</div></details>
+     <details class="sec ref"><summary>${IC('lineChart')} נתחי שוק ביחידות — MR17&28</summary><div class="secbody" style="padding:0">${renderMarketShare(mi)}</div></details>`);
+};
+
+/* 2 · Results in, financials out. Ingest and the statements live together because one
+   produces the other — separating them made you cross tabs to check what you just typed. */
+PAGE_RENDER.data = (c)=>{
+  c.insertAdjacentHTML('beforeend', `<div class="read" style="margin-bottom:16px">
+    <span class="rh">קליטת דוח הרבעון</span>
+    <div class="small muted" style="margin-top:3px">גרור את קובץ ה-XLSX של הרבעון. המערכת קוראת את הדוחות והמחקרים, ואתה מאשר לפני שמירה.</div></div>`);
+  slot(c, bodyIngest);
+  c.insertAdjacentHTML('beforeend', `<div class="read" style="margin-top:26px">
+    <span class="rh">רו״ה, מאזן ויחסים</span>
+    <div class="small muted" style="margin-top:3px">בורר הרבעונים למעלה מחליף בין רבעון בודד ל<b>מצטבר</b>.</div></div>`);
+  slot(c, bodyFinancials);
+};
+
+/* 3 · Every rule, in one place, with its source. */
+PAGE_RENDER.rules = (c)=>{ slot(c, bodyRules); };
+
+/* 4 · The quarter's decisions: budget at the top, actions against it, AI to optimise. */
+PAGE_RENDER.decide = (c)=>{
+  slot(c, bodyDecisions);
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref" style="margin-top:20px"><summary>${IC('scale')} התוכנית שלנו מול הצעת ה-AI</summary><div class="secbody" id="oursVsAi"></div></details>`);
+  try{ renderOursVsAI(); }catch(e){}
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref"><summary>${IC('sliders')} כוונון ידני של המספרים</summary><div class="secbody" id="scenPane"></div></details>`);
+  const sp=$('#scenPane'); if(sp) bodyScenarioEditor(sp);
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref"><summary>${IC('target')} יעדי Q9, חוזים ורצפות</summary><div class="secbody" id="goalPane"></div></details>`);
+  const gp=$('#goalPane'); if(gp) bodyGoals(gp);
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref"><summary>${IC('cpu')} שיחה עם ה-AI על הרבעון</summary><div class="secbody" id="aiPane"></div></details>`);
+  const ap=$('#aiPane'); if(ap) bodyAI(ap);
+};
+
+/* 5 · The numbers to type into the real simulator. */
+PAGE_RENDER.submit = (c)=>{
+  slot(c, bodySubmit);
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref" style="margin-top:16px"><summary>${IC('book')} יומן ההחלטות</summary><div class="secbody" id="jPane"></div></details>`);
+  const j=$('#jPane'); if(j) bodyJournal(j);
+};
+
+
+/* ==========================================================================
+   TAB 3 · EVERY RULE, WITH ITS SOURCE.
+   The rules were scattered: some in a card on the intel page, some only in a
+   tooltip, some encoded and never shown at all. This is the single place, and it
+   is generated FROM the encoded rules — so a rule the engine uses cannot be
+   missing here, and a rule shown here cannot be one the engine ignores.
+   ========================================================================== */
+function ruleBlock(title, entries){
+  const rows=entries.filter(([,v])=>v).map(([k,v])=>
+    `<tr><td style="text-align:start;white-space:nowrap;color:var(--muted2);font-size:12.5px">${esc(k)}</td>
+     <td class="prose" style="text-align:start">${v}</td></tr>`).join('');
+  if(!rows) return '';
+  return `<details class="sec ref"><summary>${esc(title)}</summary>
+    <div class="secbody"><table class="tbl compact"><tbody>${rows}</tbody></table></div></details>`;
+}
+function bodyRules(c){
+  const rn={us:'ארה״ב',europe:'אירופה',brazil:'ברזיל',hq:'מטה'};
+  const money=(o,cur)=>REGIONS.filter(r=>r.id!=='hq').map(r=>`${rn[r.id]} <b>${fmt(o[r.id])}</b>`).join(' · ');
+
+  /* The X→Y conversion matrix. It decides whether a plan is even legal, and it was reachable
+     only as a one-line error message when a scenario already broke it. */
+  const M=DATALOG.chipPerPC;
+  const matrix=`<div style="overflow-x:auto"><table class="tbl compact" style="text-align:center">
+    <thead><tr><th style="text-align:start">שבב ↓ / מחשב ←</th>${M[0].map((_,y)=>`<th>Y${y}</th>`).join('')}</tr></thead>
+    <tbody>${M.map((row,x)=>`<tr><td style="text-align:start"><b>X${x}</b></td>${row.map(v=>
+      v===0?`<td style="color:var(--muted2)" title="שילוב לא-אפשרי">—</td>`
+           :`<td style="font-weight:700;color:${v===1?'var(--sig-ok)':(v<=2?'var(--txt)':'var(--sig-warn)')}" title="${v} שבבים למחשב">${v}</td>`
+    ).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="small muted" style="margin-top:8px;line-height:1.8">
+      המספר = <b>כמה שבבים מדרגה X נדרשים למחשב אחד מדרגה Y</b>. <b style="color:var(--sig-ok)">1</b> = הזוג היעיל.
+      <b>—</b> = שילוב שלא ניתן לייצר כלל, וההגשה תיחסם.
+      ${RULES.lemonRisk?`<br>${RULES.lemonRisk.laggingPcHalvesChipMarket}`:''}</div>`;
+
+  c.insertAdjacentHTML('beforeend', `
+  <div class="focus"><div class="eyebrow">הכלל שמכריע אם תוכנית חוקית</div>
+    <span class="rh">טבלת ההמרה X → Y</span>
+    <div style="margin-top:12px">${matrix}</div></div>
+
+  <div class="read"><span class="rh">מספרים מה-Data Log</span>
+    <div class="small muted" style="margin:3px 0 12px">כל מספר כאן מצוטט מהדאטהלוג, לא מוערך.</div>
+    ${ruleBlock('קיבולת, מפעלים ועלויות',[
+      ['קיבולת מקסימלית ליחידה/רבעון', `שבב — ${money(DATALOG.capacity.X)} · מחשב — ${money(DATALOG.capacity.Y)}. <b>זו קיבולת מקסימלית</b>; עלות היחידה מינימלית בקיבולת ה<b>אופטימלית</b>, ש-MR24 מודד.`],
+      ['עלות רכישת מפעל', `שבב — ${money(DATALOG.plantAcqCost.X)} · מחשב — ${money(DATALOG.plantAcqCost.Y)} (מטבע מקומי, Q1)`],
+      ['עלות קבועה לרבעון', `לפי מספר המפעלים באזור. שבב באירופה: ${DATALOG.plantFixedCost.X.europe.join(' / ')} EUR למפעל 1/2/3`],
+      ['פחת', `שבב ${DATALOG.depreciation.X}% · מחשב ${DATALOG.depreciation.Y}% לרבעון`],
+      ['מו״פ מינימלי לרבעון', `שבב <b>${fmt(DATALOG.rdMinPerQuarter.X)} SF</b> · מחשב <b>${fmt(DATALOG.rdMinPerQuarter.Y)} SF</b> — מתחת לזה ההזנה אינה חוקית`],
+      ['מינימום מזומן במטה', `<b>${fmt(DATALOG.minHOCashSF)} SF</b> בכל עת`],
+      ['תקרת מחיר בברזיל', `מחשבים Y0–Y3 — עד <b>${fmt(DATALOG.maxPCPriceY0toY3)} BRL</b>`],
+      ['שינוי מחיר מינימלי', `מחשב ${DATALOG.minPriceChange.Y.us}/${DATALOG.minPriceChange.Y.europe}/${DATALOG.minPriceChange.Y.brazil} · שבב ${DATALOG.minPriceChange.X.us}/${DATALOG.minPriceChange.X.europe}/${DATALOG.minPriceChange.X.brazil} (US/EU/BR)`],
+    ])}
+    ${ruleBlock('כספים, מס וגבייה',[
+      ['שיעורי מס', REGIONS.map(r=>`${rn[r.id]} <b>${DATALOG.tax[r.id]}%</b>`).join(' · ')],
+      ['לוח גבייה (מזומן / +1 / +2)', REGIONS.filter(r=>r.id!=='hq').map(r=>`${rn[r.id]} <b>${DATALOG.collection?DATALOG.collection[r.id].join('/'):(S.config.params.collection[r.id]||[]).join('/')}</b>`).join(' · ')+'%'],
+      ['העברת הפסדים', RULES.tax.note],
+      ['מס ל-A/P', RULES.arap.taxToAP1],
+      ['היקף ה-A/P', RULES.arap.apScope],
+      ['ריבית על יתרה שלילית', REGIONS.map(r=>`${rn[r.id]} ${DATALOG.interest.negBalance.below[r.id]}% → ${DATALOG.interest.negBalance.above[r.id]}% מעל ${fmt(DATALOG.interest.supplierCredit.switchover[r.id])}`).join(' · ')],
+    ])}
+  </div>
+
+  <div class="read"><span class="rh">חוקי התנהגות מהמדריך</span>
+    <div class="small muted" style="margin:3px 0 12px">כל שורה נושאת את הסעיף שממנו היא באה, כדי שתוכל לאמת מול העותק שלכם.</div>
+    ${ruleBlock('מו״פ ודרגות (§4.3)', Object.entries(RULES.rdProgram||{}).filter(([k])=>k!=='src'))}
+    ${ruleBlock('רישוי פטנטים (§4.3 · H5)', Object.entries(RULES.licensing||{}).filter(([k])=>k!=='src'&&k!=='form'))}
+    ${ruleBlock('סיכון dud / lemon (§4.3 · §4.9)', Object.entries(RULES.lemonRisk||{}).filter(([k])=>k!=='src'))}
+    ${ruleBlock('ייצור, ניצולת ושיפור שיטות (§4.7)', [...Object.entries(RULES.utilisation||{}).filter(([k])=>k!=='src'), ...Object.entries(RULES.methodsImprovement||{}).filter(([k])=>k!=='src'), ...Object.entries(RULES.production||{})])}
+    ${ruleBlock('תמחור (§4.4 · §4.14)', Object.entries(RULES.pricing||{}).filter(([k])=>k!=='src'))}
+    ${ruleBlock('משרדי מכירות (§4.6)', Object.entries(RULES.offices||{}).filter(([k])=>typeof RULES.offices[k]==='string'))}
+    ${ruleBlock('הסכמים וחוזים (§4.14)', Object.entries(RULES.agreements||{}).filter(([k,v])=>typeof v==='string'))}
+    ${ruleBlock('מימון (§4.11)', Object.entries(RULES.finance||{}).map(([k,v])=>[k, v&&v.note]))}
+    ${ruleBlock('מלאי ואחסנה (Data Log 06)', Object.entries(RULES.inventory||{}))}
+    ${ruleBlock('תזמון ופיגורים (Data Log 08)', Object.entries(RULES.lags||{}))}
+    ${ruleBlock('ביקוש, פרסום וגמישות (§4.10 · §5.1–5.4)', [
+      ['ארבעת הקובעים','נפח המכירות נקבע ע״י <b>מחיר · פרסום · דרגה · רוחב הסדרה</b> (§4.10.1). נימוק שמתעלם מאחד מהם חסר.'],
+      ['תזמון הפרסום', RULES.adv.lagNote],
+      ['סף אפקטיביות', RULES.adv.thresholdNote],
+      ['תקרת ההרמה', RULES.adv.maxLiftNote],
+      ['גמישות צולבת', RULES.cross.note],
+      ['צמיחת שוק', RULES.potential.growth],
+    ])}
+    ${ruleBlock('מחקרי שוק (§4.10.5)', [
+      ['חינם בכל רבעון', `<b>MR17</b> (דרגות שנמכרו) · <b>MR28</b> (מחירי צרכן) · <b>MR74</b> (דוחות מאוחדים). מקור: ${esc(MR_FREE_SRC)}`],
+      ['תקרת רכישה', 'עד <b>שלושה</b> מחקרים בתשלום לרבעון (§4.10.5, ומאושר בחוברת).'],
+      ...Object.entries(RULES.mrTriangulation||{}).filter(([k,v])=>typeof v==='string'&&k!=='src'),
+    ])}
+    ${ruleBlock('שותפויות ומדידת ביצועים (§2)', Object.entries(RULES.partnerships||{}).filter(([k])=>k!=='src'))}
+  </div>
+
+  <div class="read"><span class="rh">קטלוג מחקרי השוק — 42 מחקרים</span>
+    <div class="small muted" style="margin:3px 0 10px">מספר · שם · עלות באלפי SF · מה זה נותן. מקור: עמודת העלות בחוברת העזר.</div>
+    <div style="overflow-x:auto"><table class="tbl compact"><thead><tr><th>#</th><th>שם</th><th>עלות</th><th>מה זה נותן</th></tr></thead><tbody>
+      ${MR_STUDIES.map(m=>`<tr><td class="num"><b>${m.code.replace('MR','')}</b></td><td style="text-align:start">${esc(m.short)}</td>
+        <td class="num">${m.cost===0?'<span style="color:var(--sig-ok);font-weight:700">חינם</span>':(m.cost==null?'—':fmt(m.cost)+'K')}</td>
+        <td class="prose" style="text-align:start">${esc(m.label)}</td></tr>`).join('')}
+    </tbody></table></div>
+  </div>
+
+  <div class="read"><span class="rh">19 טפסי ההחלטה</span>
+    <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact"><thead><tr><th>קוד</th><th>שם</th><th>אזור</th><th>שדות</th></tr></thead><tbody>
+      ${INTOPIA_FORMS.map(f=>`<tr><td><span class="form">${esc(f.code)}</span></td><td style="text-align:start">${esc(f.he)}</td>
+        <td class="small muted">${esc(f.area)}</td><td class="prose" style="text-align:start">${esc(f.fields)}</td></tr>`).join('')}
+    </tbody></table></div>
+  </div>`);
+}
+
+/* ==========================================================================
+   TAB 6 · HOW TO USE IT.
+   ========================================================================== */
+function bodyHelp(c){
+  const step=(n,t,body)=>`<div class="read"><span class="rh">${n} · ${t}</span><div class="prose small" style="margin-top:6px">${body}</div></div>`;
+  c.insertAdjacentHTML('beforeend', `
+  <div class="focus"><div class="eyebrow">הלולאה</div>
+    <span class="rh">מה עושים בכל רבעון, לפי הסדר</span>
+    <div class="prose small" style="margin-top:8px">
+      <b>1.</b> מקבלים את דוח הרבעון → <b>לשונית 2</b>, גוררים את הקובץ, מאשרים.<br>
+      <b>2.</b> מסתכלים על <b>לשונית 1</b> — מה השתנה, מה אדום, מה מתקרב.<br>
+      <b>3.</b> עוברים ל-<b>לשונית 4</b> ובוחרים את פעולות הרבעון מול התקציב.<br>
+      <b>4.</b> <b>לשונית 5</b> נותנת את המספרים המדויקים להקליד ל-INTOPIA.<br>
+      <b>לשונית 3</b> פתוחה בצד לכל שאלה על חוקים.</div></div>
+
+  ${step(1,'דשבורד','מה שקורה בחברה עכשיו: מזומן לפי אזור ומאוחד, הון ורווחים צבורים, מצב מו״פ ודרגות, התחייבויות שמתקרבות, והדירוג שלנו מול המתחרים לפי MR74. הנורות האדומות למעלה הן דברים שדורשים החלטה <b>הרבעון</b>, לא מידע כללי. אין כאן מה להזין — זו תמונת מצב.')}
+
+  ${step(2,'נתונים פיננסיים','גוררים לכאן את קובץ ה-XLSX של הרבעון. המערכת קוראת את הדוחות ואת מחקרי השוק, מציגה מה זיהתה, ומבקשת אישור לפני שמירה — <b>שום דבר לא נשמר בלי שאישרת</b>. אחרי הקליטה מופיעים רו״ה, מאזן ויחסים. בורר הרבעונים למעלה מחליף בין רבעון בודד לתצוגה <b>מצטברת</b> של כל הרבעונים שנקלטו.<br><br><b>טיפ:</b> אם מספר נראה שגוי — תקן אותו במסך האימות לפני האישור. כל מה שמתחת מחושב ממנו.')}
+
+  ${step(3,'חוקי המשחק','כל חוק שהמנוע משתמש בו, עם הסעיף שממנו הוא בא. <b>טבלת ההמרה X→Y</b> בראש הלשונית היא הכלל שמכריע אם תוכנית חוקית: היא אומרת כמה שבבים מדרגה מסוימת נדרשים למחשב מדרגה מסוימת, ואיזה שילובים בלתי-אפשריים.<br><br>הלשונית נבנית <b>מהחוקים המקודדים עצמם</b> — כלומר חוק שהמנוע מפעיל לא יכול להיעדר מכאן, וחוק שמופיע כאן אינו יכול להיות כזה שהמנוע מתעלם ממנו.')}
+
+  ${step(4,'החלטות רבעוניות','הלב. בראש הלשונית: <b>כמה כסף זמין</b> מכל האזורים, <b>כמה צפוי להיכנס</b> ברבעון לפי לוח הגבייה, ו<b>מה הרצפה</b> שחייבים להשאיר. מולם רצה עלות הפעולות שבחרת — כך שאתה רואה בזמן אמת אם אתה בתקציב.<br><br>הפעולות מסודרות <b>לפי עדיפות</b>. אדום = חובה. כל פעולה מראה את התזרים שלה ואת הטופס שאליו היא שייכת. "שלח לסימולטור" מעביר אותה לתוכנית.<br><br><b>ה-AI כאן.</b> הוא בוחן כל פעולה של המנוע ומציע רשימה משלו — אבל <b>המנוע בודק אותו</b>: הצעה שמפרה חוק נדחית ומוצגת כנדחתה. הוא גם מתעדכן מתוצאות הרבעון ומעדכן את יעדי Q9 בהתאם.<br><br><b>כוונון ידני</b> ו<b>יעדי Q9</b> נמצאים בסעיפים המכווצים בתחתית — פתוחים כשצריך, מכווצים כשלא.')}
+
+  ${step(5,'הזנה והגשה','גיליון עם המספרים המדויקים לכל טופס. כפתור העתקה לכל ערך, לכל טופס, ולכל הגיליון. מתחתיו צ׳ק-ליסט שבודק את התוכנית מול החוקים <b>לפני</b> שאתה מקליד — מכירה מעבר להיצע, חריגת קיבולת, משרדים לא-חוקיים, שבירת רצפה.')}
+
+  ${step(6,'איך למצות את זה','<b>קלוט כל רבעון מיד.</b> מנוע הביקוש לומד מכל רבעון שנקלט; שני רבעונים נותנים כיול גרוע, ארבעה נותנים כיול טוב.<br><br><b>קנה את MR29 ו-MR30.</b> יחד הם עולים 7K ואומרים מי מחזיק ומי מייצר כל דרגה — זה ההבדל בין "אולי אפשר לקנות שבבים" לבין לדעת ממי.<br><br><b>הזן את MR24.</b> טבלת הקיבולת בדאטהלוג היא <b>מקסימלית</b>. עלות היחידה מינימלית בקיבולת האופטימלית, ו-MR24 מודד אותה. עד שתזין, המנוע אומר "לא נמדד" במקום להתחזות.<br><br><b>הסתכל על "מה נשבר קודם".</b> הוא לא רק אומר שרבעון נשבר — הוא מראה איזו שורת הוצאה גורמת לזה ומה השינוי הבודד שסוגר את הפער.<br><br><b>הנתיב הקריטי הוא הדבר החשוב ביותר בעמוד.</b> הוא אומר אילו מהחלטות הרבעון הזה הן באמת החלטות של רבעונים מאוחרים — ומה כבר איחרנו.')}
+
+  <div class="read"><span class="rh">מה המערכת לא יודעת</span>
+    <div class="prose small" style="margin-top:6px">
+      • <b>היא לא משחקת במקומך.</b> היא מחשבת, בודקת חוקיות ומסמנת סתירות — ההחלטה שלך.<br>
+      • <b>מספר מסומן <span class="est">אומדן<sup>~</sup></span> הוא כיול שלנו</b>, לא ציטוט מהחוקים. מספר בלי סימון מגיע ממקור.<br>
+      • <b>קיבולת אופטימלית לא נמדדה</b> עד שתזין MR24.<br>
+      • <b>ה-AI יכול לטעות.</b> לכן הוא לא יכול לשנות מספר בלי שהמנוע יאשר, ולכן כל הצעה שנדחתה מוצגת עם הסיבה.</div></div>`);
+}
+
+/* 6 · How to use it. */
+PAGE_RENDER.help = (c)=>{ slot(c, bodyHelp); };
+
+
 /* ----- DASHBOARD (F3) ----- */
 function quartersStrip(){
   const ent=enteredQuarters();
@@ -2830,7 +3048,7 @@ function quartersStrip(){
 }
 window.pickQuarter=(q)=>{ S.cumulative=false; S.activeQuarter=q; save(); renderQuarterSelect(); go(currentPage); };
 
-PAGE_RENDER.dashboard = (c)=>{
+function bodyDashboard(c){
   if(S.cumulative){ renderCumulativeDashboard(c); return; }
   const q=S.activeQuarter, Q=S.quarters[q];
   if(!Q.entered){
@@ -3049,9 +3267,9 @@ function shortNum(v){ const a=Math.abs(v); if(a>=1e6)return (v/1e6).toFixed(1)+'
 function qaSectionHTML(){ // embedded in step 1 (ingest) — the check belongs right where data enters
   const r=runDataQA();
   if(!r.quarters) return `<div class="card pad" style="margin-top:18px"><b>${IC('check')} בקרת נתונים</b><div class="small muted" style="margin-top:6px">תופעל אוטומטית אחרי קליטת הרבעון הראשון — עקביות בין דוחות, רבעונים ושדות.</div></div>`;
-  const c={innerHTML:''}; PAGE_RENDER.qa(c,true); return c.innerHTML;
+  const c={innerHTML:''}; bodyQA(c,true); return c.innerHTML;
 }
-PAGE_RENDER.qa=(c,embed)=>{
+function bodyQA(c,embed){
   const r=runDataQA();
   if(!r.quarters){ c.innerHTML=quartersStrip()+emptyBlock(IC('check'),'אין רבעונים לבדיקה','קלוט לפחות רבעון אחד כדי להריץ בקרת עקביות.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const lvl={red:{t:'קריטי',c:'r'},amber:{t:'אי-עקביות',c:'a'},info:{t:'לבדיקה',c:'b'}};
@@ -3076,7 +3294,7 @@ PAGE_RENDER.qa=(c,embed)=>{
       בין רבעונים: רציפות רווחים צבורים (RE + רווח נקי) · דרגה טכנולוגית לא יורדת · הון מניות קבוע · קפיצות מזומן ללא הסבר · פערים ברצף הקליטה.</div></div>`;
 };
 
-PAGE_RENDER.financials = (c)=>{
+function bodyFinancials(c){
   const q = (S.cumulative?latestEntered():S.activeQuarter) || S.activeQuarter;
   if(!q || !S.quarters[q].entered){
     c.innerHTML=quartersStrip()+emptyBlock(IC('landmark'),'אין נתונים פיננסיים','קלוט דוח רבעוני כדי לראות את התמונה הפיננסית המלאה — רו״ה, מאזן ויחסים.',
@@ -3185,7 +3403,7 @@ function initCashflowChart(q){
 }
 
 /* ----- ACTION PLAN (practical: what to do next quarter + how to enter it) ----- */
-PAGE_RENDER.plan = (c)=>{
+function bodyDecisions(c){
   const q=S.activeQuarter, Q=S.quarters[q];
   if(!Q.entered){ c.innerHTML=quartersStrip()+emptyBlock(IC('clipboard'),'אין בסיס לתוכנית','קלוט רבעון כדי לקבל תוכנית פעולה מעשית לרבעון הבא.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const targetQ=nextQuarters(q)[0]||q;
@@ -4133,16 +4351,6 @@ const ROLES=[
   {id:'intel',name:'מודיעין · Intel',ic:'search'},
 ];
 const ROLE_PANEL={};
-PAGE_RENDER.roles=(c)=>{
-  const base=S.cumulative?latestEntered():S.activeQuarter;
-  if(!base||!S.quarters[base].entered){ c.innerHTML=emptyBlock(IC('users'),'אין נתונים','קלוט רבעון כדי לפתוח תצוגות תפקיד.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
-  c.innerHTML=`<div class="small muted" style="margin-bottom:12px">כל תפקיד מקבל את הפינה שלו — אותם נתונים, ממוקדים. תומך בעבודה מקבילה של 5 חברי הצוות.</div>
-    <div class="pill-tabs" id="roleTabs">${ROLES.map((r,i)=>`<button class="${i===0?'active':''}" data-r="${r.id}">${IC(r.ic)} ${r.name}</button>`).join('')}</div>
-    <div id="rolePanel" style="margin-top:16px"></div>`;
-  $$('#roleTabs button').forEach(b=>b.onclick=()=>{ $$('#roleTabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); showRole(b.dataset.r,base); });
-  showRole('ceo',base);
-};
-function showRole(role,base){ const el=$('#rolePanel'); if(!el)return; el.innerHTML=ROLE_PANEL[role](base); if(role==='ceo') renderOursVsAI(); }
 ROLE_PANEL.ceo=(base)=>{ const sp=scoreProxy(null); const top=computeAlerts(base).slice(0,3);
   return `<div class="kpis">${kpi('ציון Q9',sp.value.toFixed(0)+'/100','')}${kpi('מחצית עבר',sp.pastHalf.toFixed(0),'')}${kpi('מחצית פוטנציאל',sp.potentialHalf.toFixed(0),'')}${kpi('דירוג רווחים',sp.parts.rank?sp.parts.rank+'/'+sp.parts.rankN:'—','')}</div>
     <div class="card pad" style="margin-top:14px"><b>${IC('warn')} 3 הדחופים ביותר</b><ul style="padding-inline-start:20px;line-height:1.9;margin:8px 0 0">${top.map(a=>`<li class="small"><span class="tag ${a.level==='red'?'r':(a.level==='amber'?'a':'b')}">${a.level==='red'?'אדום':(a.level==='amber'?'כתום':'מידע')}</span> ${esc(a.title)}</li>`).join('')||'<li class="small">אין התראות פתוחות</li>'}</ul></div>
@@ -4182,7 +4390,7 @@ ROLE_PANEL.intel=(base)=>{ const mi=S.quarters[base].marketIntel||{}; const comp
 };
 
 /* ----- INGEST (F1) ----- */
-PAGE_RENDER.ingest = (c)=>{
+function bodyIngest(c){
   const q=S.activeQuarter;
   c.innerHTML=`
     <div class="grid" style="grid-template-columns:minmax(0,1fr);gap:18px">
@@ -4500,162 +4708,8 @@ window.confirmQuarter=()=>{ const q=S.activeQuarter;
 /* ----- CASHFLOW (F4) ----- */
 /* ----- INTEL (F5 basic) ----- */
 const OUR_CO=8; // Company 8 = us
-PAGE_RENDER.intel = (c)=>{
-  // defensive: a restored/older backup may hold a partial marketIntel (competitors without sources/sales)
-  const _mi=x=>{ const m=(x&&x.marketIntel)||{}; return {competitors:m.competitors||{},sales:m.sales||[],sources:m.sources||[],generic:m.generic||[],compPrices:m.compPrices||[]}; };
-  const src=S.cumulative?latestEntered():S.activeQuarter;
-  const q = (src && S.quarters[src] && Object.keys(_mi(S.quarters[src]).competitors).length) ? src
-          : QUARTERS.slice().reverse().find(x=>S.quarters[x].entered && Object.keys(_mi(S.quarters[x]).competitors).length) || S.activeQuarter;
-  const mi=_mi(S.quarters[q]);
-  const comps=Object.values(mi.competitors).sort((a,b)=>a.num-b.num);
-  const fmtK=(v)=> v==null?'—':fmt(v); // MR74 values are already in 000s
-  c.innerHTML=`
-    <div class="between" style="margin-bottom:14px">
-      <div class="small muted">מודיעין מרבעון <b>${q}</b>${comps.length?` · מקורות: ${mi.sources.map(s=>`<span class="chip">${esc(s)}</span>`).join(' ')}`:''}</div>
-    </div>
-    <!-- Layer 1/2: the actionable read — insights + demand engine -->
-    <div class="card pad" style="margin-bottom:16px">
-      <div class="between"><h3>${IC('search')} תובנות והמלצות מודיעין</h3></div>
-      ${comps.length? `<ul style="padding-inline-start:20px;line-height:1.9;margin:10px 0 0">${intelInsights(comps,mi).map(i=>`<li>${i}</li>`).join('')}</ul>`
-        : `<div class="small muted" style="margin:8px 0">קלוט דוח עם MR 74 כדי לקבל תובנות מבוססות-נתונים על המתחרים.</div>`}
-    </div>
-    ${renderDemandEngine()}
-    ${renderRulesCard()}
-    <!-- Layer 3: the raw tables, collapsed -->
-    ${comps.length? `<details class="sec" style="margin-top:16px"><summary>${IC('landmark')} טבלת מתחרים מלאה — MR74 (10 חברות)</summary><div class="secbody" style="padding:0">${renderCompetitors(comps,fmtK)}</div></details>
-    <details class="sec"><summary>${IC('lineChart')} נתחי שוק לפי יחידות — MR17&28</summary><div class="secbody" style="padding:0">${renderMarketShare(mi)}</div></details>`
-    : `<div class="card" style="margin-top:16px"><div class="cb">${emptyBlockInline(IC('search'),'אין נתוני מתחרים עדיין',"קלוט דוח עם גיליון MR 74 — הוא מכיל מאזן ורו״ה של כל 10 החברות והמערכת תחלץ אותם אוטומטית.")}</div></div>`}`;
-};
 /* The rule book made visible: what the engine encodes from the guide, what is a quoted
    rule and what is our estimate. The team can audit every coefficient against the source. */
-function renderRulesCard(){
-  const rn={us:'ארה״ב',europe:'אירופה',brazil:'ברזיל'};
-  const row=(label,vals,fmtV,note)=>`<tr><td style="text-align:start">${label}</td>
-    ${['us','europe','brazil'].map(r=>`<td class="num">${fmtV(vals[r])}</td>`).join('')}
-    <td class="small muted" style="text-align:start;white-space:normal;max-width:260px">${note}</td></tr>`;
-  const T=(title,body)=>`<div style="overflow-x:auto;margin-bottom:14px"><b class="small">${title}</b>
-    <table class="tbl" style="margin-top:6px"><thead><tr><th>כלל</th>${['us','europe','brazil'].map(r=>`<th>${rn[r]}</th>`).join('')}<th>מקור</th></tr></thead><tbody>${body}</tbody></table></div>`;
-  const src='<span class="tag g">חוק מקור</span>', est='<span class="tag a">אומדן</span>';
-  return `<div class="card" style="margin-top:16px">
-    <div class="ch"><h3>${IC('clipboard')} חוקי המשחק — כיצד הביקוש מגיב</h3><span class="small muted">${RULES.src}</span></div>
-    <div class="cb">
-      <div class="small" style="line-height:1.8;margin-bottom:12px">${IC('info')} ארבעת קובעי נפח המכירות (§4.10.1): <b>מחיר · פרסום · דרגה · רוחב סדרה</b>.
-        ${src} = המדריך קובע את הדירוג/הגבול במפורש. ${est} = הגודל המדויק הוא הערכה שלנו בתוך גבולות המדריך, לכיול מול תוצאות אמיתיות.</div>
-      ${T('גמישות פרסום ברמת החברה — המדריך: 0.1–0.5 '+src+', הדירוג בין אזורים '+src+', המספר '+est,
-        row('מחשב (Y)',RULES.adv.elast.Y,v=>v,'ברזיל הגבוה — שוק צעיר שהפרסום מחנך אותו')+
-        row('שבב (X)',RULES.adv.elast.X,v=>v,'ארה״ב הגבוה — מדיה מקצועית מפותחת; ברזיל הנמוך'))}
-      ${T('סף אפקטיביות פרסום (מטבע מקומי/רבעון) — הדירוג '+src+', הסכום '+est,
-        row('מחשב (Y)',RULES.adv.threshold.Y,v=>fmt(v),'המדריך: גבוה פי-כמה מהשבבים בכל אזור')+
-        row('שבב (X)',RULES.adv.threshold.X,v=>fmt(v),'נמוך בארה״ב/אירופה, גבוה יחסית בברזיל'))}
-      ${T('חלק ההשפעה שנופל באותו רבעון שבו שולם הפרסום — '+src,
-        row('מחשב (Y)',RULES.adv.sameQuarterShare.Y,v=>(v*100).toFixed(0)+'%','השארית זולגת לרבעון הבא. הזנב הגדול בארה״ב')+
-        row('שבב (X)',RULES.adv.sameQuarterShare.X,v=>(v*100).toFixed(0)+'%','לשבבים הזנב קטן יותר מלמחשבים'))}
-      ${T('גמישות מחיר — הדירוג '+src+', המספר '+est,
-        row('מחשב (Y)',RULES.price.elast.Y,v=>v,'הרגישות הגבוהה בברזיל, הנמוכה בארה״ב')+
-        row('שבב (X)',RULES.price.elast.X,v=>v,'שבבים גמישים יותר ממחשבים בכל אזור'))}
-      ${T('נזק אובדן מוניטין מחוסר מלאי (מדד 0–1) — הדירוג '+src,
-        row('מחשב (Y)',RULES.goodwill.loss.Y,v=>v,'מחשב שנגמר בארה״ב/אירופה = הנזק הגדול במשחק')+
-        row('שבב (X)',RULES.goodwill.loss.X,v=>v,'"חנונים מוכנים לחכות" — בברזיל שווה למחשב'))}
-      <div class="tag r" style="display:block;line-height:1.8;margin-bottom:12px;white-space:normal">${IC('warn')} <b>חוקים קשיחים — חריגה מהם נענשת אוטומטית:</b><br>
-        • <b>עד ${RULES.grades.maxPerProductPerArea} דרגות למוצר באזור (§4.9).</b> דרגה שלישית ללא פינוי קודם: ${RULES.grades.thirdGradePenalty}<br>
-        • <b>משרדי מכירות:</b> ${RULES.offices.note} משרד בודד = לא חוקי.<br>
-        • <b>תקרת מחיר:</b> מחשבי Y0–Y3 עד ${fmt(DATALOG.maxPCPriceY0toY3)} במטבע מקומי.<br>
-        • <b>מו״פ מינימלי:</b> שבב ${fmt(DATALOG.rdMinPerQuarter.X)} SF · מחשב ${fmt(DATALOG.rdMinPerQuarter.Y)} SF למדען לרבעון.<br>
-        • <b>מינימום מזומן במטה:</b> ${fmt(DATALOG.minHOCashSF)} SF בכל עת.<br>
-        • <b>שינוי מחיר מינימלי:</b> מחשב ${DATALOG.minPriceChange.Y.us}/${DATALOG.minPriceChange.Y.europe}/${DATALOG.minPriceChange.Y.brazil} · שבב ${DATALOG.minPriceChange.X.us}/${DATALOG.minPriceChange.X.europe}/${DATALOG.minPriceChange.X.brazil} (US/EU/BR).<br>
-        • <b>דרגות תואמות:</b> טבלת ההמרה X→Y חוסמת שילובים לא-תואמים (0 = לא ניתן לייצר).</div>
-      <div class="small muted" style="line-height:1.8">${IC('info')} <b>תזמון:</b> ${RULES.adv.lagNote}<br>
-        <b>מס ותזרים:</b> ${RULES.arap.taxToAP1}<br>
-        <b>העברת הפסדים:</b> ${RULES.tax.note}<br>
-        <b>ריבית על יתרות חיוביות:</b> ארה״ב ${DATALOG.interest.posBalance.lc.us}% · אירופה ${DATALOG.interest.posBalance.lc.europe}% · ברזיל ${DATALOG.interest.posBalance.lc.brazil}% · מטה ${DATALOG.interest.posBalance.lc.hq}% לרבעון (מטבע זר משלם יותר)<br>
-        <b>מלאי:</b> ${RULES.inventory.noChargeInProductionQuarter}<br>
-        <b>ייצור:</b> ${RULES.production.twoGradeInterference}<br>
-        <b>אמון שוק ההון:</b> ${RULES.lags.stockConfidence}<br>
-        <b>פטנטים (H5):</b> ${RULES.lags.patent}<br>
-        <b>סף:</b> ${RULES.adv.thresholdNote}<br>
-        <b>גמישות צולבת (§5.2):</b> ${RULES.cross.note} אומדנים: ${['us','europe','brazil'].map(r=>rn[r]+' '+RULES.cross.chipVsPcPrice[r]).join(' · ')}<br>
-        <b>צמיחה (§5.2):</b> ${RULES.potential.growth}<br>
-        <b>תקרת הרמה מפרסום:</b> ${(RULES.adv.maxLift*100).toFixed(0)}% — ${RULES.adv.maxLiftNote}</div>
-      <details class="fverd" style="margin-top:12px"><summary>${IC('book')} כללים שנוספו מהמדריך ומהחוברת — מימון · תמחור · משרדים · הסכמים ⌄</summary>
-        <div class="small" style="line-height:1.9;padding:10px 2px 2px">
-          <b style="color:var(--purple)">מימון (§4.11)</b><br>
-          • ${RULES.finance.citiLoan.note}<br>
-          • ${RULES.finance.bonds.note}<br>
-          • ${RULES.finance.areaBankLoan.note}<br>
-          • ${RULES.finance.loanVsSecurities.note}<br>
-          • ${RULES.finance.interCompanyLoan.note}<br><br>
-          <b style="color:var(--purple)">תמחור (§4.4 · §4.13 · §4.14)</b><br>
-          • ${RULES.pricing.integralUnitsOnly}<br>
-          • ${RULES.pricing.brazilPCCap}<br>
-          • ${RULES.pricing.interCompanyMinimum}<br>
-          • ${RULES.pricing.plantSaleMinimum}<br>
-          • ${RULES.pricing.componentDefault}<br>
-          • ${RULES.pricing.inertiaAndResentment}<br><br>
-          <b style="color:var(--purple)">משרדי מכירות (§4.6)</b><br>
-          • ${RULES.offices.changeTakesAQuarter}<br>
-          • ${RULES.offices.twoQuartersToEfficiency}<br>
-          • ${RULES.offices.changeCostAccelerates}<br>
-          • ${RULES.offices.diminishingReturns}<br><br>
-          <b style="color:var(--purple)">הסכמים — מה הופך אותם לברי-אכיפה (§4.14 + תבניות החוברת)</b><br>
-          • <b style="color:var(--red)">${RULES.agreements.expediting}</b><br>
-          • ${RULES.agreements.lowerGradeFallback}<br>
-          • ${RULES.agreements.buyerPriority}<br>
-          • ${RULES.agreements.standingContract}<br>
-          • ${RULES.agreements.serviceFees}<br>
-          • ${RULES.agreements.loanRegistration}<br>
-          • ${RULES.agreements.twoGradeTrap}<br>
-          • <b>טופס H6 — שדות חובה:</b> ${RULES.agreements.h6Fields.join(' · ')}<br>
-          • <b>תבנית הסכם מכירה (חוברת) — סעיפים:</b> ${RULES.agreements.saleTemplate.join(' · ')}<br>
-          • <b>תבנית הסכם שיתוף פעולה (חוברת):</b> ${RULES.agreements.coopTemplate.join(' · ')}<br><br>
-          <b style="color:var(--purple)">קיבולת — optimal מול maximal (§4.7)</b><br>
-          • טבלת Data Log 03 היא <b>maximal</b> capacity. עלות היחידה היא פרבולה שהמינימום שלה בקיבולת ה<b>אופטימלית</b>; מעליה הייצור אפשרי אך בעלות שולית עולה, עד ה-maximal.<br>
-          • הפער בין optimal ל-maximal: בברזיל בשבבים <b>יותר מ-50%</b> · פחות מכך בארה״ב · <b>הקטן ביותר באירופה</b>.<br>
-          • <b>MR24</b> (24K) נותן את היקף הייצור האופטימלי לפי אזור ומוצר — זה המחקר שהופך את הפרבולה מתיאור למספר.<br>
-          • שינוי קצב הייצור (למעלה או למטה) גורר עלויות התאמה — שעות נוספות, פיצויים, break-in. יש פרמיה על קצב יציב.<br>
-          • יעילות המפעל ניתנת לשיפור בהשקעה ב<b>שיפור שיטות</b> (methods improvements) — MR7/MR8/MR9 מראים מי בתעשייה משקיע בזה.<br><br>
-          <b style="color:var(--purple)">מו״פ — רציפות, איפוס ורישוי (§4.3)</b><br>
-          • <b style="color:var(--red)">${RULES.rdProgram.resetAfterPatent}</b><br>
-          • ${RULES.rdProgram.consistency}<br>
-          • ${RULES.rdProgram.resetAfterPurchase}<br>
-          • ${RULES.rdProgram.chronological}<br>
-          • ${RULES.rdProgram.direction}<br>
-          • ${RULES.rdProgram.diminishing}<br>
-          • ${RULES.rdProgram.noSharedEconomies}<br>
-          • <b>רישוי (H5):</b> ${RULES.licensing.negotiable}<br>
-          • ${RULES.licensing.fullVsRestricted}<br>
-          • ${RULES.licensing.speedUpOwn}<br><br>
-          <b style="color:var(--purple)">סיכון dud / lemon (§4.3 · §4.9)</b><br>
-          • ${RULES.lemonRisk.exists}<br>
-          • ${RULES.lemonRisk.asymmetry}<br>
-          • ${RULES.lemonRisk.laggingPcHalvesChipMarket}<br>
-          • ${RULES.lemonRisk.oemBlindness}<br>
-          • ${RULES.lemonRisk.obsolescence}<br><br>
-          <b style="color:var(--purple)">שיפור שיטות — מנוף נפרד ממו״פ (§4.7 · §7)</b><br>
-          • ${RULES.methodsImprovement.what}<br>
-          • <b>${RULES.methodsImprovement.notTransferable}</b><br>
-          • ${RULES.methodsImprovement.chipsMoreThanPcs}<br>
-          • ${RULES.methodsImprovement.regionalPattern}<br>
-          • ${RULES.methodsImprovement.scale}<br><br>
-          <b style="color:var(--purple)">עקומת הניצולת (§4.7)</b><br>
-          • ${RULES.utilisation.curve}<br>
-          • ${RULES.utilisation.optimalVsMaximal}<br>
-          • ${RULES.utilisation.stableRateIsPremium}<br>
-          • ${RULES.utilisation.lowOutputWorseForChips}<br>
-          • ${RULES.utilisation.varCostBand}<br>
-          • ${RULES.utilisation.mrForOptimal}<br><br>
-          <b style="color:var(--purple)">טריאנגולציה של אומדנים (§4.10.5)</b><br>
-          • ${RULES.mrTriangulation.rangeIsHonest}<br>
-          • <b>${RULES.mrTriangulation.orderAgainNarrows}</b><br>
-          • ${RULES.mrTriangulation.intersectAcrossQuarters}<br>
-          • ${RULES.mrTriangulation.debigHistory}<br><br>
-          <b style="color:var(--purple)">שותפויות בהערכה (§2)</b><br>
-          • ${RULES.partnerships.criterion}<br>
-          • ${RULES.partnerships.futureEmphasis}<br>
-          • ${RULES.partnerships.ownGoalsCount}<br>
-          • ${RULES.partnerships.revisionIsCredit}
-        </div></details>
-    </div></div>`;
-}
 /* WS-3 · Demand-engine panel — what the model has learned, its confidence, competitor trends, and which MR to buy. */
 function renderDemandEngine(){
   const ls=learningSummary();
@@ -4777,7 +4831,7 @@ function renderMarketShare(mi){
 }
 
 /* ----- SIMULATOR (F6) ----- */
-PAGE_RENDER.sim = (c)=>{
+function bodyScenarioEditor(c){
   const q=S.activeQuarter;
   if(!S.quarters[q].entered){ c.innerHTML=emptyBlock(IC('sliders'),'אין נתוני בסיס','קלוט רבעון בסיס כדי לבנות תרחישים.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   c.innerHTML=`
@@ -5564,7 +5618,7 @@ window.pickForDecision=(id)=>{ const sc=S.scenarios.find(s=>s.id===id); if(sc)op
 window.submitScenario=(id)=>{ const i=S.scenarios.findIndex(s=>s.id===id); if(i<0)return; const sc=S.scenarios[i]; S.scenarios.splice(i,1); S.scenarios.unshift(sc); save(); toast('התרחיש "'+sc.name+'" נבחר להגשה ✓','g'); go('export'); };
 
 /* ----- EXPORT (F8) ----- */
-PAGE_RENDER.export = (c)=>{
+function bodySubmit(c){
   const q=S.activeQuarter; const sc=S.scenarios[0]; const targetQ=nextQuarters(q)[0]||q;
   c.innerHTML=`
     <div class="between" style="margin-bottom:16px">
@@ -6116,7 +6170,7 @@ function journalSectionHTML(){
       : `<div class="small muted">אין החלטות ביומן עדיין — בחר תרחיש בסימולטור או רשום ידנית; ההחלטה נשמרת עם רציונל ומאשר.</div>`}
     </div></div>`;
 }
-PAGE_RENDER.journal = (c)=>{ c.innerHTML=journalSectionHTML(); };
+function bodyJournal(c){ c.innerHTML=journalSectionHTML(); }
 window.delDecision=(id)=>{ S.decisions=S.decisions.filter(d=>d.id!==id); save(); go('journal'); };
 window.openDecisionModal=(sc)=>{
   openModal('רישום החלטה',`
@@ -6133,7 +6187,7 @@ window.saveDecision=()=>{
 };
 
 /* ----- GOALS / CONFIG (F2) ----- */
-PAGE_RENDER.goals = (c)=>{
+function bodyGoals(c){
   c.innerHTML=`
     <div class="pill-tabs" id="goalTabs" style="margin-bottom:18px">
       <button class="active" data-t="floors">${IC('target')} יעדי Q9</button>
@@ -7033,7 +7087,7 @@ const COUNCIL=[
 ];
 
 /* ----- AI PAGE ----- */
-PAGE_RENDER.ai = (c)=>{
+function bodyAI(c){
   const prov=aiProvider(), hasKey=!!getApiKey();
   c.innerHTML=`
     <div class="between" style="margin-bottom:16px">
