@@ -67,6 +67,31 @@ const ph=await page.evaluate(()=>({
 ck('the levels hold on a phone', ph.focus>=1 && ph.read>=3, `focus ${ph.focus} · read ${ph.read}`);
 ck('no horizontal overflow on a phone', ph.overflowX===0, `${ph.overflowX}px`);
 
+/* C · a pill is for a status that changes. Most of the forty-four were figures and table values.
+   D/E · one card held a seven-row reference table open by default and stood 1,370px tall — 31% of
+   the page — so the working was louder than the answer. */
+await page.setViewportSize({width:1400,height:1000});
+await page.evaluate(()=>go('plan')); await page.waitForTimeout(800);
+const dens=await page.evaluate(()=>{
+  const c=document.querySelector('.content');
+  const heights=[...c.querySelectorAll('.act')].map(a=>Math.round(a.getBoundingClientRect().height));
+  return { tags:c.querySelectorAll('.tag').length,
+    tagText:[...c.querySelectorAll('.tag')].map(t=>t.innerText.trim()).filter(Boolean),
+    figures:c.querySelectorAll('.figure').length, notes:c.querySelectorAll('.note').length,
+    tallest:Math.max(...heights,0), pageH:Math.round(c.getBoundingClientRect().height),
+    openRefTables:[...c.querySelectorAll('details.fverd[open]')].length };
+});
+ck('C · pills are rare enough to mean something', dens.tags<=22, `${dens.tags} tags`);
+ck('C · no pill holds a bare figure — figures have their own role',
+  !dens.tagText.some(t=>/^[+\-−⚠\s]*[\d,]+(\s*SF)?$/.test(t)) && dens.figures>0,
+  `${dens.figures} figures outside pills`);
+ck('C · a sentence is a note, never a pill',
+  !dens.tagText.some(t=>t.split(/\s+/).length>6), dens.tagText.filter(t=>t.split(/\s+/).length>6).join(' | ')||'none');
+ck('E · no single decision card dominates the page',
+  dens.tallest < dens.pageH*0.2, `tallest ${dens.tallest}px of ${dens.pageH}px`);
+ck('E · reference tables inside a decision start collapsed', dens.openRefTables===0,
+  `${dens.openRefTables} open`);
+
 ck('no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).slice(0,2).join(' | '));
 await browser.close();

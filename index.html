@@ -189,6 +189,44 @@ details.sec.ref{background:none;border:0;border-top:1px dashed var(--line);borde
 details.sec.ref>summary{padding:9px 2px;font-weight:600;font-size:13.5px}
 details.sec.ref[open]>summary{border-bottom:0}
 details.sec.ref .secbody{padding:2px 2px 12px;color:var(--muted)}
+
+/* ==========================================================================
+   C · WHAT A PILL IS FOR.
+   Forty-four pills on one page, and most of them held a figure or a table value.
+   A pill is for a status that CHANGES and that you might act on — mandatory,
+   recommended, blocked, sent, already missed. Everything else gets one of these.
+   ========================================================================== */
+.figure{font-variant-numeric:tabular-nums;font-weight:700;font-size:13.5px;color:var(--muted)}
+.figure.pos{color:var(--sig-ok)}
+.figure.neg{color:var(--sig-block)}
+.meta{color:var(--muted2);font-size:12.5px;font-weight:600}
+/* A sentence never belongs inside a pill — it becomes a note, which can wrap. */
+.note{display:block;line-height:1.75;white-space:normal;font-size:13px;
+  padding:9px 12px;border-radius:var(--radius-sm);background:var(--bg2);border:1px solid var(--line)}
+.note.is-block{color:var(--sig-block);border-color:color-mix(in srgb,var(--sig-block) 34%,transparent);background:color-mix(in srgb,var(--sig-block) 8%,var(--bg2))}
+.note.is-warn{color:var(--sig-warn);border-color:color-mix(in srgb,var(--sig-warn) 32%,transparent);background:color-mix(in srgb,var(--sig-warn) 7%,var(--bg2))}
+.note.is-ok{color:var(--sig-ok);border-color:color-mix(in srgb,var(--sig-ok) 30%,transparent);background:color-mix(in srgb,var(--sig-ok) 7%,var(--bg2))}
+
+/* ==========================================================================
+   D · TYPOGRAPHY. Bold was doing the job of every heading level, and inside the
+   route tables it was doing it to whole paragraphs, which turns a cell into a
+   wall. Emphasis is for the figure and the term that decides — not the sentence.
+   ========================================================================== */
+.tbl td b,.secbody td b{font-weight:700;color:var(--txt)}
+.tbl td{color:var(--muted)}                 /* the cell reads quiet, its emphasis reads loud */
+.tbl td b,.tbl td .num{color:var(--txt)}
+.prose{line-height:1.8}
+.prose b{color:var(--txt)}
+
+/* ==========================================================================
+   E · DENSITY. One padding served a one-line status and a seven-row table alike.
+   ========================================================================== */
+.tbl.compact th{padding:0 8px 6px}
+.tbl.compact td{padding:6px 8px;font-size:13px}
+.read .tbl td{padding:7px 9px}
+.focus{padding:18px}                        /* comfortable — you act here */
+.read{padding-top:15px}                     /* airy at the top rule, tight inside */
+details.sec.ref .secbody .tbl td{padding:6px 8px;font-size:12.5px}
 .card h3{font-size:16px;margin-bottom:2px}
 .card .ch{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}
 .card .ch h3{flex:1}
@@ -429,7 +467,7 @@ button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v11.1 · שלוש רמות משטח · דקדוק צבע';
+const APP_VERSION = 'v11.2 · מערכת עיצוב מלאה';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3166,7 +3204,9 @@ PAGE_RENDER.plan = (c)=>{
   const mp=masterPlanStatus();
   const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
   const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר');
-  const badge=lvl => lvl==='red'?{t:'חובה',c:'r'} : lvl==='amber'?{t:'מומלץ',c:'a'} : lvl==='good'?{t:'תקין',c:'g'} : {t:'אופציונלי',c:'b'};
+  // A tag is for a status that CHANGES and that you might act on. 'optional' is the default
+  // state of everything that is not mandatory or recommended, so it is plain muted text.
+  const badge=lvl => lvl==='red'?{t:'חובה',c:'r'} : lvl==='amber'?{t:'מומלץ',c:'a'} : lvl==='good'?{t:'תקין',c:'g'} : null;
   const catName={fin:'פיננסי',strat:'אסטרטגי',ops:'תפעול',mkt:'שיווק'};
   // Pull the concrete input numbers out of the sim payload into a scannable strip, so the values you
   // actually type are not buried inside the prose paragraph.
@@ -3201,7 +3241,7 @@ PAGE_RENDER.plan = (c)=>{
   const allocOf=new Map(); alloc.rows.forEach((r,k)=>allocOf.set(decisionIdx[k],r));
   const insightList = insightIdx.map(i=>{ const it=items[i]; const bd=badge(it.level);
     return `<div class="row" style="gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line)">
-      <span class="tag ${bd.c}" style="flex:0 0 auto">${bd.t}</span>
+      ${bd?`<span class="tag ${bd.c}" style="flex:0 0 auto">${bd.t}</span>`:'<span class="meta" style="flex:0 0 auto">אופציונלי</span>'}
       <div style="flex:1"><b class="small">${it.title}</b>${it.detail?`<details class="fverd"><summary class="small">הרחבה ⌄</summary><div class="small muted" style="line-height:1.75;padding:6px 2px 2px">${it.detail}</div></details>`:''}</div></div>`; }).join('');
   const actionList = decisionIdx.map((i,pos)=>{ const it=items[i]; const bd=badge(it.level); const blk=it.blocked;
     const _k=sentKeyFor(it), sent=isSent(targetQ,_k);
@@ -3219,17 +3259,17 @@ PAGE_RENDER.plan = (c)=>{
       <div class="at">
         <div class="between" style="gap:8px;flex-wrap:wrap">
           <b style="flex:1;min-width:170px;font-size:15px">${it.ai?`<span class="tag" style="background:rgba(139,124,255,.18);color:var(--purple);margin-inline-end:6px">${IC('cpu')} AI</span>`:''}${it.title}</b>
-          <span class="row" style="gap:6px">${_a.inNow>0?`<span class="tag g" title="גבייה מיידית באותו רבעון לפי לוח הגבייה (Data Log 09). היתרה נגבית ברבעונים הבאים.">+${fmt(_a.inNow)} SF מיידי</span>`:''}${_a.cost>0?`<span class="tag ${_a.fits?'b':'r'}" title="${_a.fits?'נכנס בתקציב':'אין כיסוי מזומן בהתחשב בפעולות שמעליו'}">${_a.fits?'−':'⚠ −'}${fmt(_a.cost)} SF</span>`:''}${blk?'<span class="tag r">⛔ חסום</span>':`<span class="tag ${bd.c}">${bd.t}</span>`}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
+          <span class="row" style="gap:8px;align-items:baseline">${_a.inNow>0?`<span class="figure pos" title="גבייה מיידית באותו רבעון לפי לוח הגבייה (Data Log 09). היתרה נגבית ברבעונים הבאים.">+${fmt(_a.inNow)}</span>`:''}${_a.cost>0?`<span class="figure${_a.fits?'':' neg'}" title="${_a.fits?'נכנס בתקציב':'אין כיסוי מזומן בהתחשב בפעולות שמעליו'}">${_a.fits?'−':'⚠ −'}${fmt(_a.cost)}</span>`:''}${blk?'<span class="tag r">⛔ חסום</span>':(bd?`<span class="tag ${bd.c}">${bd.t}</span>`:'')}${it.form?`<span class="form">${it.form}</span>`:''}</span></div>
         ${_a.cost>0&&!_a.fits?`<div class="tag r" style="display:block;margin-top:7px;line-height:1.6;white-space:normal">${IC('warn')} <b>אין מזומן לזה ברבעון הזה.</b> הפעולות שמעליה כבר מקצות ${fmt(alloc.used)} SF מתוך ${fmt(alloc.spendable)} הפנויים. או שתוותר עליה, או שתוותר על משהו שמעליה, או שתגייס מימון (A3-2/H4).</div>`:''}
         ${_a.revenue>0?`<div class="small" style="margin-top:7px;padding:7px 9px;border-radius:8px;line-height:1.7;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25)">
           ${IC('dollar')} <b>תזרים הפעולה:</b> הכנסה ${fmt(_a.revenue)} SF → <b style="color:var(--green)">${fmt(_a.inNow)} נגבים כבר ברבעון הזה</b>${_a.inLater>0?` · ${fmt(_a.inLater)} ברבעונים הבאים`:''} מול הוצאה ${fmt(_a.out)} → <b>נטו ${_a.net>=0?'+':''}${fmt(_a.net)} SF</b>.
           ${_a.net>0?'<b>הפעולה הזו מממנת את עצמה ואת מה שמתחתיה.</b>':''}</div>`:''}
-        ${it.routes?`<details class="fverd" style="margin-top:8px" open><summary>${IC('share')} כל המסלולים לעמידה בהתחייבות — ומה עוד עומד בלוח הזמנים ⌄</summary>
-          <div style="overflow-x:auto;margin-top:8px"><table class="tbl"><thead><tr><th>מסלול</th><th>עומד בזמן?</th><th>למה</th><th>עלות</th></tr></thead><tbody>
+        ${it.routes?`<details class="fverd" style="margin-top:8px"><summary>${IC('share')} ${it.routes.best?`המסלול המומלץ: <b>${esc(it.routes.best.name)}</b> — כל ${it.routes.routes.length} המסלולים`:`כל ${it.routes.routes.length} המסלולים לעמידה בהתחייבות`} ⌄</summary>
+          <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact"><thead><tr><th>מסלול</th><th>עומד בזמן?</th><th>למה</th><th>עלות</th></tr></thead><tbody>
           ${it.routes.routes.map(r=>`<tr${r===it.routes.best?' style="background:rgba(52,211,153,.09)"':''}>
             <td style="text-align:start"><b>${esc(r.name)}</b>${r.form&&r.form!=='—'?` <span class="form">${esc(r.form)}</span>`:''}${r===it.routes.best?' <span class="tag g">המסלול המומלץ</span>':''}</td>
-            <td>${r.unknown?'<span class="tag a">לא ידוע</span>':(r.feasible?(r.fallback?'<span class="tag a">תמיד</span>':'<span class="tag g">כן</span>'):'<span class="tag r">לא</span>')}</td>
-            <td style="text-align:start;white-space:normal;line-height:1.65;max-width:420px">${r.why}</td>
+            <td style="font-weight:700">${r.unknown?'<span style="color:var(--sig-warn)">לא ידוע</span>':(r.feasible?(r.fallback?'<span style="color:var(--sig-warn)">תמיד</span>':'<span style="color:var(--sig-ok)">כן</span>'):'<span style="color:var(--sig-block)">לא</span>')}</td>
+            <td class="prose" style="text-align:start;white-space:normal;max-width:400px">${r.why}</td>
             <td style="text-align:start;white-space:normal;max-width:150px" class="small muted">${esc(r.cost)}</td></tr>`).join('')}
           </tbody></table></div>
           <div class="small muted" style="margin-top:8px;line-height:1.7">${IC('info')} ${(()=>{const w=whoHasGrade(it.routes.cap&&'X'||'X',0);return '';})()}
@@ -3293,10 +3333,10 @@ PAGE_RENDER.plan = (c)=>{
       <div class="between" style="flex-wrap:wrap;gap:8px">
         <span class="rh">תקציב המזומן לרבעון הזה</span>
         <span class="row" style="gap:6px;flex-wrap:wrap">
-          <span class="tag b">במזומן ${fmt(alloc.available)} SF</span>
-          <span class="tag a" title="נשמר רק החלק הבלתי-נמנע של הרצפה (מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס, ריבית). ההוצאות שההחלטות מקצות אינן מנוכות פעמיים.">− רצפה מחייבת ${fmt(alloc.floor)}</span>
-          ${alloc.inNow>0?`<span class="tag g">+ גבייה מיידית ${fmt(alloc.inNow)}</span>`:''}
-          <span class="tag ${alloc.over>0?'r':'g'}">קיבולת <b>${fmt(alloc.capacity)} SF</b></span></span>
+          <span class="small muted">במזומן <b class="num" style="color:var(--txt)">${fmt(alloc.available)}</b></span>
+          <span class="small muted" title="נשמר רק החלק הבלתי-נמנע של הרצפה (מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס, ריבית). ההוצאות שההחלטות מקצות אינן מנוכות פעמיים.">− רצפה מחייבת <b class="num" style="color:var(--txt)">${fmt(alloc.floor)}</b></span>
+          ${alloc.inNow>0?`<span class="small muted">+ גבייה <b class="num" style="color:var(--sig-ok)">${fmt(alloc.inNow)}</b></span>`:''}
+          <span class="small">קיבולת <b class="num" style="color:${alloc.over>0?'var(--sig-block)':'var(--sig-ok)'};font-size:15px">${fmt(alloc.capacity)} SF</b></span></span>
       </div>
       <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
         <i style="display:block;height:100%;width:${Math.min(100,alloc.capacity?alloc.totalOut/alloc.capacity*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
@@ -3309,7 +3349,7 @@ PAGE_RENDER.plan = (c)=>{
     </div>
     <div id="decisions" class="between" style="margin:0 2px 12px;padding-top:14px;border-top:2px solid var(--line2);flex-wrap:wrap;gap:8px;scroll-margin-top:12px">
       <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
-      <span class="row" style="gap:6px">${sentCount?`<span class="tag g">✓ ${sentCount}/${decisionCount} הועברו</span>`:''}${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
+      <span class="small muted"><b class="num" style="color:var(--txt)">${decisionCount}</b> פעולות${mustCount?` · <b class="num" style="color:var(--sig-block)">${mustCount}</b> חובה`:''}${sentCount?` · <b class="num" style="color:var(--sig-ok)">${sentCount}</b> הועברו`:''}</span>
     </div>
     <div class="read" style="margin-bottom:16px">
       <div class="between" style="flex-wrap:wrap;gap:8px">
@@ -3402,12 +3442,12 @@ function renderWhatBreaksFirst(q){
       <tbody>${w.items.map(i=>row(i)).join('')}</tbody></table></div>`
       :`<div class="small muted" style="margin-top:8px">${IC('info')} אין תרחיש עם מנופים ל-${w.q}, ולכן אין שורות הוצאה לפרק. הפער נובע מהמצב הקיים — רצפה, ריבית, מס והתחייבויות.</div>`}
     ${w.single
-      ? `<div class="tag a" style="display:block;margin-top:10px;line-height:1.75;white-space:normal">${IC('zap')} <b>שינוי בודד שסוגר את הפער:</b> <b>${esc(w.single.what)}</b> — ${fmt(w.single.sf)} SF מול פער ${fmt(w.gap)}. ${w.single.how}</div>`
+      ? `<div class="note is-warn" style="margin-top:10px">${IC('zap')} <b>שינוי בודד שסוגר את הפער:</b> <b>${esc(w.single.what)}</b> — ${fmt(w.single.sf)} SF מול פער ${fmt(w.gap)}. ${w.single.how}</div>`
       : (w.combo.length
-        ? `<div class="tag ${w.enough?'a':'r'}" style="display:block;margin-top:10px;line-height:1.75;white-space:normal">${IC('warn')} <b>אין שורה בודדת שמספיקה.</b> ${w.enough
+        ? `<div class="note ${w.enough?'is-warn':'is-block'}" style="margin-top:10px">${IC('warn')} <b>אין שורה בודדת שמספיקה.</b> ${w.enough
             ? `נדרש לוותר על <b>${w.combo.length}</b> שורות (הגדולות ראשונות): ${w.combo.map(c=>esc(c.what)).join(' · ')} — סה״כ ${fmt(w.combo.reduce((a,c)=>a+c.sf,0))} SF.`
             : `<b>גם ויתור על כל ההוצאות שניתן להזיז (${fmt(w.movableTotal)} SF) אינו סוגר פער של ${fmt(w.gap)} SF.</b> זה אינו כוונון — נדרש מימון, האצת גבייה, או צמצום הנפח עצמו.`}</div>`
-        : `<div class="tag r" style="display:block;margin-top:10px;line-height:1.75;white-space:normal">${IC('warn')} <b>אין הוצאה שניתן להזיז ברבעון הזה</b> — הפער אינו נובע מהחלטות אלא מהמצב הקיים. נדרש מימון או האצת גבייה.</div>`)}
+        : `<div class="note is-block" style="margin-top:10px">${IC('warn')} <b>אין הוצאה שניתן להזיז ברבעון הזה</b> — הפער אינו נובע מהחלטות אלא מהמצב הקיים. נדרש מימון או האצת גבייה.</div>`)}
   </div>`;
 }
 /* I-3 · The first mandatory decision, at the top of the page. The list is ordered by priority and
@@ -3443,7 +3483,7 @@ function renderCriticalPath(q,targetQ){
   if(!cp.now.length && !cp.missed.length) return '';
   const kindLabel={contract:'התחייבות',tech:'מו״פ',capacity:'קיבולת',produce:'ייצור'};
   const item=(m,tone)=>`<li style="margin-bottom:8px;line-height:1.75">
-    <span class="tag ${tone}">${kindLabel[m.kind]||m.kind}</span>
+    <span class="meta">${kindLabel[m.kind]||m.kind}</span>
     <b>${esc(m.what)}</b> — נדרש ב-<b>${m.forQ}</b>${m.form?` <span class="form">${esc(m.form)}</span>`:''}
     <div class="small muted" style="margin-top:2px">${m.why}</div></li>`;
   return `<div class="read">
@@ -6922,7 +6962,7 @@ window.runQuarterAdvisor=async()=>{
 function renderAdvisorCard(q,targetQ){
   const adv=S.ai&&S.ai.advisor, fresh=adv&&adv.q===q, hasKey=!!getApiKey();
   return `<div class="card" style="margin-bottom:16px">
-    <div class="ch"><h3>${IC('cpu')} יועץ הרבעון <span class="tag b" style="margin-inline-start:6px">ביקורת 4 עמודים</span></h3>
+    <div class="ch"><h3>${IC('cpu')} יועץ הרבעון</h3><span class="small muted">ביקורת 4 עמודים</span>
       <div class="row" style="gap:8px"><span class="small muted">${AI_PROVIDERS[aiProvider()].short}</span>
         <button class="btn sm primary" id="advBtn" onclick="runQuarterAdvisor()">${IC('zap')} ${fresh?'רענן':(hasKey?'הפעל יועץ':'חבר AI')}</button></div></div>
     <div class="cb" id="advOut">${fresh

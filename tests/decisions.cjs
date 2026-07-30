@@ -44,7 +44,9 @@ await page.evaluate(()=>{ const b=[...document.querySelectorAll('button')].find(
 await page.waitForTimeout(600);
 const after=await page.evaluate(()=>({page:currentPage, scenarios:S.scenarios.length,
   checked:[...document.querySelectorAll('.act')].filter(a=>/הועבר לסימולטור/.test(a.textContent)).length,
-  progress:[...document.querySelectorAll('.tag.g')].map(t=>t.textContent.trim()).filter(t=>/הועברו/.test(t))[0]||''}));
+  // The counter stopped being a green pill when figures were demoted out of pills — it is now
+  // part of the muted count line in the decisions header. Same counter, no longer a status badge.
+  progress:document.body.innerText.split('\n').map(x=>x.trim()).filter(x=>/הועברו/.test(x))[0]||''}));
 ck('sending does NOT navigate away from the decisions', after.page==='plan', 'landed on '+after.page);
 ck('the action is marked as sent', after.checked===1);
 ck('a progress counter appears', /הועברו/.test(after.progress), after.progress);
