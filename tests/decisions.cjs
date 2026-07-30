@@ -124,7 +124,9 @@ await page.evaluate(()=>{
 });
 await page.waitForTimeout(600);
 const ui=await page.evaluate(()=>({
-  banner:/נבחן/.test(document.body.innerText),
+  // The provenance stopped being a row of four pills and became one muted line; the wording
+  // moved from "4 · AI · נבחן" to "נבחנו ע״י AI". Same claim, current phrasing.
+  banner:/נבחנו ע״י AI/.test(document.body.innerText),
   rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.innerText),
   droppedSection:/המליץ לוותר עליהן/.test(document.body.innerText),
   aiTagOnCard:[...document.querySelectorAll('.act')].some(a=>/\bAI\b/.test(a.textContent)),

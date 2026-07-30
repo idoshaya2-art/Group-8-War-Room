@@ -71,10 +71,14 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
   await page.evaluate(()=>go('plan')); await page.waitForTimeout(900);
   const m=await page.evaluate(()=>{
     const btn=[...document.querySelectorAll('button')].find(b=>/^שלח לסימולטור/.test(b.textContent.trim()));
-    const strip=[...document.querySelectorAll('.card')].find(c=>/הפעולה הראשונה בתור/.test(c.textContent));
+    // The strip became a level-1 `.focus` surface when the three surface levels landed. `.act`
+    // was already taken by the decision cards, hence `.focus`.
+    const strip=[...document.querySelectorAll('.focus')].find(c=>/הפעולה הראשונה בתור/.test(c.textContent));
     if(!btn||!strip) return {found:false};
     const rb=btn.getBoundingClientRect(), rs=strip.getBoundingClientRect();
-    const hero=document.querySelector('.planhero');
+    // The situation block lost its box: it is now a single line, since the score it used to
+    // repeat is already in the north-star bar above every page.
+    const hero=document.querySelector('.planhero-line');
     return { found:true, top:Math.round(rb.top), vh:window.innerHeight,
       aboveFold:rb.top>=0 && rb.bottom<=window.innerHeight,
       stripBeforeHero: hero ? rs.top < hero.getBoundingClientRect().top : null,

@@ -19,6 +19,16 @@
   --amber:#d9a441; --amberbg:#332609;
   --purple:#7f8bcb;
   --ink:var(--txt); --faint:var(--muted2); /* semantic aliases used by disclosure/summary chrome */
+
+  /* ---- COLOUR GRAMMAR — one meaning per colour, and nothing else may borrow it.
+     Red was doing five jobs at once (breach, mandatory tag, deficit figure, panel
+     edge, warning box) and amber four, so neither signalled anything. Use these
+     names, not the raw palette, anywhere a colour is meant to CARRY meaning. ---- */
+  --sig-block:var(--red);    /* blocking · illegal · a deadline already missed */
+  --sig-warn:var(--amber);   /* warning · estimate · not measured             */
+  --sig-ok:var(--green);     /* verified · done · passes                      */
+  --sig-ai:var(--purple);    /* authored by the model, not the engine         */
+  --sig-act:var(--accent);   /* the primary action — and nothing else         */
   --radius:12px; --radius-sm:8px;
   --shadow:0 10px 30px rgba(0,0,0,.4);
 }
@@ -146,6 +156,39 @@ details.sec .secbody{padding:16px 18px}
 /* ===== Components ===== */
 .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
 .card.pad{padding:18px}
+
+/* ==========================================================================
+   THREE SURFACE LEVELS.
+   Every block on a page used to be a .card — same background, same border, same
+   radius, same padding — so an instruction you read once looked exactly as
+   important as the decision you act on. Eleven identical boxes on the decisions
+   page meant the eye had nothing to rank by.
+     .act  — you do something here. A box now MEANS this, so it stays rare.
+     .read — you read this now. No box at all: a rule and a heading separate it.
+     .ref  — you may never need this. Collapsed and weightless until opened.
+   ========================================================================== */
+/* NB: `.act` was already taken — it is the decision-card class. This is `.focus`. */
+.focus{background:linear-gradient(180deg,var(--panel2),var(--panel));
+  border:1px solid var(--line2);border-radius:var(--radius);padding:18px;
+  box-shadow:0 8px 26px rgba(0,0,0,.35);position:relative;overflow:hidden;margin-bottom:16px}
+.focus::before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:3px;background:var(--sig-act)}
+.focus.is-block::before{background:var(--sig-block)}
+.focus.is-warn::before{background:var(--sig-warn)}
+.focus.is-ok::before{background:var(--sig-ok)}
+.read{border-top:1px solid var(--line);padding-top:15px;margin-bottom:26px}
+.read>h2,.read>.rh{margin:0 0 3px}
+.rh{font-family:'Rubik',sans-serif;font-size:17px;font-weight:600;letter-spacing:-.01em}
+/* An eyebrow says what a block IS, so the heading can say what it SAYS. */
+.eyebrow{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted2);font-weight:700;margin-bottom:6px}
+/* A card nested inside a collapsed section is a box inside a box — strip it. */
+.secbody>.card,.secbody .card{background:none;border:0;box-shadow:none;border-radius:0}
+.secbody>.card+.card{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+/* .ref — the lightest disclosure. No panel, no border box: a dashed rule and muted text, so
+   reference material carries no weight on the page until someone asks for it. */
+details.sec.ref{background:none;border:0;border-top:1px dashed var(--line);border-radius:0}
+details.sec.ref>summary{padding:9px 2px;font-weight:600;font-size:13.5px}
+details.sec.ref[open]>summary{border-bottom:0}
+details.sec.ref .secbody{padding:2px 2px 12px;color:var(--muted)}
 .card h3{font-size:16px;margin-bottom:2px}
 .card .ch{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}
 .card .ch h3{flex:1}
@@ -386,7 +429,7 @@ button.chip,button.x{min-height:36px;min-width:36px;justify-content:center}
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v11.0 · נתיב מתגלגל Q4→Q9 · 12/12 חוקים · דיוק תחזית';
+const APP_VERSION = 'v11.1 · שלוש רמות משטח · דקדוק צבע';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -818,9 +861,12 @@ function howTo(key,title,bodyHtml){
   S.ui=S.ui||{seen:{}}; S.ui.seen=S.ui.seen||{};
   const n=S.ui.seen[key]||0; const open=n<LEGEND_OPEN_TIMES;
   S.ui.seen[key]=n+1; save(true);
-  return `<details class="card pad" style="margin-bottom:14px;border-color:var(--line2)" ${open?'open':''}>
-    <summary style="cursor:pointer;font-weight:700;font-size:13.5px;list-style:none">${title}${open?'':' <span class="small muted" style="font-weight:400">— לחץ לפתיחה</span>'}</summary>
-    <div class="small" style="line-height:2;margin-top:8px">${bodyHtml}</div></details>`;
+  // Level 3. This is read once and then never again, so after LEGEND_OPEN_TIMES it stops being a
+  // box and becomes a muted line you can reopen — it should not hold a card's worth of weight on
+  // the page forever.
+  return `<details class="sec ref" style="margin-bottom:14px" ${open?'open':''}>
+    <summary>${title}</summary>
+    <div class="secbody small" style="line-height:2">${bodyHtml}</div></details>`;
 }
 function migrateIntel(){ // coerce legacy array marketIntel into the structured object shape
   QUARTERS.forEach(q=>{ const Q=S.quarters[q]; if(!Q)return;
@@ -3216,25 +3262,23 @@ PAGE_RENDER.plan = (c)=>{
     ${renderNextAction(q,targetQ,items,fieldStrip)}
     <!-- ===== PART 1 · THE SITUATION. Everything narrative lives here, and nothing
          narrative appears again between the decisions below. ===== -->
-    <div class="planhero"><div class="top">
-      <span class="sc" style="font-size:26px">${mp.remaining>0?`+${Math.max(0,mp.tScore-mp.score).toFixed(0)}`:'—'}</span>
-      <span class="arrow">נק׳ עד יעד ${mp.tScore}</span>
+    <!-- The score itself is already in the north-star bar above every page. Repeating it here in
+         a box of its own said the same number twice and put a second jump button directly under
+         the first. What is left is only what the north-star does NOT say: the gap, the pace it
+         demands, and the three standing figures — as text, not as pills. -->
+    <div class="planhero-line small" style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin-bottom:18px;color:var(--muted)">
+      <span><b style="color:var(--txt);font-size:15px">${mp.remaining>0?`+${Math.max(0,mp.tScore-mp.score).toFixed(0)}`:'—'}</b> נק׳ עד יעד ${mp.tScore}</span>
+      <span>${mp.remaining} רבעונים ל-Q9${mp.required>0?` · נדרש <b style="color:var(--txt)">${mp.required.toFixed(1)}</b> נק׳/רבעון`:''}</span>
       <span class="tag ${trackTag}">${trackTxt}</span>
-      <span class="small muted">${mp.remaining} רבעונים ל-Q9${mp.required>0?` · נדרש ${mp.required.toFixed(1)} נק׳/רבעון`:''}</span>
-      <button class="btn sm primary" style="margin-inline-start:auto" onclick="document.getElementById('decisions').scrollIntoView({behavior:'smooth',block:'start'})">↓ ${mustCount?`${mustCount} החלטות חובה`:'לרשימת ההחלטות'}</button></div>
-      <div class="row" style="gap:7px;flex-wrap:wrap;margin-top:10px">
-        <span class="tag b">${IC('dollar')} מטה ${fmt(_f.cash.hq||0)} SF</span>
-        <span class="tag b">${IC('cpu')} טק X${_op.techX}/Y${_op.techY}</span>
-        <span class="tag b">מו״פ ${fmt(_op.rd||0)}</span>
-      </div>
-      ${_topPivot?`<div class="tag a" style="display:block;margin-top:10px;line-height:1.6">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
+      <span style="margin-inline-start:auto">מטה <b style="color:var(--txt)">${fmt(_f.cash.hq||0)}</b> SF · טק <b style="color:var(--txt)">X${_op.techX}/Y${_op.techY}</b> · מו״פ <b style="color:var(--txt)">${fmt(_op.rd||0)}</b></span>
     </div>
+    ${_topPivot?`<div class="focus is-warn" style="padding:14px 18px"><div class="eyebrow" style="color:var(--sig-warn)">${IC('warn')} שינוי אסטרטגיה</div><div class="small" style="line-height:1.7">${_topPivot}</div></div>`:''}
     ${howTo('plan',`${IC('clipboard')} איך עובדים כאן (הזנות ל-${targetQ})`,
       `<b>1.</b> ההחלטות ממוספרות <b>לפי עדיפות</b> — עבור מלמעלה למטה. תגיות: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (אסור עד שהתלות מתקיימת).<br>
       <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
       <b>3.</b> חלופות ב<b>"אופציות אחרות"</b> · נימוק ותלויות ב<b>"למה, ומה התלויות"</b>. כל מספר מחושב במנוע.`)}
     ${renderWhatBreaksFirst(q)}
-    ${insightList?`<div class="card pad" style="margin-bottom:14px"><b class="small">${IC('search')} מה שכדאי לדעת לפני שמחליטים</b>${insightList}</div>`:''}
+    ${insightList?`<div class="read"><span class="rh">מה שכדאי לדעת לפני שמחליטים</span>${insightList}</div>`:''}
     ${renderCriticalPath(q,targetQ)}
     <details class="sec" style="margin-bottom:14px"><summary>${IC('calendar')} הנתיב המתגלגל ${targetQ}→Q9 — מה חייב להיות נכון בכל רבעון, ומתי להתחיל</summary>
       <div class="secbody">${renderRollingPlan(q,targetQ)}</div></details>
@@ -3245,9 +3289,9 @@ PAGE_RENDER.plan = (c)=>{
 
     <!-- ===== PART 2 · THE DECISIONS. Nothing above this line repeats below it. ===== -->
     <div id="decisionsTop"></div>
-    <div class="card pad" style="margin-bottom:12px;border-inline-start:4px solid ${alloc.over>0?'var(--red)':'var(--green)'}">
+    <div class="read" style="margin-bottom:16px">
       <div class="between" style="flex-wrap:wrap;gap:8px">
-        <b class="small">${IC('dollar')} תקציב המזומן לרבעון הזה</b>
+        <span class="rh">תקציב המזומן לרבעון הזה</span>
         <span class="row" style="gap:6px;flex-wrap:wrap">
           <span class="tag b">במזומן ${fmt(alloc.available)} SF</span>
           <span class="tag a" title="נשמר רק החלק הבלתי-נמנע של הרצפה (מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס, ריבית). ההוצאות שההחלטות מקצות אינן מנוכות פעמיים.">− רצפה מחייבת ${fmt(alloc.floor)}</span>
@@ -3267,11 +3311,9 @@ PAGE_RENDER.plan = (c)=>{
       <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
       <span class="row" style="gap:6px">${sentCount?`<span class="tag g">✓ ${sentCount}/${decisionCount} הועברו</span>`:''}${mustCount?`<span class="tag r">${mustCount} חובה</span>`:''}<span class="tag b">${decisionCount} סה״כ</span></span>
     </div>
-    <div class="card pad" style="margin-bottom:14px;background:var(--bg2);${rv?'border-inline-start:4px solid var(--purple)':''}">
+    <div class="read" style="margin-bottom:16px">
       <div class="between" style="flex-wrap:wrap;gap:8px">
-        <div class="small" style="line-height:1.8"><b>${IC('info')} על מה ההחלטות האלה נבנו:</b>
-          <span class="tag g">1 · חוקי המשחק</span> <span class="tag g">2 · המצב מהדוח האחרון</span> <span class="tag g">3 · היעדים</span>
-          <span class="tag ${rv?'b':'a'}">4 · AI ${rv?'· נבחן':'· טרם הורץ'}</span></div>
+        <div class="small muted" style="line-height:1.8">${IC('info')} נבנו מ־<b>חוקי המשחק</b> · <b>המצב מהדוח האחרון</b> · <b>היעדים</b>${rv?` · <b style="color:var(--sig-ai)">נבחנו ע״י AI</b>`:' · <span style="color:var(--sig-warn)">AI טרם הורץ</span>'}</div>
         <div class="row" style="gap:8px">
           <button class="btn sm ${rv?'':'primary'}" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'בחן והצע רשימה מלאה'}</button>
           ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</div>
@@ -3286,8 +3328,8 @@ PAGE_RENDER.plan = (c)=>{
       <div class="small muted" style="margin-top:6px">שכבות 1–3 דטרמיניסטיות ורצות תמיד. שכבה 4 רצה <b>לפי בקשה</b>: ה-AI בוחן כל פעולה של המנוע (לאשר · לשנות · לוותר) ומחזיר רשימה מלאה ומסודרת. <b>למנוע המילה האחרונה</b> — שינוי או תוספת שנכשלים בבדיקות החוקיות נדחים, ופעולת חובה לא ניתנת להסרה.</div>
     </div>
     ${actionList}
-    <div class="card pad" style="margin-top:16px;border-inline-start:4px solid var(--accent)">
-      <b>${IC('check')} סיימת לשלוח פעולות?</b>
+    <div class="read" style="margin-top:20px">
+      <span class="rh">סיימת לשלוח פעולות?</span>
       <div class="small muted" style="margin:6px 0 10px;line-height:1.7">בסימולטור תכוונן את המספרים ותראה את ההשפעה על הציון והמזומן, ואז תעבור להזנה.</div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <button class="btn primary" onclick="go('sim')">${IC('sliders')} המשך לסימולטור →</button>
@@ -3344,16 +3386,17 @@ function maturationAdvice(q){
 function renderWhatBreaksFirst(q){
   const sc=selectedExportScenario&&selectedExportScenario();
   let w; try{ w=whatBreaksFirst(q, sc?sc.levers:null); }catch(e){ return ''; }
-  if(w.ok) return `<div class="cb" style="margin-bottom:14px;border-inline-start:3px solid var(--green)">
+  if(w.ok) return `<div class="read" style="margin-bottom:20px">
     <div class="small">${IC('check')} <b>אין שבירת רצפה בהקרנה</b> — כל הרבעונים עד Q9 עומדים ברצפה ואין אזור בגירעון.</div></div>`;
   const row=(i,tone)=>`<tr><td style="text-align:start"><b>${esc(i.what)}</b>${i.form&&i.form!=='—'?` <span class="form">${esc(i.form)}</span>`:''}
       <div class="small muted" style="white-space:normal;line-height:1.6;max-width:420px">${i.how}</div></td>
     <td class="num"><b>${fmt(i.sf)}</b></td>
     <td>${i.movable?'<span class="tag a">ניתן להזיז</span>':'<span class="tag" style="opacity:.7">נגרר</span>'}</td></tr>`;
-  return `<div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid var(--red)">
+  return `<div class="focus is-block">
+    <div class="eyebrow" style="color:var(--sig-block)">${IC('warn')} מה נשבר קודם</div>
     <div class="between" style="flex-wrap:wrap;gap:8px">
-      <b>${IC('warn')} מה נשבר קודם — <span style="color:var(--red)">${w.q}</span></b>
-      <span class="row" style="gap:6px"><span class="tag r">פער ${fmt(w.gap)} SF</span><span class="tag a">${esc(w.reason)}</span></span></div>
+      <span class="rh">${w.q} — פער <span class="num">${fmt(w.gap)} SF</span></span>
+      <span class="small muted" style="max-width:340px;text-align:end">${esc(w.reason)}</span></div>
     ${w.negs.length?`<div class="small" style="margin-top:8px;line-height:1.7">${IC('info')} <b>אזורים בגירעון:</b> ${w.negs.map(n=>`${esc(n.name)} — חסר ${fmt(n.short)} SF`).join(' · ')}. <span class="muted">מזומן אינו בר-המרה חופשית בין אזורים — גירעון אזורי דורש העברה (A3-1) ולא רק יתרה מאוחדת חיובית.</span></div>`:''}
     ${w.items.length?`<div style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>מה יוצא מהמזומן ב-${w.q}</th><th>SF</th><th></th></tr></thead>
       <tbody>${w.items.map(i=>row(i)).join('')}</tbody></table></div>`
@@ -3376,10 +3419,10 @@ function renderNextAction(q,targetQ,items,fieldStrip){
   if(pick<0) return '';
   const it=items[pick]; const sent=isSent(targetQ, sentKeyFor(it));
   const flow=(()=>{ try{ return actionCashFlowSF(it); }catch(e){ return null; } })();
-  return `<div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid ${sent?'var(--green)':'var(--accent)'}">
+  return `<div class="focus${sent?' is-ok':''}">
     <div class="between" style="flex-wrap:wrap;gap:10px">
       <div style="flex:1;min-width:220px">
-        <div class="small muted">${IC('zap')} הפעולה הראשונה בתור${idx>=0?' · <b style="color:var(--red)">חובה</b>':''}</div>
+        <div class="eyebrow" style="color:${sent?'var(--sig-ok)':'var(--sig-act)'}">${IC('zap')} הפעולה הראשונה בתור</div>
         <b style="font-size:15px;line-height:1.5">${it.title}</b>
         ${it.form?`<div class="small muted" style="margin-top:2px"><span class="form">${esc(it.form)}</span></div>`:''}
         ${flow&&flow.revenue>0?`<div class="small" style="margin-top:4px;color:var(--green)">מכניסה ${fmt(flow.inNow)} SF כבר ברבעון הזה מול הוצאה ${fmt(flow.out)} → נטו ${flow.net>=0?'+':''}${fmt(flow.net)}</div>`:''}
@@ -3403,9 +3446,9 @@ function renderCriticalPath(q,targetQ){
     <span class="tag ${tone}">${kindLabel[m.kind]||m.kind}</span>
     <b>${esc(m.what)}</b> — נדרש ב-<b>${m.forQ}</b>${m.form?` <span class="form">${esc(m.form)}</span>`:''}
     <div class="small muted" style="margin-top:2px">${m.why}</div></li>`;
-  return `<div class="card pad" style="margin-bottom:14px;border-inline-start:4px solid ${cp.missed.length?'var(--red)':'var(--amber)'}">
+  return `<div class="read">
     <div class="between" style="flex-wrap:wrap;gap:8px">
-      <b>${IC('warn')} הנתיב הקריטי — החלטות של ${targetQ} שהן באמת החלטות של רבעונים מאוחרים</b>
+      <span class="rh">הנתיב הקריטי</span>
       <span class="row" style="gap:6px">${cp.missed.length?`<span class="tag r">${cp.missed.length} כבר איחרנו</span>`:''}${cp.now.length?`<span class="tag a">${cp.now.length} חייבות להתחיל ב-${targetQ}</span>`:''}</span></div>
     ${cp.missed.length?`<div style="margin-top:10px"><b class="small" style="color:var(--red)">איחרנו את מועד ההתחלה — היעד הזה לא יושג בזמן:</b>
       <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.missed.map(m=>item(m,'r')).join('')}</ul>
