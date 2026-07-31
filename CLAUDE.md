@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **603 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **608 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **629**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **634**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -177,9 +177,24 @@ import and the only in-app way to fix a figure the parser misread (three capacit
 an OCR reconstruction), so every path that tells you to use it — a parse error, SheetJS missing —
 opens it.
 
+## R&D has two numbers, and both must name themselves
+
+`R & D NEW CHIP` / `R & D NEW PC` are **Income Statement** rows, so `operational.rd` and MR74's
+competitor cells are alike the spend of **one quarter**. The number the team carries in their head
+is the **cumulative** (~1.65M across Q1–Q3). Printing either one under a bare label "our R&D" is
+how "our R&D is 0" read as a claim about the company when it was a claim about one quarter — Q3's
+R&D genuinely was 0.
+
+So the read-out says both, each named: `rdToDateSF()` (ours, summed over entered quarters) and
+`marketRdToDateSF()` (the field's, summed per company over the quarters where MR74 was actually
+ingested — it reports `quarters` so a partial history is not passed off as a full one). And it adds
+that a total alone does not buy a grade: §4.3's ramp resets on an unfunded quarter, so the same
+sum spread differently buys fewer.
+
 ## MR74 is in thousands; everything we hold about ourselves is in units
 
-`marketRdAvgSF()` is the only place the two meet. The competitor read-out printed **"our R&D 0 vs
+`marketRdAvgSF()` is the only place the two meet — and it **excludes company 8**, because "am I
+above the field" is a question about the others. The competitor read-out printed **"our R&D 0 vs
 a market average of 419"** while the team's own report held 90,000 — two faults in one line: it
 took OUR figure out of MR74 (a report about the *other* companies, which does not always carry it)
 and compared MR74's thousands against a number in units. A missing cell became a confident zero.

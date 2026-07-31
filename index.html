@@ -550,7 +550,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.6 · המו״פ שלנו מהדוח שלנו';
+const APP_VERSION = 'v12.7 · מו״פ: רבעון ומצטבר, כל אחד בשמו';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -4894,11 +4894,44 @@ function renderDemandEngine(){
     </div></div>`;
 }
 /* Data-driven competitive insights + MR purchase recommendations from MR74/MR17&28. */
-/* MR74 reports in thousands of CHF while everything the app holds about ourselves is in units.
-   Mixing the two silently is how "our R&D 0 vs a market average of 419" got on screen. */
+/* Two things about R&D that are easy to get wrong, and both were:
+
+   UNITS — MR74 reports in thousands of CHF while everything the app holds about ourselves is in
+   units. Mixing them silently is how "our R&D 0 vs a market average of 419" got on screen.
+
+   PERIOD — `R & D NEW CHIP` / `R & D NEW PC` are Income Statement rows, so both our figure and
+   MR74's are the spend of ONE quarter, not a running total. A line that says "our R&D" without
+   saying which period is asking to be misread: the number the team carries in their head is the
+   cumulative one (~1.7M across Q1-Q3), and the quarterly one can legitimately be much smaller or
+   even zero. Every R&D read-out below states its period.
+
+   The market average excludes company 8 — "am I above the field" is a question about the others. */
 function marketRdAvgSF(comps){
-  if(!comps.length) return 0;
-  return Math.round(comps.reduce((a,c)=>a+((c.rdChip||0)+(c.rdPc||0)),0)/comps.length*1000);
+  const others=(comps||[]).filter(c=>c.num!==OUR_CO);
+  if(!others.length) return 0;
+  return Math.round(others.reduce((a,c)=>a+((c.rdChip||0)+(c.rdPc||0)),0)/others.length*1000);
+}
+/* Our cumulative R&D across every quarter whose report is in. This is what a grade actually
+   costs — but note it is NOT sufficient on its own: R-15's ramp resets whenever a quarter goes
+   unfunded, so the same total spread differently buys fewer grades. */
+function rdToDateSF(){
+  return enteredQuarters().reduce((a,q)=>a+(S.quarters[q].operational.rd||0),0);
+}
+/* The field's cumulative, summed per company across the quarters where MR74 was actually
+   ingested, then averaged. `quarters` is reported so a partial history is not passed off as a
+   full one. */
+function marketRdToDateSF(){
+  const per={}; let quarters=0;
+  enteredQuarters().forEach(q=>{
+    const comps=Object.values((((S.quarters[q]||{}).marketIntel||{}).competitors)||{})
+      .filter(c=>c.num!==OUR_CO && (c.rdChip!=null||c.rdPc!=null));
+    if(!comps.length) return;
+    quarters++;
+    comps.forEach(c=>{ per[c.num]=(per[c.num]||0)+(((c.rdChip||0)+(c.rdPc||0))*1000); });
+  });
+  const vals=Object.values(per);
+  return { avg: vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):0,
+           quarters, companies:vals.length };
 }
 function intelInsights(comps,mi,q){
   const out=[]; const us=comps.find(c=>c.num===OUR_CO); if(!us) return out;
@@ -4914,22 +4947,30 @@ function intelInsights(comps,mi,q){
   // R&D pressure by product
   const rdChipLeaders=sorted('rdChip').filter(c=>c.num!==OUR_CO && c.rdChip>0).slice(0,2);
   const rdPcLeaders=sorted('rdPc').filter(c=>c.num!==OUR_CO && c.rdPc>0).slice(0,2);
-  if(rdChipLeaders.length) out.push(`לחץ טכנולוגי ב-<b>Chip</b>: חברות ${rdChipLeaders.map(c=>c.num+' ('+fmt(c.rdChip)+')').join(', ')} משקיעות במו״פ Chip — שקול להדביק כדי לא לפגר בדרגה.`);
-  if(rdPcLeaders.length) out.push(`לחץ טכנולוגי ב-<b>Computer</b>: חברות ${rdPcLeaders.map(c=>c.num+' ('+fmt(c.rdPc)+')').join(', ')} משקיעות במו״פ Computer.`);
-  /* Our own R&D vs the field. It used to read OUR figure out of MR74's row for company 8 — a
-     report about competitors — and MR74 does not always carry it, so a missing cell became a
-     flat "our R&D is 0" printed against a real market average. Our own report is authoritative
-     and is in units; MR74 is in thousands, so the field average is scaled to match before the
-     two are compared. If neither source has a figure, it says so instead of claiming zero. */
-  const avgRd=marketRdAvgSF(comps);
-  const ourReported=q!=null?(S.quarters[q].operational.rd||0):0;
+  // ×1000: these are MR74 cells (000 CHF) sitting next to figures in units. Printing them raw put
+  // "400" beside "400,000" on the same screen, which is the same trap in a smaller place.
+  const k=v=>fmt(Math.round((v||0)*1000));
+  if(rdChipLeaders.length) out.push(`לחץ טכנולוגי ב-<b>Chip</b> ברבעון זה: חברות ${rdChipLeaders.map(c=>c.num+' ('+k(c.rdChip)+' SF)').join(', ')} משקיעות במו״פ Chip — שקול להדביק כדי לא לפגר בדרגה.`);
+  if(rdPcLeaders.length) out.push(`לחץ טכנולוגי ב-<b>Computer</b> ברבעון זה: חברות ${rdPcLeaders.map(c=>c.num+' ('+k(c.rdPc)+' SF)').join(', ')} משקיעות במו״פ Computer.`);
+  /* R&D, said twice on purpose: the quarter (which is what both Income Statements report) and the
+     running total (which is the number the team actually carries in their head, and what a grade
+     costs). Saying only one of them without naming the period is what made this line unreadable. */
+  const avgQ=marketRdAvgSF(comps);
+  const ourQ=q!=null?(S.quarters[q].operational.rd||0):0;
   const ourFromMR=((us.rdChip||0)+(us.rdPc||0))*1000;
-  const ourRd=ourReported>0?ourReported:ourFromMR;
-  const src=ourReported>0?'מהדוח שלנו':'מ-MR74';
-  if(ourRd>0 || avgRd>0){
-    out.push(ourRd>0
-      ? `מו״פ שלנו <b class="num">${fmt(ourRd)}</b> SF (${src}) מול ממוצע השוק <b class="num">${fmt(avgRd)}</b> SF — ${ourRd>=avgRd?'מעל הממוצע, שומר על קצב טכנולוגי':'<span style="color:var(--amber)">מתחת לממוצע — סיכון לפיגור בדרגה</span>'}.`
-      : `ממוצע המו״פ בשוק <b class="num">${fmt(avgRd)}</b> SF. <span style="color:var(--amber)">המו״פ שלנו לא דווח ברבעון הזה</span> — לא ניתן להשוות עד שייקלט.`);
+  const ourQuarter=ourQ>0?ourQ:ourFromMR;
+  const cum=rdToDateSF(), field=marketRdToDateSF();
+  const done=enteredQuarters();
+  if(avgQ>0 || ourQuarter>0){
+    out.push(`מו״פ <b>ברבעון ${esc(q||'')}</b>: שלנו ${ourQuarter>0?`<b class="num">${fmt(ourQuarter)}</b> SF${ourQ>0?'':' (מ-MR74)'}`:'<span style="color:var(--amber)">לא דווח</span>'} · ממוצע המתחרים <b class="num">${fmt(avgQ)}</b> SF. <span class="muted">שתי השורות מדוח רו״ה — הוצאת הרבעון, לא מצטבר.</span>`);
+  }
+  if(cum>0 || field.avg>0){
+    const cmp = (cum>0 && field.avg>0)
+      ? (cum>=field.avg ? ' — מעל הממוצע, שומרים על קצב טכנולוגי'
+                        : ' — <span style="color:var(--amber)">מתחת לממוצע, סיכון לפיגור בדרגה</span>')
+      : '';
+    out.push(`מו״פ <b>מצטבר</b> ${done.length?`(${done[0]}–${done[done.length-1]})`:''}: שלנו <b class="num">${fmt(cum)}</b> SF · ממוצע המתחרים ${field.avg>0?`<b class="num">${fmt(field.avg)}</b> SF${field.quarters<done.length?` <span class="muted">(מ-${field.quarters} רבעונים שבהם נקלט MR74)</span>`:''}`:'<span class="muted">לא נקלט MR74</span>'}${cmp}.`);
+    out.push(`<span class="muted">${IC('info')} סכום מצטבר אינו מבטיח דרגה: לפי §4.3 רבעון ללא מימון מאפס את הרמפה, ולכן אותו סכום שפוזר אחרת קונה פחות דרגות.</span>`);
   }
   // Aggressive intel gatherers
   const mrLeaders=sorted('marketResearch').filter(c=>c.num!==OUR_CO && c.marketResearch>0).slice(0,2);

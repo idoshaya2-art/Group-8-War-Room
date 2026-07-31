@@ -361,26 +361,49 @@ ck('the engine\'s second-opinion list exists and is folded shut',
    companies, which does not always carry it — and it compared MR74's thousands-of-CHF against a
    number that is in units. A missing cell became a confident zero. */
 const rd=await page.evaluate(()=>{
+  // A history that matches the plan's own account of it: chips funded in Q1-Q2, PCs across
+  // Q1-Q2, nothing in Q3. Cumulative 1,650,000 — the figure the team carries in their head —
+  // while the LAST QUARTER's spend is 0. Those are both true and they are not the same number.
+  ['Q1','Q2','Q3'].forEach(x=>{ S.quarters[x].marketIntel.competitors={
+    2:{num:2,retainedEarnings:1,rdChip:400,rdPc:100},
+    5:{num:5,retainedEarnings:1,rdChip:300,rdPc:0},
+    8:{num:8,retainedEarnings:1} }; });
+  S.quarters.Q1.operational.rd=800000; S.quarters.Q2.operational.rd=850000;
+  const keepQ3=S.quarters.Q3.operational.rd; S.quarters.Q3.operational.rd=0;
   const q=S.activeQuarter, mi=S.quarters[q].marketIntel;
-  const comps=Object.values(mi.competitors||{}).filter(x=>x.retainedEarnings!=null)
-    .map(c=>({...c, rdChip:c.num===2?400:(c.num===5?300:0), rdPc:c.num===2?100:0}));
-  const line=()=>intelInsights(comps,mi,q).find(x=>/מו״פ שלנו|ממוצע המו״פ/.test(x))||'';
-  const withReport=line();
-  const keep=S.quarters[q].operational.rd;
-  S.quarters[q].operational.rd=0;
-  const withoutReport=line();
-  S.quarters[q].operational.rd=keep;
-  return { ourRd:keep, avg:marketRdAvgSF(comps), rawAvg:comps.reduce((a,c)=>a+c.rdChip+c.rdPc,0)/comps.length,
-    withReport:withReport.replace(/<[^>]+>/g,''), withoutReport:withoutReport.replace(/<[^>]+>/g,'') };
+  const comps=Object.values(mi.competitors||{}).filter(x=>x.retainedEarnings!=null);
+  const lines=intelInsights(comps,mi,q).map(x=>x.replace(/<[^>]+>/g,''));
+  const quarterLine=lines.find(x=>/^מו״פ ברבעון/.test(x))||'';
+  const cumLine=lines.find(x=>/^מו״פ מצטבר/.test(x))||'';
+  const rampNote=lines.find(x=>/מאפס את הרמפה/.test(x))||'';
+  const pressure=lines.find(x=>/לחץ טכנולוגי/.test(x))||'';
+  const cum=rdToDateSF(), field=marketRdToDateSF(), qAvg=marketRdAvgSF(comps);
+  S.quarters.Q3.operational.rd=keepQ3;   // restore AFTER reading, or the total includes the seed
+  return { cum, field, qAvg,
+    quarterLine, cumLine, rampNote, pressure,
+    includesUs:marketRdAvgSF([{num:8,rdChip:9999,rdPc:9999},{num:2,rdChip:400,rdPc:100}]) };
 });
-ck('MR74\'s thousands are scaled to units before being compared to ours',
-  rd.avg===Math.round(rd.rawAvg*1000), `${rd.rawAvg} (000) → ${rd.avg} SF`);
-ck('our R&D comes from our own report, not from the competitor sheet',
-  rd.withReport.includes(String(rd.ourRd).replace(/\B(?=(\d{3})+(?!\d))/g,',')) && /מהדוח שלנו/.test(rd.withReport),
-  rd.withReport.slice(0,80));
-ck('...and it is never reported as 0 when the report simply lacks the figure',
-  /לא דווח/.test(rd.withoutReport) && !/מו״פ שלנו 0/.test(rd.withoutReport),
-  rd.withoutReport.slice(0,80));
+ck('the cumulative figure is our own running total across the loaded quarters',
+  rd.cum===1650000, `${rd.cum} SF`);
+ck('MR74\'s thousands are scaled to units — the field\'s quarterly average, not a raw cell',
+  rd.qAvg===400000, `${rd.qAvg} SF`);
+ck('the market average excludes company 8 — "above the field" is about the others',
+  rd.includesUs===500000, `${rd.includesUs} (9999+9999 for us would have moved it)`);
+/* The number the team carries is the cumulative one; the Income Statement row is the quarter's.
+   Reporting either one unlabelled is what made "our R&D is 0" look like a claim about the
+   company rather than about one quarter. */
+ck('the quarter figure names its period and its source',
+  /ברבעון Q3/.test(rd.quarterLine) && /הוצאת הרבעון, לא מצטבר/.test(rd.quarterLine),
+  rd.quarterLine.slice(0,80));
+ck('a quarter with no R&D says "not reported" rather than asserting zero',
+  /לא דווח/.test(rd.quarterLine) && !/שלנו 0/.test(rd.quarterLine), rd.quarterLine.slice(0,60));
+ck('the cumulative is reported separately, against the field\'s cumulative',
+  /מצטבר/.test(rd.cumLine) && /1,650,000/.test(rd.cumLine) && /1,200,000/.test(rd.cumLine),
+  rd.cumLine.slice(0,90));
+ck('...and it warns that a total alone does not buy a grade — the ramp resets',
+  /מאפס את הרמפה/.test(rd.rampNote));
+ck('competitor R&D is quoted in units too, never as a raw MR74 cell',
+  /400,000 SF/.test(rd.pressure) && !/\(400\)/.test(rd.pressure), rd.pressure.slice(0,80));
 
 // ---------------- the dashboard's competitor read-out is orientation, so it folds
 await page.evaluate(()=>go('dash')); await page.waitForTimeout(700);
