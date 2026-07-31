@@ -102,6 +102,31 @@ ck('E · no single decision card dominates the page',
 ck('E · reference tables inside a decision start collapsed', dens.openRefTables===0,
   `${dens.openRefTables} open`);
 
+/* The north-star KPI said "cash vs floor" and printed cash. The floor goal defaults to 0 when the
+   team has not set one, so the subtraction was a no-op and the label was a promise the number did
+   not keep — visible as the same figure appearing twice on the decisions tab, once in the bar and
+   once as "cash available". A label may not describe an operation the number did not undergo. */
+const fl=await page.evaluate(()=>{
+  const q=S.activeQuarter, cash=Math.round(unifiedCashOf(q));
+  const read=()=>{ const k=[...document.querySelectorAll('#northstar .ns-kpi')][0];
+    return {txt:k.innerText.replace(/\n/g,' '), title:k.title,
+      num:Number((k.innerText.match(/[-+]?[\d,]+/)||[''])[0].replace(/,/g,''))}; };
+  const keep=S.config.goals.floors[q];
+  S.config.goals.floors[q]=0; save(); renderNorthStar();
+  const derived=read(), ef=effectiveFloor(q);
+  S.config.goals.floors[q]=900000; save(); renderNorthStar();
+  const set=read();
+  S.config.goals.floors[q]=keep; save(); renderNorthStar();
+  return {cash, derived, set, ef};
+});
+ck('with no floor goal set, the KPI subtracts the ENGINE-derived floor instead of zero',
+  fl.ef.src==='derived' && fl.derived.num===fl.cash-Math.round(fl.ef.value) && fl.derived.num!==fl.cash,
+  `cash ${fl.cash} − floor ${Math.round(fl.ef.value)} = ${fl.derived.num}`);
+ck('...and says on the label that the floor was derived, not chosen',
+  /נגזרת/.test(fl.derived.txt) && /לא הוגדר יעד/.test(fl.derived.title), fl.derived.txt);
+ck('a floor the team actually set wins over the derived one, and drops the caveat',
+  fl.set.num===fl.cash-900000 && !/נגזרת/.test(fl.set.txt), fl.set.txt);
+
 ck('no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).slice(0,2).join(' | '));
 await browser.close();

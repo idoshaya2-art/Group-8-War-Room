@@ -476,7 +476,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.2 · לשונית החלטות — כסף, רשימה, ורקע אחד סגור';
+const APP_VERSION = 'v12.2 · החלטות: כסף → רשימה → רקע';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1230,7 +1230,7 @@ function renderNorthStar(){
   const base=S.activeQuarter, Q=S.quarters[base];
   if(!Q||!Q.entered){ box.innerHTML=`<div class="ns-wrap"><div class="ns-lbl">${IC('inbox')} קלוט דוח רבעון כדי לראות את הציון החי (50% עבר / 50% פוטנציאל)</div></div>`; return; }
   const sp=scoreProxy(null);
-  const cash=unifiedCashOf(base), floor=(S.config.goals.floors[base]||0), dist=cash-floor;
+  const cash=unifiedCashOf(base), ef=effectiveFloor(base), dist=cash-ef.value;
   const alerts=computeAlerts(base);
   const top=alerts.find(a=>a.level==='red')||alerts.find(a=>a.level==='amber')||alerts[0];
   const tlvl=top?(top.level==='red'?'red':(top.level==='amber'?'amber':'ok')):'ok';
@@ -1245,7 +1245,9 @@ function renderNorthStar(){
       <div class="ns-lbl">ציון Q9 · חברה ${OUR_CO}<br><span style="color:var(--accent2)">ממוצע שתי המחציות ⓘ</span></div>
     </div>
     <div class="ns-div"></div>
-    <div class="ns-kpi"><span class="k">מזומן מול רצפה</span><b class="num" style="color:${dist>=0?'var(--green)':'var(--red)'}">${dist>=0?'+':''}${fmt(Math.round(dist))} SF</b></div>
+    ${ef.src==='none'
+      ? `<div class="ns-kpi" title="לא הוגדרה רצפה ואי-אפשר לגזור אותה מהמצב הנוכחי, ולכן זהו המזומן עצמו — לא מרחק ממנה."><span class="k">מזומן מאוחד</span><b class="num">${fmt(Math.round(cash))} SF</b></div>`
+      : `<div class="ns-kpi" title="מזומן מאוחד ${fmt(Math.round(cash))} SF פחות ${ef.label} ${fmt(Math.round(ef.value))} SF.${ef.src==='derived'?' הגדירו יעד בלשונית ההחלטות כדי להחליף את הגזירה.':''}"><span class="k">מזומן מול רצפה${ef.src==='derived'?' (נגזרת)':''}</span><b class="num" style="color:${dist>=0?'var(--green)':'var(--red)'}">${dist>=0?'+':''}${fmt(Math.round(dist))} SF</b></div>`}
     ${sp.parts.rank?`<div class="ns-kpi"><span class="k">דירוג רווחים</span><b class="num">${sp.parts.rank}/${sp.parts.rankN}</b></div>`:''}
     ${sp.parts.share!=null?`<div class="ns-kpi"><span class="k">נתח שוק</span><b class="num">${(sp.parts.share*100).toFixed(1)}%</b></div>`:''}
     ${top?`<div class="ns-alert ${tlvl}" onclick="go('${top.key==='floor'?'financials':(top.key==='noprice'?'ingest':'plan')}')">${IC(tlvl==='red'?'warn':'info')} ${esc(top.title)}</div>`:`<div class="ns-alert ok">${IC('check')} אין התראות פתוחות</div>`}
@@ -1614,6 +1616,19 @@ function floorComponents(forQuarter){
   return {quarter:forQuarter, fundsQuarter:nextQ, items, total, mandatory,
     note:'ההכנסות של הרבעון הבא לא מנוכות: לפי Data Log 09 הגבייה מפוזרת על 1–2 רבעונים, ולכן מכירות של רבעון אינן יכולות לשלם את חשבונות אותו רבעון.',
     planned:!!lev };
+}
+/* "Cash vs floor" needs a floor to be a comparison at all. The goal field defaults to 0 when the
+   team has not set one, and `cash - 0` is just cash — so the north-star KPI was reporting the raw
+   balance under a label promising something else, and on the decisions tab that made it look like
+   the same number twice. The engine can derive the floor (floorComponents), so prefer the team's
+   own goal when it exists, fall back to the derived one, and when neither exists say the floor is
+   not set instead of printing a number that means something different from its label. */
+function effectiveFloor(q){
+  const set=((S.config.goals||{}).floors||{})[q]||0;
+  if(set>0) return {value:set, src:'set', label:'רצפה שהוגדרה כיעד'};
+  let d=null; try{ d=floorComponents(q); }catch(e){}
+  if(d&&d.total>0) return {value:d.total, src:'derived', label:'רצפה שנגזרה מהמנוע (לא הוגדר יעד)'};
+  return {value:0, src:'none', label:'רצפה לא נקבעה'};
 }
 function recommendFloors(){
   const out={}; const detail={};
@@ -3539,7 +3554,7 @@ function bodyDecisions(c){
         <div class="eyebrow" style="margin:0;color:${alloc.over>0?'var(--sig-block)':'var(--sig-act)'}">${IC('dollar')} הכסף של ${targetQ}</div>
         <div><span class="meta">${alloc.over>0?'חסר':'נשאר לפעולות'}</span> <b class="figure${alloc.over>0?' neg':' pos'}" style="font-size:19px">${fmt(Math.abs(_left))} SF</b></div>
       </div>
-      <div class="small" style="margin-top:4px;line-height:1.9;color:var(--muted)">
+      <div class="small" style="margin-top:3px;line-height:1.75;color:var(--muted)">
         <span class="meta">מזומן זמין</span> <b class="figure">${fmt(alloc.available)}</b>
         <span style="opacity:.4">·</span> <span class="meta">הכנסה צפויה</span> <b class="figure${_income>0?' pos':''}">${_income>0?'+':''}${fmt(_income)}</b>
         <span style="opacity:.4">·</span> <span class="meta">רצפה מחייבת</span> <b class="figure neg">−${fmt(alloc.floor)}</b>
@@ -4351,8 +4366,8 @@ function renderOursVsAI(){ const box=$('#oursVsAi'); if(!box)return;
    ${delta!=null?`<div class="tag ${delta>=0?'g':'a'}" style="margin-top:12px;display:block">פער: ה-AI ${delta>=0?'משפר ב-':'נמוך ב-'}${Math.abs(delta).toFixed(0)} נק׳${delta>=0?' — שקול לאמץ':' — התוכנית שלנו מובילה'}</div>`:''}
    ${!ai?`<button class="btn primary" style="margin-top:12px" onclick="go('goals')">${IC('zap')} הרץ מיקסום ליצירת המלצת AI</button>`:`<button class="btn" style="margin-top:12px" onclick="go('sim')">${IC('sliders')} פתח בסימולטור</button>`}`;
 }
-ROLE_PANEL.cfo=(base)=>{ const f=S.quarters[base].financial; const cash=unifiedCashOf(base), floor=S.config.goals.floors[base]||0;
-  return `<div class="kpis">${kpi('מזומן מאוחד (SF)',fmt(cash),'')}${kpi('מרחק מרצפה',fmt(Math.round(cash-floor)),'')}${kpi('חוב',fmt(f.loans),'')}${kpi('ROE / ROI / ROS',(f.roe||0)+'/'+(f.roi||0)+'/'+(f.ros||0)+'%','')}</div>
+ROLE_PANEL.cfo=(base)=>{ const f=S.quarters[base].financial; const cash=unifiedCashOf(base), ef=effectiveFloor(base);
+  return `<div class="kpis">${kpi('מזומן מאוחד (SF)',fmt(cash),'')}${kpi('מרחק מרצפה'+(ef.src==='derived'?' (נגזרת)':''),ef.src==='none'?'—':fmt(Math.round(cash-ef.value)),`<div class="small muted" style="margin-top:2px">${ef.label}${ef.value>0?` · ${fmt(Math.round(ef.value))} SF`:''}</div>`)}${kpi('חוב',fmt(f.loans),'')}${kpi('ROE / ROI / ROS',(f.roe||0)+'/'+(f.roi||0)+'/'+(f.ros||0)+'%','')}</div>
     <div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('wallet')} מזומן לפי אזור</h3></div><div class="cb"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אזור</th><th>מקומי</th><th>שווי SF</th></tr></thead><tbody>${REGIONS.map(r=>`<tr><td>${r.name}</td><td class="num" style="${(f.cash[r.id]||0)<0?'color:var(--red)':''}">${fmt(f.cash[r.id]||0)} ${r.cur}</td><td class="num">${fmt(Math.round((f.cash[r.id]||0)*fxRate(r.cur)))}</td></tr>`).join('')}</tbody></table></div></div></div>
     <div class="card pad" style="margin-top:14px"><b>מימון וגבייה</b><div class="small" style="margin-top:8px;line-height:1.9">אשראי ספקים ${fmt(f.supplierCredit)} · A/P ${fmt(f.ap)} · A/R ${fmt(f.ar)} · ריבית בנק ${S.config.params.interest.bank}%<br>לוח גבייה: ${REGIONS.filter(r=>r.id!=='hq').map(r=>r.name+' '+((S.config.params.collection[r.id]||[]).join('/'))).join(' · ')}</div></div>`;
 };

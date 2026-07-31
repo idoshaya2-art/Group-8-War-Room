@@ -92,6 +92,8 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
     return { found:true, top:Math.round(rb.top), vh:window.innerHeight,
       aboveFold:rb.top>=0 && rb.bottom<=window.innerHeight,
       cardTop: card?Math.round(card.getBoundingClientRect().top):null,
+      // everything this tab puts above the first card, independent of the app chrome around it
+      ownHeight: card?Math.round(card.getBoundingClientRect().top-money.getBoundingClientRect().top):null,
       moneyFirst: money.getBoundingClientRect().top < list.getBoundingClientRect().top,
       // nothing narrative may sit between the money and the list
       listTop: Math.round(list.getBoundingClientRect().top),
@@ -109,6 +111,12 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
   else
     ck('I-3 · the first decision card begins on the first screen on phone',
       m.found && m.cardTop!=null && m.cardTop<m.vh, `card top ${m.cardTop} of ${m.vh}px`);
+  /* The check above is an OUTCOME, and the app chrome is most of its budget — a longer version
+     string in the sidebar has already been enough to wrap a line and push it over. So measure
+     what this tab actually controls as well, otherwise a chrome edit fails an assertion about
+     the decisions tab and sends the next reader to the wrong file. */
+  ck(`I-3 · the tab's own content above the list stays within its budget on ${vp.name}`,
+    m.found && m.ownHeight<=300, `${m.ownHeight}px of chrome-independent height (money block + header)`);
   ck(`I-3 · the money block leads, and the decision list starts within one screen on ${vp.name}`,
     m.moneyFirst===true && m.listTop<m.vh, `list at ${m.listTop} of ${m.vh}px`);
   ck(`I-3 · the money block carries all four figures the tab is for, on ${vp.name}`, m.hasFour===true);

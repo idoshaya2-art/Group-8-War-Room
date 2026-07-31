@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **539 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **544 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **565**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **570**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -97,6 +97,21 @@ it moved into (4). Two rules keep it that way, and both are asserted:
 
 The old `renderNextAction` strip was deleted, not disabled — with the list one screen from the
 top it duplicated the first card. The dead-code suite is what forces that choice.
+
+wave5 also measures the tab's **own** height above the first card (≤300px), not just the outcome.
+The app chrome eats most of a phone screen, so a change nowhere near this tab — a longer
+`APP_VERSION` wrapping a line in the sidebar was enough — can fail the outcome assertion and send
+the next reader to the wrong file. The pair localises the blame.
+
+## A label may not describe an operation the number did not undergo
+
+`S.config.goals.floors[q]` defaults to 0, so the north-star's "מזומן מול רצפה" was printing
+`cash - 0` — raw cash under a label promising a comparison. `effectiveFloor(q)` is the fix and the
+single definition: the team's own goal when set, otherwise the engine's `floorComponents(q).total`
+with the label marked `(נגזרת)`, and only if neither exists does it stop claiming a comparison at
+all. `renderNorthStar` and `ROLE_PANEL.cfo` both go through it; `projectCashflow` deliberately does
+not, because a breach there is also triggered by a negative region and changing its floor would
+move every projection the suite already pins.
 
 ## The written plan lives in the decisions tab, as structure
 
