@@ -153,34 +153,39 @@ ck('the PC grade row follows v6 in deferring Y2 to Q6',
 ck('Brazil absorption is now one of the tracked anchors',
   del.some(r=>/ברזיל/.test(r.topic) && /14,000/.test(r.planned)));
 
-// ---------------- it renders on the decisions tab, beside the engine's own list
+/* ---------------- where it renders.
+   The plan is a baseline to check decisions against, not a decision itself, so it lives in the
+   decisions tab's background disclosure — below the money block and below the engine's own list,
+   and closed until asked for. That ordering is the assertion: the plan must never push the
+   decisions down the page, and it must never replace them. */
 await page.evaluate(()=>go('decide')); await page.waitForTimeout(900);
 const ui=await page.evaluate(()=>{
   const c=document.querySelector('.content');
-  const blocks=[...c.querySelectorAll('.read')];
-  const plan=blocks.find(b=>/התוכנית הכתובה/.test(b.textContent));
+  const plan=[...c.querySelectorAll('.read')].find(b=>/התוכנית הכתובה/.test(b.textContent));
   if(!plan) return {found:false};
-  const rows=plan.querySelectorAll('table tbody tr');
-  const marks=plan.querySelectorAll('.pv6');
-  const openTables=[...plan.querySelectorAll('details[open]')].length;
-  const engineList=!!document.getElementById('decisionsTop');
-  const planTop=plan.getBoundingClientRect().top;
-  const listTop=document.getElementById('decisionsTop').getBoundingClientRect().top;
-  return {found:true, rows:rows.length, marks:marks.length, openTables,
-    engineList, planBeforeList: planTop<listTop,
+  const bg=plan.closest('details.sec');
+  return {found:true,
+    marks:plan.querySelectorAll('.pv6').length,
+    // nested disclosures inside the plan block start shut
+    openTables:[...plan.querySelectorAll('details[open]')].length,
+    insideBackground: !!bg && !bg.open,
+    listAbove: document.getElementById('decisionsTop').getBoundingClientRect().top
+             < plan.getBoundingClientRect().top,
+    decisionCards: c.querySelectorAll('.act').length,
     // the verdict marker must not be a pill — that is what the surfaces suite polices
     pillsInside:plan.querySelectorAll('.tag').length,
-    naVisible:[...plan.querySelectorAll('.pv6.na')].length};
+    naPresent:plan.querySelectorAll('.pv6.na').length};
 });
 ck('the plan renders on the decisions tab', ui.found===true);
 ck('every action shows a verdict marker', ui.found && ui.marks>=15, `${ui.marks} markers`);
-ck('the engine\'s own decision list is still there, below the plan',
-  ui.engineList===true && ui.planBeforeList===true);
-ck('the supporting tables are collapsed by default — the actions are the point',
+ck('it sits inside the background disclosure, which starts closed', ui.insideBackground===true);
+ck('the engine\'s own decision list stays above it and is not replaced by it',
+  ui.listAbove===true && ui.decisionCards>=5, `${ui.decisionCards} decision cards above the plan`);
+ck('the tables inside the plan start collapsed — the actions are the point',
   ui.openTables===0, `${ui.openTables} open`);
 ck('verdicts are markers, not pills, so the pill budget still means something',
   ui.pillsInside<=3, `${ui.pillsInside} pills inside the plan block`);
-ck('"not checked" is visible on screen rather than hidden', ui.naVisible>0, `${ui.naVisible}`);
+ck('"not checked" appears rather than being hidden', ui.naPresent>0, `${ui.naPresent}`);
 ck('no JavaScript errors',
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.slice(0,2).join(' | '));

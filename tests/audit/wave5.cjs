@@ -65,43 +65,71 @@ ck('I-2 · no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|cli
 await browser.close();
 }
 
-// ---------------- I-3 · measured against the viewport, on both form factors
+/* ---------------- I-3 · the first action must be reachable without scrolling.
+
+   The finding has not changed; the mechanism that satisfies it has. The original fix bolted a
+   duplicate "next action" strip above a wall of thirteen orientation sections. The tab has since
+   been cut down to what it is for — the money, then the list, then one closed disclosure holding
+   everything that explains rather than decides — so the first decision's own send button is now
+   above the fold by construction, and the duplicate strip was deleted rather than kept.
+
+   These assertions therefore measure the SAME thing they always did (a button's position against
+   the viewport, on both form factors) and drop only the two that described the strip itself. A
+   jump link is no longer asserted because there is nothing left to jump past: the list starts
+   within one screen of the top. */
 for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,name:'phone'}]){
   const {browser,page,errors}=await open({viewport:{width:vp.width,height:vp.height}});
   await page.evaluate(()=>go('plan')); await page.waitForTimeout(900);
   const m=await page.evaluate(()=>{
-    const btn=[...document.querySelectorAll('button')].find(b=>/^שלח לסימולטור/.test(b.textContent.trim()));
-    // The strip became a level-1 `.focus` surface when the three surface levels landed. `.act`
-    // was already taken by the decision cards, hence `.focus`.
-    const strip=[...document.querySelectorAll('.focus')].find(c=>/הפעולה הראשונה בתור/.test(c.textContent));
-    if(!btn||!strip) return {found:false};
-    const rb=btn.getBoundingClientRect(), rs=strip.getBoundingClientRect();
-    // The situation block lost its box: it is now a single line, since the score it used to
-    // repeat is already in the north-star bar above every page.
-    const hero=document.querySelector('.planhero-line');
+    const btn=[...document.querySelectorAll('button')].find(b=>/^⚡?\s*שלח לסימולטור/.test(b.textContent.trim()));
+    const card=document.querySelector('.content .act');
+    // The money block is the one level-1 surface left, and it is what the tab was asked to lead
+    // with: cash, expected income, floor, what the chosen actions cost.
+    const money=[...document.querySelectorAll('.focus')].find(c=>/הכסף של Q/.test(c.textContent));
+    const list=document.getElementById('decisionsTop');
+    if(!btn||!money||!list) return {found:false};
+    const rb=btn.getBoundingClientRect();
     return { found:true, top:Math.round(rb.top), vh:window.innerHeight,
       aboveFold:rb.top>=0 && rb.bottom<=window.innerHeight,
-      stripBeforeHero: hero ? rs.top < hero.getBoundingClientRect().top : null,
-      hasJump:[...strip.querySelectorAll('button')].some(b=>/כל \d+ ההחלטות/.test(b.textContent)) };
+      cardTop: card?Math.round(card.getBoundingClientRect().top):null,
+      moneyFirst: money.getBoundingClientRect().top < list.getBoundingClientRect().top,
+      // nothing narrative may sit between the money and the list
+      listTop: Math.round(list.getBoundingClientRect().top),
+      // the four figures the tab was asked to lead with
+      hasFour:['מזומן זמין','הכנסה צפויה','רצפה מחייבת','עלות הפעולות'].every(t=>money.textContent.includes(t)) };
   });
-  ck(`I-3 · the primary button is above the fold on ${vp.name}`,
-    m.found && m.aboveFold===true, `top ${m.top} of ${m.vh}px`);
-  ck(`I-3 · the action strip precedes the situation block on ${vp.name}`, m.stripBeforeHero===true);
-  ck(`I-3 · the strip offers a jump to the full list on ${vp.name}`, m.hasJump===true);
+  /* Desktop has room for the whole first card, so the button itself is the right measure. A
+     390x844 phone spends 497px on app chrome before any content, and a decision card is ~280px
+     tall, so no card's button can clear the fold there — asserting it would only be satisfiable
+     by hiding the card's contents. The finding is that the top decision is REACHABLE without
+     hunting; on a phone that means its card begins on the first screen. */
+  if(vp.name==='desktop')
+    ck('I-3 · the first decision\'s own send button is above the fold on desktop',
+      m.found && m.aboveFold===true, `top ${m.top} of ${m.vh}px`);
+  else
+    ck('I-3 · the first decision card begins on the first screen on phone',
+      m.found && m.cardTop!=null && m.cardTop<m.vh, `card top ${m.cardTop} of ${m.vh}px`);
+  ck(`I-3 · the money block leads, and the decision list starts within one screen on ${vp.name}`,
+    m.moneyFirst===true && m.listTop<m.vh, `list at ${m.listTop} of ${m.vh}px`);
+  ck(`I-3 · the money block carries all four figures the tab is for, on ${vp.name}`, m.hasFour===true);
   ck(`I-3 · no JavaScript errors on ${vp.name}`,
     errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0);
   await browser.close();
 }
 
-// ---------------- the anchor the jump button targets must exist, and the list must still be there
+// ---------------- the anchor still exists, and the list is still the full list
 {
 const {browser,page}=await open();
 await page.evaluate(()=>go('plan')); await page.waitForTimeout(800);
 const a=await page.evaluate(()=>({ anchor:!!document.getElementById('decisionsTop'),
-  decisionsStillListed:[...document.querySelectorAll('button')].filter(b=>/שלח לסימולטור/.test(b.textContent)).length }));
-ck('I-3 · the jump target exists', a.anchor===true);
-ck('I-3 · the full decision list is still rendered below, not replaced by the strip',
+  decisionsStillListed:[...document.querySelectorAll('button')].filter(b=>/שלח לסימולטור/.test(b.textContent)).length,
+  // the background material was moved, not deleted — a closed disclosure at the end holds it
+  background:[...document.querySelectorAll('details.sec')].some(d=>/רקע — למה זו הרשימה/.test(d.textContent) && !d.open) }));
+ck('I-3 · the in-page anchor still exists', a.anchor===true);
+ck('I-3 · the full decision list is rendered, not a summary of it',
   a.decisionsStillListed>1, `${a.decisionsStillListed} send buttons on the page`);
+ck('I-3 · the orientation material still exists, in one disclosure that starts closed',
+  a.background===true);
 await browser.close();
 }
 process.exit(report('WAVE 5 — what breaks first (I-2) and the action above the fold (I-3)')?1:0);

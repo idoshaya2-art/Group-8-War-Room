@@ -476,7 +476,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.1 · התוכנית הכתובה (v6) בלשונית ההחלטות';
+const APP_VERSION = 'v12.2 · לשונית החלטות — כסף, רשימה, ורקע אחד סגור';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3519,94 +3519,93 @@ function bodyDecisions(c){
   const mustCount=decisionIdx.filter(i=>items[i].level==='red'&&!items[i].blocked).length;
   const decisionCount=decisionIdx.length;
   const sentCount=decisionIdx.filter(i=>isSent(targetQ,sentKeyFor(items[i]))).length;
-  const _q=S.activeQuarter, _f=S.quarters[_q].financial, _op=S.quarters[_q].operational;
-  const _sp=scoreProxy(null); const _share=(_sp.parts&&_sp.parts.share!=null)?(_sp.parts.share*100).toFixed(1)+'%':'—';
   const _topPivot=(mp.pivots&&mp.pivots.length)?mp.pivots[0].replace(/<[^>]+>/g,''):'';
+  const _income=alloc.inNow+alloc.inLater;
+  const _left=alloc.capacity-alloc.totalOut;
+  let _wb=null; try{ _wb=whatBreaksFirst(q, (S.scenarios[0]||{}).levers||null); }catch(e){}
+  /* This tab answers four questions and nothing else: how much cash there is, what is expected
+     to come in, what the floor costs against what the chosen actions cost, and then the list —
+     with the AI beside it. It used to open with thirteen sections stacked above the first
+     decision (a next-action strip, a score line, a how-to, a breach panel, the written plan, an
+     insight list, a critical path and three more disclosures), so the thing you came to do was
+     the last thing you reached. All of that still exists and none of it was deleted — it moved
+     into ONE closed disclosure at the bottom, because it is background, not a decision. */
   c.innerHTML=`
-    <!-- I-3 · The action first. On a phone the situation block alone pushed the primary button
-         106px below the fold, so the one decision that matters most needed a scroll to reach.
-         The situation follows it — orientation is useful, but it is not the thing to do. -->
-    ${renderNextAction(q,targetQ,items,fieldStrip)}
-    <!-- ===== PART 1 · THE SITUATION. Everything narrative lives here, and nothing
-         narrative appears again between the decisions below. ===== -->
-    <!-- The score itself is already in the north-star bar above every page. Repeating it here in
-         a box of its own said the same number twice and put a second jump button directly under
-         the first. What is left is only what the north-star does NOT say: the gap, the pace it
-         demands, and the three standing figures — as text, not as pills. -->
-    <div class="planhero-line small" style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin-bottom:18px;color:var(--muted)">
-      <span><b style="color:var(--txt);font-size:15px">${mp.remaining>0?`+${Math.max(0,mp.tScore-mp.score).toFixed(0)}`:'—'}</b> נק׳ עד יעד ${mp.tScore}</span>
-      <span>${mp.remaining} רבעונים ל-Q9${mp.required>0?` · נדרש <b style="color:var(--txt)">${mp.required.toFixed(1)}</b> נק׳/רבעון`:''}</span>
-      <span class="tag ${trackTag}">${trackTxt}</span>
-      <span style="margin-inline-start:auto">מטה <b style="color:var(--txt)">${fmt(_f.cash.hq||0)}</b> SF · טק <b style="color:var(--txt)">X${_op.techX}/Y${_op.techY}</b> · מו״פ <b style="color:var(--txt)">${fmt(_op.rd||0)}</b></span>
-    </div>
-    ${_topPivot?`<div class="focus is-warn" style="padding:14px 18px"><div class="eyebrow" style="color:var(--sig-warn)">${IC('warn')} שינוי אסטרטגיה</div><div class="small" style="line-height:1.7">${_topPivot}</div></div>`:''}
-    ${howTo('plan',`${IC('clipboard')} איך עובדים כאן (הזנות ל-${targetQ})`,
-      `<b>1.</b> ההחלטות ממוספרות <b>לפי עדיפות</b> — עבור מלמעלה למטה. תגיות: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (אסור עד שהתלות מתקיימת).<br>
-      <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
-      <b>3.</b> חלופות ב<b>"אופציות אחרות"</b> · נימוק ותלויות ב<b>"למה, ומה התלויות"</b>. כל מספר מחושב במנוע.`)}
-    ${renderWhatBreaksFirst(q)}
-    <!-- The written plan (v6) as the BASELINE, not as a replacement for the engine's list.
-         The team decided on paper; this shows that decision line by line with whatever the
-         engine can still say about it today, and says plainly where it can say nothing. -->
-    ${(()=>{ try{ return renderPlanV6(q,targetQ); }catch(e){ return ''; } })()}
-    ${insightList?`<div class="read"><span class="rh">מה שכדאי לדעת לפני שמחליטים</span>${insightList}</div>`:''}
-    ${renderCriticalPath(q,targetQ)}
-    <details class="sec" style="margin-bottom:14px"><summary>${IC('calendar')} הנתיב המתגלגל ${targetQ}→Q9 — מה חייב להיות נכון בכל רבעון, ומתי להתחיל</summary>
-      <div class="secbody">${renderRollingPlan(q,targetQ)}</div></details>
-    <details class="sec" style="margin-bottom:14px"><summary>${IC('trendUp')} רקע אסטרטגי — תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
-      <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}${renderForecastAccuracy()}</div></details>
-    <details class="sec" style="margin-bottom:18px"><summary>${IC('cpu')} חוות דעת שנייה מהיועץ (אינה משנה את הרשימה)</summary>
-      <div class="secbody">${renderAdvisorCard(q,targetQ)}</div></details>
-
-    <!-- ===== PART 2 · THE DECISIONS. Nothing above this line repeats below it. ===== -->
-    <div id="decisionsTop"></div>
-    <div class="read" style="margin-bottom:16px">
-      <div class="between" style="flex-wrap:wrap;gap:8px">
-        <span class="rh">תקציב המזומן לרבעון הזה</span>
-        <span class="row" style="gap:6px;flex-wrap:wrap">
-          <span class="small muted">במזומן <b class="num" style="color:var(--txt)">${fmt(alloc.available)}</b></span>
-          <span class="small muted" title="נשמר רק החלק הבלתי-נמנע של הרצפה (מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס, ריבית). ההוצאות שההחלטות מקצות אינן מנוכות פעמיים.">− רצפה מחייבת <b class="num" style="color:var(--txt)">${fmt(alloc.floor)}</b></span>
-          ${alloc.inNow>0?`<span class="small muted">+ גבייה <b class="num" style="color:var(--sig-ok)">${fmt(alloc.inNow)}</b></span>`:''}
-          <span class="small">קיבולת <b class="num" style="color:${alloc.over>0?'var(--sig-block)':'var(--sig-ok)'};font-size:15px">${fmt(alloc.capacity)} SF</b></span></span>
+    <div class="focus${alloc.over>0?' is-block':''}">
+      <!-- The conclusion on the headline, its four components as one flowing line beneath.
+           Stacking label-over-value in a grid put the block at 245px on a 390px phone and pushed
+           the first decision off the screen; this says the same four numbers in ~90px. -->
+      <div class="between" style="flex-wrap:wrap;gap:8px;align-items:baseline">
+        <div class="eyebrow" style="margin:0;color:${alloc.over>0?'var(--sig-block)':'var(--sig-act)'}">${IC('dollar')} הכסף של ${targetQ}</div>
+        <div><span class="meta">${alloc.over>0?'חסר':'נשאר לפעולות'}</span> <b class="figure${alloc.over>0?' neg':' pos'}" style="font-size:19px">${fmt(Math.abs(_left))} SF</b></div>
       </div>
-      <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
+      <div class="small" style="margin-top:4px;line-height:1.9;color:var(--muted)">
+        <span class="meta">מזומן זמין</span> <b class="figure">${fmt(alloc.available)}</b>
+        <span style="opacity:.4">·</span> <span class="meta">הכנסה צפויה</span> <b class="figure${_income>0?' pos':''}">${_income>0?'+':''}${fmt(_income)}</b>
+        <span style="opacity:.4">·</span> <span class="meta">רצפה מחייבת</span> <b class="figure neg">−${fmt(alloc.floor)}</b>
+        <span style="opacity:.4">·</span> <span class="meta">עלות הפעולות</span> <b class="figure${alloc.over>0?' neg':''}">−${fmt(alloc.totalOut)}</b>
+      </div>
+      <div style="margin-top:8px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
         <i style="display:block;height:100%;width:${Math.min(100,alloc.capacity?alloc.totalOut/alloc.capacity*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
-      <div class="small muted" style="margin-top:7px;line-height:1.7">
-        ההמלצות מוציאות <b class="num">${fmt(alloc.totalOut)} SF</b> מתוך קיבולת ${fmt(alloc.capacity)}.
-        ${alloc.over>0?`<b style="color:var(--red)">חריגה של ${fmt(alloc.over)} SF</b> — פעולות ללא כיסוי מסומנות באדום ברשימה.`:'הכל נכנס.'}
-        <br><b>הקיבולת מורכבת משניים:</b> מזומן פנוי אחרי <b>החלק המחייב</b> של הרצפה (<b>${fmt(alloc.spendable)} SF</b> — נשמר רק מה שאי-אפשר לוותר עליו, כדי לא לנכות פעמיים את ההוצאות שההחלטות עצמן מקצות) ועוד <b>${fmt(alloc.inNow)} SF</b> שנגבים כבר ברבעון הזה מהמכירות שברשימה (Data Log 09: ארה״ב 40% · אירופה 50% · ברזיל 30% נגבים מיד; היתרה ${fmt(alloc.inLater)} SF ברבעונים הבאים).
-        ${alloc.inNow>0?`<br><span style="color:var(--amber)">${IC('warn')} <b>הגבייה המיידית מותנית</b> בכך שהסחורה באמת תימכר במחיר שהוזן. אם לא תימכר — ההוצאות כבר יצאו. ${alloc.strictBalance<0?`<b>בתרחיש שבו לא נמכר כלום, תרד ${fmt(-alloc.strictBalance)} SF מתחת לרצפה</b> — זה הסיכון שאתה לוקח.`:`גם אם לא יימכר כלום, תישאר מעל הרצפה (${fmt(alloc.strictBalance)} SF מרווח).`}</span>`:''}
+      <div class="small" style="margin-top:6px;line-height:1.6;color:var(--muted)">
+        ${alloc.over>0
+          ? `<b style="color:var(--sig-block)">חורגים ב-${fmt(alloc.over)} SF</b> — הפעולות ללא כיסוי מסומנות באדום למטה.`
+          : `הכל נכנס בתקציב.`}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}${alloc.inNow>0?` <span style="color:var(--sig-warn)">${fmt(alloc.inNow)} SF מההכנסה כבר נספרו בתקציב ומותנים במכירה.</span>`:''}
       </div>
     </div>
-    <div id="decisions" class="between" style="margin:0 2px 12px;padding-top:14px;border-top:2px solid var(--line2);flex-wrap:wrap;gap:8px;scroll-margin-top:12px">
-      <b style="font-size:17px">${IC('clipboard')} ההחלטות ל-${targetQ}</b>
-      <span class="small muted"><b class="num" style="color:var(--txt)">${decisionCount}</b> פעולות${mustCount?` · <b class="num" style="color:var(--sig-block)">${mustCount}</b> חובה`:''}${sentCount?` · <b class="num" style="color:var(--sig-ok)">${sentCount}</b> הועברו`:''}</span>
-    </div>
-    <div class="read" style="margin-bottom:16px">
-      <div class="between" style="flex-wrap:wrap;gap:8px">
-        <div class="small muted" style="line-height:1.8">${IC('info')} נבנו מ־<b>חוקי המשחק</b> · <b>המצב מהדוח האחרון</b> · <b>היעדים</b>${rv?` · <b style="color:var(--sig-ai)">נבחנו ע״י AI</b>`:' · <span style="color:var(--sig-warn)">AI טרם הורץ</span>'}</div>
-        <div class="row" style="gap:8px">
-          <button class="btn sm ${rv?'':'primary'}" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'בחן והצע רשימה מלאה'}</button>
-          ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</div>
+
+    <div id="decisionsTop"></div>
+    <!-- Deliberately not a .read: a section rule plus its padding cost 44px here, and on a phone
+         that is the difference between the first decision starting on screen or below it. -->
+    <div style="margin:14px 0 12px">
+      <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
+        <b style="font-size:16px">${decisionCount} ההחלטות ל-${targetQ}${mustCount?` · <span style="color:var(--sig-block)">${mustCount} חובה</span>`:''}${sentCount?` · <span style="color:var(--sig-ok)">${sentCount} הועברו</span>`:''}${rv?`<span class="small" style="font-weight:400;color:var(--sig-ai)"> · נבחנו ע״י AI</span>`:''}</b>
+        <span class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn sm ${rv?'':'primary'}" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'שפר עם AI'}</button>
+          ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
       </div>
-      <div id="enrichOut" style="margin-top:8px"></div>
-      ${rv?`
-        ${rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
-        ${rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
-          <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
-        ${rv.rejected&&rv.rejected.length?`<div class="tag a" style="display:block;margin-top:8px;line-height:1.7;white-space:normal">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b> ולא נכנסו: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
-      `:''}
-      <div class="small muted" style="margin-top:6px">שכבות 1–3 דטרמיניסטיות ורצות תמיד. שכבה 4 רצה <b>לפי בקשה</b>: ה-AI בוחן כל פעולה של המנוע (לאשר · לשנות · לוותר) ומחזיר רשימה מלאה ומסודרת. <b>למנוע המילה האחרונה</b> — שינוי או תוספת שנכשלים בבדיקות החוקיות נדחים, ופעולת חובה לא ניתנת להסרה.</div>
+      <div id="enrichOut"></div>
+      ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
+      ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
+        <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
+      ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b> ולא נכנסו: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
     </div>
     ${actionList}
-    <div class="read" style="margin-top:20px">
+    <div class="read" style="margin-top:18px">
       <span class="rh">סיימת לשלוח פעולות?</span>
       <div class="small muted" style="margin:6px 0 10px;line-height:1.7">בסימולטור תכוונן את המספרים ותראה את ההשפעה על הציון והמזומן, ואז תעבור להזנה.</div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <button class="btn primary" onclick="go('sim')">${IC('sliders')} המשך לסימולטור →</button>
         <button class="btn" onclick="go('export')">${IC('share')} דלג לגיליון ההזנה</button>
       </div>
-    </div>`
+    </div>
+
+    <!-- Everything that explains, rather than decides. One disclosure, closed. -->
+    <details class="sec" style="margin-top:22px"><summary>${IC('book')} רקע — למה זו הרשימה, התוכנית הכתובה, והדרך עד Q9</summary>
+      <div class="secbody">
+        <div class="read">
+          <span class="rh">איך עובדים כאן</span>
+          <div class="small" style="line-height:2;margin-top:6px">
+            <b>1.</b> ההחלטות ממוספרות <b>לפי עדיפות</b> — עבור מלמעלה למטה. תגיות: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (אסור עד שהתלות מתקיימת).<br>
+            <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
+            <b>3.</b> הרשימה נבנית משלוש שכבות דטרמיניסטיות (חוקי המשחק · המצב מהדוח האחרון · היעדים) שרצות תמיד. <b>ה-AI הוא שכבה רביעית לפי בקשה</b> — הוא בוחן כל פעולה (לאשר · לשנות · לוותר) ומחזיר רשימה מסודרת, אבל <b>למנוע המילה האחרונה</b>: שינוי שנכשל בבדיקות החוקיות נדחה, ופעולת חובה לא ניתנת להסרה.<br>
+            <b>4.</b> <b>איך מחושב התקציב למעלה:</b> מזומן זמין <b class="num">${fmt(alloc.available)}</b> פחות <b>החלק המחייב</b> של הרצפה (<b class="num">${fmt(alloc.floor)}</b> — מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית; ההוצאות שההחלטות עצמן מקצות אינן מנוכות פעמיים) ועוד <b class="num">${fmt(alloc.inNow)}</b> SF שנגבים כבר ברבעון הזה מהמכירות שברשימה. לפי Data Log 09 הגבייה המיידית היא ארה״ב 40% · אירופה 50% · ברזיל 30%, והיתרה — <b class="num">${fmt(alloc.inLater)}</b> SF — מגיעה ברבעונים הבאים. הסכום המיידי <b>מותנה</b> בכך שהסחורה תימכר במחיר שהוזן: ${alloc.strictBalance<0?`בתרחיש שבו לא נמכר כלום תרד <b style="color:var(--sig-warn)">${fmt(-alloc.strictBalance)} SF מתחת לרצפה</b>.`:`גם אם לא יימכר כלום תישאר מעל הרצפה, עם ${fmt(alloc.strictBalance)} SF מרווח.`}<br>
+            <b>5.</b> מצב היעד והקצב: ${mp.remaining} רבעונים ל-Q9${mp.required>0?`, נדרש <b>${mp.required.toFixed(1)}</b> נק׳ לרבעון כדי להגיע ל-${mp.tScore}`:''}. <span class="tag ${trackTag}">${trackTxt}</span>
+          </div>
+        </div>
+        ${_topPivot?`<div class="note is-warn" style="margin-top:12px">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
+        ${renderWhatBreaksFirst(q)}
+        ${(()=>{ try{ return renderPlanV6(q,targetQ); }catch(e){ return ''; } })()}
+        ${insightList?`<div class="read"><span class="rh">מה שכדאי לדעת לפני שמחליטים</span>${insightList}</div>`:''}
+        ${renderCriticalPath(q,targetQ)}
+        <details class="sec" style="margin-top:14px"><summary>${IC('calendar')} הנתיב המתגלגל ${targetQ}→Q9</summary>
+          <div class="secbody">${renderRollingPlan(q,targetQ)}</div></details>
+        <details class="sec" style="margin-top:14px"><summary>${IC('trendUp')} תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
+          <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}${renderForecastAccuracy()}</div></details>
+        <details class="sec" style="margin-top:14px"><summary>${IC('cpu')} חוות דעת שנייה מהיועץ (אינה משנה את הרשימה)</summary>
+          <div class="secbody">${renderAdvisorCard(q,targetQ)}</div></details>
+      </div>
+    </details>`
 };
 /* Decision-dependency layer: the canonical INTOPIA decision chain + the
    cross-decision prerequisites that are relevant to the current state, so the
@@ -3679,31 +3678,6 @@ function renderWhatBreaksFirst(q){
             ? `נדרש לוותר על <b>${w.combo.length}</b> שורות (הגדולות ראשונות): ${w.combo.map(c=>esc(c.what)).join(' · ')} — סה״כ ${fmt(w.combo.reduce((a,c)=>a+c.sf,0))} SF.`
             : `<b>גם ויתור על כל ההוצאות שניתן להזיז (${fmt(w.movableTotal)} SF) אינו סוגר פער של ${fmt(w.gap)} SF.</b> זה אינו כוונון — נדרש מימון, האצת גבייה, או צמצום הנפח עצמו.`}</div>`
         : `<div class="note is-block" style="margin-top:10px">${IC('warn')} <b>אין הוצאה שניתן להזיז ברבעון הזה</b> — הפער אינו נובע מהחלטות אלא מהמצב הקיים. נדרש מימון או האצת גבייה.</div>`)}
-  </div>`;
-}
-/* I-3 · The first mandatory decision, at the top of the page. The list is ordered by priority and
-   the send button lives on each card, but the highest-priority card sat about 180 words down —
-   so the one action that matters most needed a scroll to find. */
-function renderNextAction(q,targetQ,items,fieldStrip){
-  const idx=(items||[]).findIndex(it=>(it.level||it.sev)==='red' && it.sim && !it.blocked);
-  const pick=idx>=0?idx:(items||[]).findIndex(it=>it.sim && !it.blocked);
-  if(pick<0) return '';
-  const it=items[pick]; const sent=isSent(targetQ, sentKeyFor(it));
-  const flow=(()=>{ try{ return actionCashFlowSF(it); }catch(e){ return null; } })();
-  return `<div class="focus${sent?' is-ok':''}">
-    <div class="between" style="flex-wrap:wrap;gap:10px">
-      <div style="flex:1;min-width:220px">
-        <div class="eyebrow" style="color:${sent?'var(--sig-ok)':'var(--sig-act)'}">${IC('zap')} הפעולה הראשונה בתור</div>
-        <b style="font-size:15px;line-height:1.5">${it.title}</b>
-        ${it.form?`<div class="small muted" style="margin-top:2px"><span class="form">${esc(it.form)}</span></div>`:''}
-        ${flow&&flow.revenue>0?`<div class="small" style="margin-top:4px;color:var(--green)">מכניסה ${fmt(flow.inNow)} SF כבר ברבעון הזה מול הוצאה ${fmt(flow.out)} → נטו ${flow.net>=0?'+':''}${fmt(flow.net)}</div>`:''}
-      </div>
-      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-        ${sent?`<span class="tag g" style="font-weight:800">✓ הועבר לסימולטור</span>`
-              :`<button class="btn primary" onclick="applyRecToSim(${pick})">${IC('zap')} שלח לסימולטור</button>`}
-        <button class="btn sm ghost" onclick="document.getElementById('decisionsTop')?.scrollIntoView({behavior:'smooth',block:'start'})">כל ${items.filter(x=>x.sim).length} ההחלטות ↓</button>
-      </div></div>
-    ${fieldStrip(it.sim)}
   </div>`;
 }
 /* D-02 · The critical path, above the decisions rather than buried in a section. Two questions

@@ -335,26 +335,38 @@ ck('selling inventory is net cash POSITIVE, not a pure cost', flow.sellNet>0, `o
 ck('capacity = cash after the floor PLUS same-quarter collection', flow.capacityIsBaseePlusInflow, `${flow.spendable} + ${flow.inNow} = ${flow.capacity}`);
 ck('with the sale funding it, the whole set fits', flow.allFit);
 ck('the no-sale scenario is quantified, not assumed away', typeof flow.strictBalance==='number', 'strict balance '+flow.strictBalance);
-const flowUI=await page.evaluate(()=>{ const t=document.body.innerText;
-  return {twoTier:/הקיבולת מורכבת משניים/.test(t), contingency:/הגבייה המיידית מותנית/.test(t),
-    noSaleScenario:/גם אם לא יימכר כלום|מתחת לרצפה/.test(t),
+/* The decisions tab was cut back to the four things it was asked for — cash, expected income,
+   floor, and what the chosen actions cost — with the derivation moved into one closed disclosure
+   at the foot of the page. So these split in two: the HEADLINE claims must be visible without
+   opening anything (innerText), and the WORKING behind them must still exist on the page
+   (textContent, which reaches inside a closed <details>). Neither may quietly disappear. */
+const flowUI=await page.evaluate(()=>{ const t=document.body.innerText, all=document.body.textContent;
+  return {twoTier:/הקיבולת מורכבת משניים|מזומן זמין.*הכנסה צפויה|החלק המחייב/s.test(all),
+    contingency:/מותנים במכירה/.test(t), contingencyDetail:/מותנה בכך שהסחורה תימכר/.test(all),
+    noSaleScenario:/גם אם לא יימכר כלום|מתחת לרצפה/.test(all),
     perCard:/תזרים הפעולה/.test(t), selfFunding:/מממנת את עצמה/.test(t)}; });
-ck('the strip separates cash-in-hand from expected collection', flowUI.twoTier);
-ck('it warns that the collection is contingent on the goods actually selling', flowUI.contingency);
-ck('it states what happens if nothing sells', flowUI.noSaleScenario);
+ck('the visible strip separates cash-in-hand from expected collection', flowUI.twoTier);
+ck('it warns on the surface that the collection is contingent on the goods selling',
+  flowUI.contingency && flowUI.contingencyDetail);
+ck('it still states what happens if nothing sells', flowUI.noSaleScenario);
 ck('revenue actions show their own cash flow on the card', flowUI.perCard);
 ck('a self-funding action says so', flowUI.selfFunding);
 ck('every recommendation carries a cash cost', bud.everyActionCosted && bud.someActionCosts);
 ck('the recommended set is allocated against a running balance', bud.used>=0);
 ck('parking idle cash accounts for what the other recommendations spend', bud.idleAfterCommitments!==false);
 ck('the tool never recommends spending AND parking the same money', bud.idleNotDoubleCounting);
-const budUI=await page.evaluate(()=>{ const t=document.body.innerText;
-  return {strip:/תקציב המזומן לרבעון הזה/.test(t), showsSpendable:/קיבולת/.test(t),
-    explainsWhyRevenueExcluded:/Data Log 09|נגבים מיד/.test(t),
+const budUI=await page.evaluate(()=>{ const t=document.body.innerText, all=document.body.textContent;
+  const money=[...document.querySelectorAll('.focus')].find(x=>/הכסף של Q/.test(x.textContent));
+  return {strip:!!money,
+    // the four figures the tab exists to show, all above the decision list
+    fourFigures:money?['מזומן זמין','הכנסה צפויה','רצפה מחייבת','עלות הפעולות'].every(k=>money.textContent.includes(k)):false,
+    showsSpendable:/נשאר לפעולות|חסר/.test(t),
+    explainsWhyRevenueExcluded:/Data Log 09|נגבים מיד/.test(all),
     perCardCost:[...document.querySelectorAll('.act')].filter(a=>/SF/.test(a.textContent)).length}; });
-ck('a cash budget strip is shown above the decisions', budUI.strip);
-ck('it states the spending capacity', budUI.showsSpendable);
-ck('it shows the collection schedule behind the inflow', budUI.explainsWhyRevenueExcluded);
+ck('a cash budget block leads the tab', budUI.strip);
+ck('it shows all four figures the tab is for', budUI.fourFigures);
+ck('it states what is left to spend', budUI.showsSpendable);
+ck('it still shows the collection schedule behind the inflow', budUI.explainsWhyRevenueExcluded);
 ck('cards display their cash cost', budUI.perCardCost>0, budUI.perCardCost+' cards');
 const over=await page.evaluate(()=>{
   // genuinely over budget: almost no cash AND nothing to sell, so no inflow can rescue it
@@ -362,7 +374,7 @@ const over=await page.evaluate(()=>{
   window.__inv=S.quarters.Q3.operational.inventory;
   S.quarters.Q3.operational.inventory=[]; save(); go('plan');
   const t=document.body.innerText;
-  return {overWarning:/חריגה של/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(t)}; });
+  return {overWarning:/חורגים ב-/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(t)}; });
 ck('an over-budget set is flagged', over.overWarning);
 ck('actions with no cash cover are marked individually', over.unaffordableMarked);
 await page.evaluate(()=>{ S.quarters.Q3.operational.inventory=window.__inv;

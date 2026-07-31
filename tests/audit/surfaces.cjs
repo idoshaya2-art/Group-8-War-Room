@@ -46,14 +46,16 @@ ck('every level-1 surface says what it is before it says what it holds',
 ck('all five semantic colour variables are defined', m.sigVars===5, `${m.sigVars}/5`);
 
 /* The score is the number the whole page hangs on. It appeared twice — once in the north-star bar
-   and once in a hero box directly beneath it — with a jump button under each. */
+   and once in a hero box directly beneath it — with a jump button under each. The hero box and
+   the second jump are both gone now that the list starts within a screen of the top, so the
+   assertion is "never more than one", not "exactly one": zero is the correct answer for a page
+   with nothing to jump past. */
 const dup=await page.evaluate(()=>{
-  const t=document.querySelector('.content').innerText;
   const jump=[...document.querySelectorAll('.content button')].filter(b=>/ההחלטות|החלטות חובה/.test(b.textContent) && /↓/.test(b.textContent));
   return { jumpButtons:jump.length, jumpLabels:jump.map(b=>b.textContent.trim()) };
 });
-ck('one jump-to-decisions button, not two stacked',
-  dup.jumpButtons===1, dup.jumpLabels.join(' | '));
+ck('never two stacked jump-to-decisions buttons',
+  dup.jumpButtons<=1, dup.jumpLabels.join(' | ') || 'none — the list needs no jump');
 
 /* Same page, phone. The levels must survive the narrow viewport rather than collapse into a stack
    of identical blocks. */

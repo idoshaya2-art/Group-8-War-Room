@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **536 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **539 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **562**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **565**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -70,6 +70,34 @@ engine ignores.
 asserting the behaviour its fix was verified against, so a later change cannot quietly
 reopen a closed finding.
 
+## The decisions tab is four things, in this order
+
+It answers exactly what it was asked to answer, and nothing sits above the list that is not one
+of them:
+
+1. **`.focus` — the money.** Cash available · expected income · mandatory floor · what the chosen
+   actions cost · what is left. One level-1 surface, ~140px, followed by the allocation bar.
+2. **The list**, under a single compact header carrying the AI button.
+3. The simulator/export footer.
+4. **One `<details>`, closed** — everything that explains rather than decides: how the list is
+   built, how the budget is derived (Data Log 09 collection, the two-tier capacity, the no-sale
+   scenario), the written plan v6, what-breaks-first, the critical path, the rolling plan, the
+   roadmap and the advisor.
+
+The tab used to stack thirteen sections above the first decision. Nothing was deleted in the cut —
+it moved into (4). Two rules keep it that way, and both are asserted:
+
+- `tests/audit/wave5.cjs` measures the **first decision's own send button against the viewport**
+  on desktop, and the **first card's top** on a phone (a 390×844 phone spends 497px on app chrome
+  and a card is ~280px, so a button above the fold there is not achievable without hiding the
+  card's contents — asserting it would only be satisfiable by making the page worse).
+- `tests/decisions.cjs` splits every budget claim in two: the headline must be in `innerText`
+  (visible), the working must still be in `textContent` (present, inside the closed disclosure).
+  That is what stops a future cut from deleting the derivation instead of collapsing it.
+
+The old `renderNextAction` strip was deleted, not disabled — with the list one screen from the
+top it duplicated the first card. The dead-code suite is what forces that choice.
+
 ## The written plan lives in the decisions tab, as structure
 
 `PLAN_V6` encodes the team's plan Q4→Q9 (version 6) as data — the fifteen Q4 actions in order,
@@ -89,7 +117,8 @@ of **18 SF** is below Data Log 04's selling cost of **40 EUR** (Y-only) or **33 
 **31 SF a unit**, ~690,000 SF a quarter at 22,000 units. It does not overturn the plan's Brazil
 conclusion — it widens the Brazil↔Europe gap — but Europe's 45.4 SF contribution is overstated.
 
-`PLAN_DOC` (v5) is still the *document* the submission tab hands back; v6 is deliberately **not**
+It renders inside the decisions tab's background disclosure — below the money and below the list,
+closed until asked for. `PLAN_DOC` (v5) is still the *document* the submission tab hands back; v6 is deliberately **not**
 committed as a file. `planDeltas()` compares against v6's anchors.
 
 ## What is settled, and what the app still does not claim to know

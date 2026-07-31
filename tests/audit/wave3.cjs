@@ -113,14 +113,21 @@ ck('I-4 · one measurement is never reported as a consistent bias',
 await page.evaluate(()=>{ S.quarters.Q3.operational.techX=0; S.quarters.Q4.entered=false; save(); });
 await page.evaluate(()=>go('plan')); await page.waitForTimeout(900);
 const ui=await page.evaluate(()=>{
-  const d=[...document.querySelectorAll('details')].find(x=>/הנתיב המתגלגל/.test(x.textContent));
-  if(d) d.open=true;
+  // The decisions tab now leads with the money and the list, and everything that explains rather
+  // than decides sits in one closed disclosure at the foot of the page — including this. So open
+  // every disclosure before reading: what is asserted here is that the material is correct and
+  // present, not that it competes with the decisions for the top of the screen.
+  document.querySelectorAll('details').forEach(x=>x.open=true);
+  // match on the SUMMARY, not on textContent — the outer background disclosure contains this one,
+  // and matching its text swept in every other table on the page (77 rows instead of 6).
+  const d=[...document.querySelectorAll('details')]
+    .find(x=>/הנתיב המתגלגל/.test((x.querySelector('summary')||{}).textContent||''));
   const t=document.body.innerText;
   return { card:/הנתיב הקריטי/.test(t), missed:/כבר איחרנו/.test(t), now:/חייבות להתחיל/.test(t),
     section:!!d, rows:d?d.querySelectorAll('tbody tr').length:0, q9:/Q9/.test(d?d.innerText:''),
     x3:/דרגת X3/.test(t) };
 });
-ck('D-02 · the critical path is on the decisions page, above the decisions', ui.card===true);
+ck('D-02 · the critical path is on the decisions page, in the background section', ui.card===true);
 ck('D-02 · missed start dates and start-now items are both shown', ui.missed && ui.now);
 ck('D-02 · the rolling table has one row per remaining quarter and reaches Q9',
   ui.rows===6 && ui.q9===true, `${ui.rows} rows`);
