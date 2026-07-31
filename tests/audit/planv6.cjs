@@ -186,6 +186,96 @@ ck('the tables inside the plan start collapsed — the actions are the point',
 ck('verdicts are markers, not pills, so the pill budget still means something',
   ui.pillsInside<=3, `${ui.pillsInside} pills inside the plan block`);
 ck('"not checked" appears rather than being hidden', ui.naPresent>0, `${ui.naPresent}`);
+/* ---------------- the plan IS the list.
+   The tab used to lead with buildActionPlan()'s output — a well-sourced list, but not the one the
+   team wrote. Being handed someone else's fifteen items while holding your own is the complication
+   this tab exists to remove, so the written plan is now the page's decision list and the engine's
+   own list is a second opinion below it. What must not happen is the engine's MANDATORY findings
+   going quiet just because they are not in the written plan. */
+const asList=await page.evaluate(()=>{
+  const c=document.querySelector('.content');
+  const cards=[...c.querySelectorAll('.act')];
+  const visible=cards.filter(a=>!a.closest('details:not([open])'));
+  const engineWrap=[...c.querySelectorAll('details.sec')].find(d=>/מה המנוע היה מציע מעצמו/.test(d.textContent));
+  const planTitles=PLAN_V6.quarters.Q4.actions.map(a=>a.what);
+  return { visible:visible.length,
+    total:cards.length,
+    firstThree:visible.slice(0,3).map(a=>a.innerText.split('\n').filter(Boolean)[1]||''),
+    allFromPlan:visible.every(a=>planTitles.some(t=>a.textContent.includes(t))),
+    header:(document.getElementById('decisions')||{}).textContent||'',
+    engineHidden: !!engineWrap && !engineWrap.open,
+    engineCards: engineWrap?engineWrap.querySelectorAll('.act').length:0,
+    aiButton:!![...c.querySelectorAll('button')].find(b=>/בדוק עם AI|בדוק מחדש/.test(b.textContent)) };
+});
+ck('the page\'s decision list is the written plan, not the engine\'s list',
+  asList.visible===15 && asList.allFromPlan===true, `${asList.visible} visible cards`);
+ck('...and says so in its header', /התוכנית שלי/.test(asList.header), asList.header.slice(0,50));
+ck('the engine\'s own list still exists, as a second opinion that starts closed',
+  asList.engineHidden===true && asList.engineCards>0, `${asList.engineCards} engine cards, collapsed`);
+ck('one button checks the plan with the AI', asList.aiButton===true);
+
+// mandatory engine findings the plan does not cover must be promoted back to the surface
+const gaps=await page.evaluate(()=>{
+  const blk=planV6For('Q4');
+  const eng=buildActionPlan('Q3','Q4')||[];
+  const real=planGaps(eng, blk);
+  // a red item on a form the plan DOES use must not be promoted (it is already covered)
+  const covered=planGaps([{level:'red', form:'A3-1 (Transfers)', title:'כבר בתוכנית'}], blk);
+  // a red item on a form the plan does not use must be
+  const uncovered=planGaps([{level:'red', form:'H2 (Securities)', title:'לא בתוכנית'}], blk);
+  // an amber item is never promoted — this section is for obligations, not suggestions
+  const amber=planGaps([{level:'amber', form:'H2 (Securities)', title:'רק מומלץ'}], blk);
+  // and a blocked one is not actionable yet
+  const blocked=planGaps([{level:'red', blocked:'תלוי במו״פ', form:'H2', title:'חסום'}], blk);
+  return { real:real.map(x=>x.title), covered:covered.length, uncovered:uncovered.length,
+    amber:amber.length, blocked:blocked.length };
+});
+ck('an obligation on a form the plan already uses is NOT repeated', gaps.covered===0);
+ck('an obligation on a form the plan never touches IS surfaced', gaps.uncovered===1);
+ck('merely recommended engine actions are not promoted — only obligations', gaps.amber===0);
+ck('a blocked obligation is not presented as something to do now', gaps.blocked===0);
+
+// ---------------- the AI review of the plan, parsed defensively
+const pr=await page.evaluate(()=>{
+  const good=parsePlanReview(JSON.stringify({rationale:'סביר',
+    actions:[{n:1,verdict:'fix',why:'מזומן ברזיל נמוך',fix:'העבר 1M בלבד'},
+             {n:2,verdict:'nonsense',why:'x'},
+             {n:99,verdict:'ok',why:'מחוץ לטווח'},
+             {n:3,verdict:'blocked',why:'<img src=x onerror="window.__pw=1">'}],
+    missing:[{what:'<b>אספקת החוזה</b>',why:'סעיף 5'}]}), 15);
+  let threw=null; try{ parsePlanReview('לא JSON בכלל',15); }catch(e){ threw=e.message; }
+  return { keys:Object.keys(good.byN), v1:good.byN[1], v2:good.byN[2],
+    hasOutOfRange:!!good.byN[99], v3why:good.byN[3].why,
+    missingWhat:good.missing[0].what, threw };
+});
+ck('a verdict outside the action range is dropped rather than mis-attached',
+  pr.hasOutOfRange===false && pr.keys.join(',')==='1,2,3', pr.keys.join(','));
+ck('an unknown verdict word falls back to "ok" rather than breaking the render',
+  pr.v2.verdict==='ok');
+ck('a fix instruction is kept alongside its verdict',
+  pr.v1.verdict==='fix' && /1M/.test(pr.v1.fix));
+ck('model output is escaped where it enters — the XSS lesson applies here too',
+  /^&lt;img/.test(pr.v3why) && /^&lt;b&gt;/.test(pr.missingWhat), pr.v3why.slice(0,30));
+ck('a non-JSON answer raises rather than silently producing an empty review',
+  typeof pr.threw==='string' && pr.threw.length>0, pr.threw);
+
+// the AI's verdicts must actually reach the cards
+const rendered=await page.evaluate(async()=>{
+  S.ai=S.ai||{};
+  S.ai.planReview={q:'Q4', at:Date.now(), rationale:'בדיקה', missing:[],
+    byN:{1:{verdict:'blocked',why:'אין מזומן בברזיל',fix:null},
+         2:{verdict:'ok',why:'תקין',fix:null}}};
+  save(); go('plan');
+  await new Promise(r=>setTimeout(r,700));
+  const cards=[...document.querySelectorAll('.content .act')].filter(a=>!a.closest('details:not([open])'));
+  return { first:cards[0].className, firstHasAI:/אין מזומן בברזיל/.test(cards[0].textContent),
+    second:cards[1].className, rationaleShown:/סיכום ה-AI/.test(document.body.innerText) };
+});
+ck('an AI verdict appears on the action it belongs to', rendered.firstHasAI===true);
+ck('a blocked verdict colours the card red', /red/.test(rendered.first), rendered.first);
+ck('an approved one does not', !/red/.test(rendered.second), rendered.second);
+ck('the AI\'s summary line is shown above the list', rendered.rationaleShown===true);
+
 ck('no JavaScript errors',
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.slice(0,2).join(' | '));

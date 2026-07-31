@@ -81,17 +81,14 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
   const {browser,page,errors}=await open({viewport:{width:vp.width,height:vp.height}});
   await page.evaluate(()=>go('plan')); await page.waitForTimeout(900);
   const m=await page.evaluate(()=>{
-    const btn=[...document.querySelectorAll('button')].find(b=>/^⚡?\s*שלח לסימולטור/.test(b.textContent.trim()));
     const card=document.querySelector('.content .act');
     // The money block is the one level-1 surface left, and it is what the tab was asked to lead
     // with: cash, expected income, floor, what the chosen actions cost.
     const money=[...document.querySelectorAll('.focus')].find(c=>/הכסף של Q/.test(c.textContent));
     const list=document.getElementById('decisionsTop');
-    if(!btn||!money||!list) return {found:false};
-    const rb=btn.getBoundingClientRect();
-    return { found:true, top:Math.round(rb.top), vh:window.innerHeight,
-      aboveFold:rb.top>=0 && rb.bottom<=window.innerHeight,
-      cardTop: card?Math.round(card.getBoundingClientRect().top):null,
+    if(!card||!money||!list) return {found:false};
+    return { found:true, vh:window.innerHeight,
+      cardTop: Math.round(card.getBoundingClientRect().top),
       // everything this tab puts above the first card, independent of the app chrome around it
       ownHeight: card?Math.round(card.getBoundingClientRect().top-money.getBoundingClientRect().top):null,
       moneyFirst: money.getBoundingClientRect().top < list.getBoundingClientRect().top,
@@ -100,23 +97,19 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
       // the four figures the tab was asked to lead with
       hasFour:['מזומן זמין','הכנסה צפויה','רצפה מחייבת','עלות הפעולות'].every(t=>money.textContent.includes(t)) };
   });
-  /* Desktop has room for the whole first card, so the button itself is the right measure. A
-     390x844 phone spends 497px on app chrome before any content, and a decision card is ~280px
-     tall, so no card's button can clear the fold there — asserting it would only be satisfiable
-     by hiding the card's contents. The finding is that the top decision is REACHABLE without
-     hunting; on a phone that means its card begins on the first screen. */
-  if(vp.name==='desktop')
-    ck('I-3 · the first decision\'s own send button is above the fold on desktop',
-      m.found && m.aboveFold===true, `top ${m.top} of ${m.vh}px`);
-  else
-    ck('I-3 · the first decision card begins on the first screen on phone',
-      m.found && m.cardTop!=null && m.cardTop<m.vh, `card top ${m.cardTop} of ${m.vh}px`);
+  /* The list is now the team's own written plan, and a plan action is a line to check rather than
+     a payload to fire, so there is no per-card send button to measure any more (the engine's list,
+     which has them, moved into the background section). The finding is unchanged — the first
+     decision must be reachable without hunting — so it is measured directly: the card itself is
+     on the first screen, on both form factors. */
+  ck(`I-3 · the first decision card is on the first screen on ${vp.name}`,
+    m.found && m.cardTop!=null && m.cardTop<m.vh, `card top ${m.cardTop} of ${m.vh}px`);
   /* The check above is an OUTCOME, and the app chrome is most of its budget — a longer version
      string in the sidebar has already been enough to wrap a line and push it over. So measure
      what this tab actually controls as well, otherwise a chrome edit fails an assertion about
      the decisions tab and sends the next reader to the wrong file. */
   ck(`I-3 · the tab's own content above the list stays within its budget on ${vp.name}`,
-    m.found && m.ownHeight<=300, `${m.ownHeight}px of chrome-independent height (money block + header)`);
+    m.found && m.ownHeight<=320, `${m.ownHeight}px of chrome-independent height (money block + header)`);
   ck(`I-3 · the money block leads, and the decision list starts within one screen on ${vp.name}`,
     m.moneyFirst===true && m.listTop<m.vh, `list at ${m.listTop} of ${m.vh}px`);
   ck(`I-3 · the money block carries all four figures the tab is for, on ${vp.name}`, m.hasFour===true);

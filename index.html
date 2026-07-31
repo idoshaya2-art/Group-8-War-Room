@@ -403,6 +403,18 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
   .side{width:100%;height:auto;position:sticky;top:0;z-index:40;flex-direction:column;padding:8px 10px;gap:6px;
     overflow:visible;border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
   .side .brand{padding:2px 4px 6px}
+  /* A phone spends ~497px on chrome before any content — more than half the screen — and the
+     first decision was landing below the fold because of it. The university line and the build
+     string are the two things on that strip that no one is reading twice; both stay in the DOM
+     (the version is how you tell what is deployed) but stop costing rows on a narrow screen. */
+  .side .brand .t2{display:none}
+  .side .brand{padding:0 4px 4px}
+  .side .logo{width:30px;height:30px;font-size:13px}
+  .side>div:last-child{font-size:9px;margin-top:2px !important;opacity:.55}
+  /* A level-1 surface still has to read as one, but 18px of padding on each side of a 350px
+     screen is 10% of the width spent on air. */
+  .focus{padding:13px}
+  .act{margin-bottom:10px}
   .nav{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;gap:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
   .nav::-webkit-scrollbar{display:none}
   .nav button{width:auto;flex:0 0 auto;white-space:nowrap;min-height:44px;padding:10px 13px}
@@ -476,7 +488,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.3 · קליטה לרבעון הנכון';
+const APP_VERSION = 'v12.4 · הרשימה שלי, נבדקת';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3538,6 +3550,10 @@ function bodyDecisions(c){
   const _income=alloc.inNow+alloc.inLater;
   const _left=alloc.capacity-alloc.totalOut;
   let _wb=null; try{ _wb=whatBreaksFirst(q, (S.scenarios[0]||{}).levers||null); }catch(e){}
+  // The written plan for this quarter, if there is one. When there is, it IS the list and the
+  // engine's own list becomes the second opinion below. When there is not (a quarter the plan
+  // does not cover), the engine's list stays where it was — better a generated list than none.
+  let _planList=''; try{ _planList=renderPlanActions(q,targetQ,items); }catch(e){ _planList=''; }
   /* This tab answers four questions and nothing else: how much cash there is, what is expected
      to come in, what the floor costs against what the chosen actions cost, and then the list —
      with the AI beside it. It used to open with thirteen sections stacked above the first
@@ -3565,13 +3581,14 @@ function bodyDecisions(c){
       <div class="small" style="margin-top:6px;line-height:1.6;color:var(--muted)">
         ${alloc.over>0
           ? `<b style="color:var(--sig-block)">חורגים ב-${fmt(alloc.over)} SF</b> — הפעולות ללא כיסוי מסומנות באדום למטה.`
-          : `הכל נכנס בתקציב.`}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}${alloc.inNow>0?` <span style="color:var(--sig-warn)">${fmt(alloc.inNow)} SF מההכנסה כבר נספרו בתקציב ומותנים במכירה.</span>`:''}
+          : `הכל נכנס בתקציב.`}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}${alloc.inNow>0?` <span style="color:var(--sig-warn)">${fmt(alloc.inNow)} SF מותנים במכירה.</span>`:''}
       </div>
     </div>
 
-    <div id="decisionsTop"></div>
-    <!-- Deliberately not a .read: a section rule plus its padding cost 44px here, and on a phone
-         that is the difference between the first decision starting on screen or below it. -->
+    <!-- THE LIST IS THE TEAM'S OWN PLAN. The engine's generated list is a second opinion and
+         lives in the background section below; the only part of it promoted back up here is
+         what it marks mandatory and the plan does not cover. -->
+    ${_planList || `<div id="decisionsTop"></div>
     <div style="margin:14px 0 12px">
       <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
         <b style="font-size:16px">${decisionCount} ההחלטות ל-${targetQ}${mustCount?` · <span style="color:var(--sig-block)">${mustCount} חובה</span>`:''}${sentCount?` · <span style="color:var(--sig-ok)">${sentCount} הועברו</span>`:''}${rv?`<span class="small" style="font-weight:400;color:var(--sig-ai)"> · נבחנו ע״י AI</span>`:''}</b>
@@ -3580,12 +3597,8 @@ function bodyDecisions(c){
           ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
       </div>
       <div id="enrichOut"></div>
-      ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
-      ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
-        <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
-      ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b> ולא נכנסו: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
     </div>
-    ${actionList}
+    ${actionList}`}
     <div class="read" style="margin-top:18px">
       <span class="rh">סיימת לשלוח פעולות?</span>
       <div class="small muted" style="margin:6px 0 10px;line-height:1.7">בסימולטור תכוונן את המספרים ותראה את ההשפעה על הציון והמזומן, ואז תעבור להזנה.</div>
@@ -3608,6 +3621,19 @@ function bodyDecisions(c){
             <b>5.</b> מצב היעד והקצב: ${mp.remaining} רבעונים ל-Q9${mp.required>0?`, נדרש <b>${mp.required.toFixed(1)}</b> נק׳ לרבעון כדי להגיע ל-${mp.tScore}`:''}. <span class="tag ${trackTag}">${trackTxt}</span>
           </div>
         </div>
+        ${_planList?`<details class="sec" style="margin-bottom:14px"><summary>${IC('sliders')} מה המנוע היה מציע מעצמו — ${decisionCount} פעולות (חוות דעת שנייה, לא הרשימה)</summary>
+          <div class="secbody">
+            <div class="small muted" style="line-height:1.8;margin-bottom:10px">${IC('info')} הרשימה הזו נבנית מחוקי המשחק, מהדוח האחרון ומהיעדים — בלי לראות את התוכנית הכתובה. היא כאן כדי להשוות, לא כדי להחליף. מה שהיא מסמנת כ<b>חובה</b> ואינו מכוסה בתוכנית כבר עלה למעלה.
+              <span class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">
+                <button class="btn sm" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'תן ל-AI לבחון גם את רשימת המנוע'}</button>
+                ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
+              <div id="enrichOut" style="margin-top:8px"></div>
+              ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
+              ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
+                <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
+              ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b>: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
+            </div>
+            ${actionList}</div></details>`:''}
         ${_topPivot?`<div class="note is-warn" style="margin-top:12px">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
         ${renderWhatBreaksFirst(q)}
         ${(()=>{ try{ return renderPlanV6(q,targetQ); }catch(e){ return ''; } })()}
@@ -5861,6 +5887,182 @@ function planV6Row(a, idx){
       ${planV6Mark(v.state)}
       <div class="small" style="white-space:normal;line-height:1.7;margin-top:4px;color:var(--muted)">${v.txt}</div></td>
   </tr>`;
+}
+/* ==========================================================================
+   THE TEAM'S OWN LIST, CHECKED — not a list the engine invented.
+
+   The decisions tab used to lead with buildActionPlan()'s output: a list the engine composed
+   from rules and state. It is well-sourced, but it is not the plan the team wrote, and being
+   asked to work through someone else's fifteen items while holding your own is precisely the
+   complication this tab was supposed to remove.
+
+   So the list IS the plan (PLAN_V6, the actions the team entered for the quarter), and both
+   checkers sit BESIDE it rather than in front of it:
+     · the engine, through PLAN_V6_CHECKS — arithmetic against DATALOG and live state;
+     · the model, through reviewPlanWithAI() — judgement against the same fact pack the rest of
+       the AI layer uses (rules, Data Log, MR74/MR17&28, competitor prices, liquidity by
+       currency, the demand model).
+   The engine's own list is not deleted — it moves below, and the only part of it promoted back
+   up is what it flags as mandatory that the plan does not cover. Losing a contract deadline
+   because it was not in the written plan is the one failure this arrangement must not allow.
+   ========================================================================== */
+const PLAN_REVIEW_SYSTEM = `אתה בוחן תוכנית רבעונית שצוות INTOPIA (חברה 8) כתב בעצמו. התוכנית אינה שלך ואינך מחליף אותה — אתה בודק אותה מול הנתונים ומחזיר חוות דעת לכל פעולה.
+
+## מה אתה בודק בכל פעולה, לפי סדר
+1. **חוקיות** — האם הפעולה אפשרית לפי חוקי המשחק ולוחות ה-Data Log שקיבלת? (עיכוב של רבעון בכל פעולה · מו״פ נספר רבעון קדימה · אין מלאי = אין מכירה · שתי דרגות = שני דגמים · שבב אחד למחשב לפי מטריצת [DL-02])
+2. **מחקרי שוק** — האם הכמות והמחיר עומדים מול מה ש-MR17&28 / MR74 / מנוע הביקוש מראים? אם המחקר הרלוונטי חסר — אמור "לא מכויל" ואל תמציא מספר.
+3. **כסף** — האם יש מזומן **באזור ובמטבע הנכונים**? "מאוחד" אינו ארנק. אם האזור דק, מה מקדימים או מעבירים.
+4. **כדאיות** — כמה זה מזיז את שתי מחציות הציון (עבר: רווח/יעילות · עתיד: דרגה/נתח/בריאות).
+
+## כללי ברזל
+- **אל תמציא מספרים.** כל מספר שאתה מצטט חייב להופיע בהקשר הנתונים שקיבלת. אם אין נתון — כתוב "לא ידוע" ואמור איזה מחקר סוגר את זה.
+- **אל תשכתב את התוכנית.** אתה מאשר, מסייג, מציע תיקון נקודתי, או פוסל. אינך מחליף פעולה בפעולה אחרת.
+- אם פעולה תקינה — אמור זאת בקצרה. אל תמציא הסתייגות כדי להיראות ביקורתי.
+- \`missing\` הוא רק למה שהחוקים או ההתחייבויות **מחייבים** ואינו מופיע באף פעולה. לא רעיונות לשיפור.
+
+## פורמט התשובה — JSON בלבד, ללא טקסט מסביב
+{"rationale":"משפט אחד: מה המצב הכללי של התוכנית",
+ "actions":[{"n":1,"verdict":"ok|risk|fix|blocked","why":"נימוק קצר ומספרי","fix":"מה לשנות, רק אם verdict=fix"}],
+ "missing":[{"what":"מה חסר","why":"איזה חוק/התחייבות מחייב אותו"}]}
+
+verdict: ok = תקין · risk = אפשרי אך תלוי בהנחה שלא אומתה · fix = צריך תיקון נקודתי · blocked = לא חוקי או בלתי אפשרי.
+"n" הוא מספר הפעולה כפי שהוא מופיע ברשימה. החזר ערך לכל פעולה, ואל תדלג.`;
+
+/* Model output is untrusted text — the fact pack is built from uploaded report files, so a string
+   a report carries can come back out as a verdict. Everything is escaped here, where it first
+   enters the app, exactly as applyReview does for the engine list. */
+function parsePlanReview(txt, count){
+  let raw=String(txt||'').trim();
+  const fence=raw.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) raw=fence[1].trim();
+  const a=raw.indexOf('{'), b=raw.lastIndexOf('}');
+  if(a<0||b<=a) throw new Error('התשובה לא הכילה JSON');
+  let obj; try{ obj=JSON.parse(raw.slice(a,b+1)); }catch(e){ throw new Error('JSON לא תקין: '+e.message); }
+  const VERDICTS=['ok','risk','fix','blocked'];
+  const byN={};
+  (obj.actions||[]).slice(0,40).forEach(e=>{
+    const n=parseInt(e.n,10);
+    if(!Number.isInteger(n)||n<1||n>count) return;
+    byN[n]={ verdict:VERDICTS.includes(e.verdict)?e.verdict:'ok',
+      why:esc(String(e.why||'').slice(0,400)),
+      fix:e.fix?esc(String(e.fix).slice(0,300)):null };
+  });
+  const missing=(obj.missing||[]).slice(0,8).map(m=>({
+    what:esc(String(m.what||'').slice(0,140)), why:esc(String(m.why||'').slice(0,300))
+  })).filter(m=>m.what);
+  return { rationale:esc(String(obj.rationale||'').slice(0,400)), byN, missing };
+}
+window.reviewPlanWithAI=async()=>{
+  if(!getApiKey()){ openAISettings(); return; }
+  const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q;
+  const blk=planV6For(targetQ);
+  if(!blk){ toast('אין תוכנית כתובה לרבעון הזה','a'); return; }
+  const btn=$('#planAiBtn'); if(btn){ btn.disabled=true; btn.textContent='בודק…'; }
+  const box=$('#planAiOut');
+  if(box) box.innerHTML=`<div class="chip">${IC('clock')} ה-AI בודק כל פעולה מול החוקים, המחקרים והכספים…</div>`;
+  try{
+    // Each action goes with the engine's own verdict attached, so the model is told what the
+    // arithmetic already found instead of re-deriving (or contradicting) it blind.
+    const listTxt=blk.actions.map((x,i)=>{
+      const v=planV6Check(x.check);
+      return `${i+1}. ${x.what}${x.form&&x.form!=='—'?` [טופס ${x.form}]`:''}\n   ערך כלכלי לפי התוכנית: ${x.value||'—'}\n   בדיקת המנוע: ${PLAN_V6_STATES[v.state].label} — ${String(v.txt).replace(/<[^>]+>/g,'')}`;
+    }).join('\n');
+    const floorTxt=blk.floorTotal?`רצפת הרבעון לפי התוכנית: ${fmt(blk.floorTotal)} SF. מקורות: ${blk.sources}`:'';
+    const ctx=[buildAIContext(),
+      `## התוכנית הכתובה של הצוות ל-${targetQ} (גרסה ${PLAN_V6_VERSION}) — זו הרשימה שאתה בוחן`,
+      blk.subtitle?`כותרת הרבעון בתוכנית: ${blk.subtitle}`:'',
+      listTxt, floorTxt,
+      `## הסתייגות שהתוכנית עצמה רושמת`, PLAN_V6.caveat,
+      `## רבעון היעד: ${targetQ}`].filter(Boolean).join('\n');
+    const out=await callLLM([{role:'user',content:ctx+`\n\n---\nבדוק כל פעולה ברשימה והחזר חוות דעת לכל אחת. JSON בלבד.`}],
+      PLAN_REVIEW_SYSTEM,{max_tokens:2600});
+    const rev=parsePlanReview(out, blk.actions.length);
+    S.ai=S.ai||{};
+    S.ai.planReview={ q:targetQ, at:Date.now(), ...rev };
+    save(); go('plan');
+    const counts=Object.values(rev.byN).reduce((m,v)=>{ m[v.verdict]=(m[v.verdict]||0)+1; return m; },{});
+    toast(`התוכנית נבדקה: ${counts.ok||0} תקינות · ${counts.risk||0} בסיכון · ${counts.fix||0} לתיקון · ${counts.blocked||0} חסומות`,
+      (counts.blocked||counts.fix)?'a':'g');
+  }catch(e){
+    if(box) box.innerHTML=`<div class="tag r" style="display:block;line-height:1.7;white-space:normal">${IC('warn')} ${esc(aiErr(e))}</div>`;
+  }
+  const b2=$('#planAiBtn'); if(b2){ b2.disabled=false; b2.textContent='בדוק את התוכנית עם AI'; }
+};
+window.clearPlanReview=()=>{ if(S.ai) S.ai.planReview=null; save(); go('plan'); };
+
+const PLAN_AI_STATES = {
+  ok:     {cls:'ok',    glyph:'✓', label:'תקין לפי ה-AI'},
+  risk:   {cls:'warn',  glyph:'!', label:'סיכון'},
+  fix:    {cls:'warn',  glyph:'✎', label:'דורש תיקון'},
+  blocked:{cls:'block', glyph:'✕', label:'חסום'},
+};
+/* Engine findings the written plan does not cover. Only mandatory ones are promoted — the rest of
+   the engine's list stays below, in the background section, as a second opinion rather than a
+   second to-do list. Matching is by decision-form code, which is what both sides speak. */
+function planGaps(engineItems, blk){
+  if(!blk) return [];
+  const planForms=new Set();
+  blk.actions.forEach(a=>String(a.form||'').split(/[\/+]/).forEach(f=>{
+    const m=String(f).trim().match(/^([A-Z]\d(?:-\d)?)/); if(m) planForms.add(m[1]);
+  }));
+  return (engineItems||[]).filter(it=>{
+    if(it.level!=='red' || it.blocked) return false;
+    const m=String(it.form||'').match(/^([A-Z]\d(?:-\d)?)/);
+    return !(m && planForms.has(m[1]));
+  });
+}
+/* The plan as the page's decision list. Same card shape as the engine list it replaces, so the
+   density and collapse rules the surfaces suite polices still apply. */
+function renderPlanActions(base, targetQ, engineItems){
+  const blk=planV6For(targetQ);
+  if(!blk) return '';
+  const rv=(S.ai&&S.ai.planReview&&S.ai.planReview.q===targetQ)?S.ai.planReview:null;
+  const gaps=planGaps(engineItems, blk);
+  const tally=planV6Tally(blk.actions);
+  const cards=blk.actions.map((a,i)=>{
+    const n=a.n!=null?a.n:(i+1);
+    const ev=planV6Check(a.check);
+    const av=rv?rv.byN[n]:null;
+    const worst = (ev.state==='block'||(av&&av.verdict==='blocked')) ? 'red'
+                : (ev.state==='warn'||(av&&(av.verdict==='risk'||av.verdict==='fix'))) ? 'amber' : 'info';
+    const as=av?PLAN_AI_STATES[av.verdict]:null;
+    return `<div class="act ${worst}">
+      <div class="an">${n}</div>
+      <div class="at">
+        <div class="between" style="gap:8px;flex-wrap:wrap">
+          <b style="flex:1;min-width:180px;font-size:15px">${esc(a.what)}</b>
+          <span class="row" style="gap:8px;align-items:baseline">
+            ${as?`<span class="pv6 ${as.cls}">${as.glyph} ${as.label}</span>`:''}
+            ${a.form&&a.form!=='—'?`<span class="form">${esc(a.form)}</span>`:''}</span>
+        </div>
+        ${a.value?`<div class="small muted" style="margin-top:5px;line-height:1.7">${esc(a.value)}</div>`:''}
+        ${av?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.75;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">
+          ${IC('cpu')} <b>ה-AI:</b> ${av.why}${av.fix?`<br><b style="color:var(--sig-warn)">מה לשנות:</b> ${av.fix}`:''}</div>`:''}
+        <details class="fverd" style="margin-top:8px"><summary>${planV6Mark(ev.state)} — מה המנוע מודד ⌄</summary>
+          <div class="small muted" style="line-height:1.75;margin-top:6px">${ev.txt}</div></details>
+      </div></div>`;
+  }).join('');
+  return `<div id="decisionsTop"></div>
+    <div style="margin:14px 0 12px">
+      <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
+        <b style="font-size:16px" title="הפעולות כפי שהוזנו בקובץ התוכנית, גרסה ${PLAN_V6_VERSION}">התוכנית שלי ל-${targetQ} · ${blk.actions.length} פעולות</b>
+        <span class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn sm ${rv?'':'primary'}" id="planAiBtn" onclick="reviewPlanWithAI()">${IC('cpu')} ${rv?'בדוק מחדש':'בדוק עם AI'}</button>
+          ${rv?`<button class="btn sm ghost" onclick="clearPlanReview()">נקה בדיקת AI</button>`:''}</span>
+      </div>
+      <div class="small" style="margin-top:6px;display:flex;gap:11px;flex-wrap:wrap" title="סיכום בדיקת המנוע על פעולות התוכנית">
+        ${['ok','warn','block','na'].map(k=>`<span class="pv6 ${k}">${PLAN_V6_STATES[k].glyph} <b class="num">${tally[k]}</b> ${PLAN_V6_STATES[k].label}</span>`).join('')}
+      </div>
+      <div id="planAiOut" style="margin-top:8px"></div>
+      ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75">${IC('cpu')} <b>סיכום ה-AI:</b> ${rv.rationale}</div>`:''}
+    </div>
+    ${cards}
+    ${(gaps.length||(rv&&rv.missing.length))?`<div class="focus is-block" style="margin-top:18px">
+      <div class="eyebrow" style="color:var(--sig-block)">${IC('warn')} מה שהתוכנית לא מכסה</div>
+      <div class="small muted" style="line-height:1.8;margin-top:4px">חובות שהחוקים או ההתחייבויות מטילים ואין להן פעולה ברשימה שלמעלה. הן אינן הצעות — התעלמות מהן עולה בציון.</div>
+      <ul style="padding-inline-start:20px;margin:10px 0 0;line-height:1.9">
+        ${gaps.map(g=>`<li class="small"><b>${g.title}</b>${g.form?` <span class="form">${esc(g.form)}</span>`:''} <span class="muted">— לפי המנוע</span></li>`).join('')}
+        ${rv?rv.missing.map(m=>`<li class="small"><b>${m.what}</b> <span class="muted">— ${m.why} (AI)</span></li>`).join(''):''}
+      </ul></div>`:''}`;
 }
 /* The written plan as the baseline of the decisions tab. It does NOT replace the engine's own
    list below it — the two are deliberately separate: this is what the team committed to on

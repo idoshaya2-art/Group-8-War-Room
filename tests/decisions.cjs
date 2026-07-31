@@ -36,8 +36,16 @@ ck('it quotes the Brazil rate that makes it worth doing', idle&&/4\.5/.test(idle
 ck('it warns the deposit must be renewed each quarter', idle&&/חידוש/.test(idle.d));
 ck('it carries an executable payload', !!(idle&&idle.sim));
 
-/* ---- sending marks, does not navigate ---- */
-await page.evaluate(()=>{ const a=document.querySelector('.act');
+/* ---- sending marks, does not navigate ----
+   The page's own list is now the team's written plan, and a plan action is a line to check, not a
+   payload to fire. The engine's generated list — the one that carries send buttons — moved into
+   the background disclosure, so open it and act on the first card that actually has the button.
+   The behaviour under test (send marks, does not navigate) is unchanged. */
+await page.evaluate(()=>{ document.querySelectorAll('details').forEach(d=>d.open=true); });
+await page.waitForTimeout(200);
+await page.evaluate(()=>{
+  const a=[...document.querySelectorAll('.act')]
+    .find(x=>[...x.querySelectorAll('button')].some(b=>/שלח לסימולטור/.test(b.textContent)));
   [...a.querySelectorAll('button')].find(b=>/שלח לסימולטור/.test(b.textContent)).click(); });
 await page.waitForTimeout(300);
 await page.evaluate(()=>{ const b=[...document.querySelectorAll('button')].find(x=>/העבר לתרחיש/.test(x.textContent)); if(b)b.click(); });
@@ -46,7 +54,7 @@ const after=await page.evaluate(()=>({page:currentPage, scenarios:S.scenarios.le
   checked:[...document.querySelectorAll('.act')].filter(a=>/הועבר לסימולטור/.test(a.textContent)).length,
   // The counter stopped being a green pill when figures were demoted out of pills — it is now
   // part of the muted count line in the decisions header. Same counter, no longer a status badge.
-  progress:document.body.innerText.split('\n').map(x=>x.trim()).filter(x=>/הועברו/.test(x))[0]||''}));
+  progress:document.body.textContent.split('\n').map(x=>x.trim()).filter(x=>/הועברו/.test(x))[0]||''}));
 ck('sending does NOT navigate away from the decisions', after.page==='decide', 'landed on '+after.page);
 ck('the action is marked as sent', after.checked===1);
 ck('a progress counter appears', /הועברו/.test(after.progress), after.progress);
@@ -125,12 +133,17 @@ await page.evaluate(()=>{
   save(); go('plan');
 });
 await page.waitForTimeout(600);
+/* From here down, several claims live on the ENGINE's generated list, which is now a second
+   opinion inside the decisions tab's background disclosure rather than the page's main list.
+   They must still be produced and correct, so they are read from textContent (which reaches
+   inside a closed <details>) instead of innerText. What changed is where they sit, not whether
+   the engine still computes them. */
 const ui=await page.evaluate(()=>({
   // The provenance stopped being a row of four pills and became one muted line; the wording
   // moved from "4 · AI · נבחן" to "נבחנו ע״י AI". Same claim, current phrasing.
-  banner:/נבחנו ע״י AI/.test(document.body.innerText),
-  rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.innerText),
-  droppedSection:/המליץ לוותר עליהן/.test(document.body.innerText),
+  banner:/נבחנו ע״י AI/.test(document.body.textContent),
+  rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.textContent),
+  droppedSection:/המליץ לוותר עליהן/.test(document.body.textContent),
   aiTagOnCard:[...document.querySelectorAll('.act')].some(a=>/\bAI\b/.test(a.textContent)),
   revertBtn:!![...document.querySelectorAll('button')].find(b=>/חזור לרשימת המנוע/.test(b.textContent)),
   addedVisible:[...document.querySelectorAll('.act')].some(a=>/ברזיל/.test(a.textContent))
@@ -344,7 +357,7 @@ const flowUI=await page.evaluate(()=>{ const t=document.body.innerText, all=docu
   return {twoTier:/הקיבולת מורכבת משניים|מזומן זמין.*הכנסה צפויה|החלק המחייב/s.test(all),
     contingency:/מותנים במכירה/.test(t), contingencyDetail:/מותנה בכך שהסחורה תימכר/.test(all),
     noSaleScenario:/גם אם לא יימכר כלום|מתחת לרצפה/.test(all),
-    perCard:/תזרים הפעולה/.test(t), selfFunding:/מממנת את עצמה/.test(t)}; });
+    perCard:/תזרים הפעולה/.test(all), selfFunding:/מממנת את עצמה/.test(all)}; });
 ck('the visible strip separates cash-in-hand from expected collection', flowUI.twoTier);
 ck('it warns on the surface that the collection is contingent on the goods selling',
   flowUI.contingency && flowUI.contingencyDetail);
@@ -374,7 +387,7 @@ const over=await page.evaluate(()=>{
   window.__inv=S.quarters.Q3.operational.inventory;
   S.quarters.Q3.operational.inventory=[]; save(); go('plan');
   const t=document.body.innerText;
-  return {overWarning:/חורגים ב-/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(t)}; });
+  return {overWarning:/חורגים ב-/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(document.body.textContent)}; });
 ck('an over-budget set is flagged', over.overWarning);
 ck('actions with no cash cover are marked individually', over.unaffordableMarked);
 await page.evaluate(()=>{ S.quarters.Q3.operational.inventory=window.__inv;

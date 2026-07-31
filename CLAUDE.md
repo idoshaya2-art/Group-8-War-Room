@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **563 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **580 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **589**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **606**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -70,14 +70,40 @@ engine ignores.
 asserting the behaviour its fix was verified against, so a later change cannot quietly
 reopen a closed finding.
 
+## The list is the team's plan, not a list the engine invented
+
+`renderPlanActions()` renders `PLAN_V6`'s actions for the target quarter as the tab's decision
+list. `buildActionPlan()` still runs and still renders — as a **second opinion inside the
+background disclosure**, because being handed someone else's fifteen items while holding your own
+is the complication this tab exists to remove.
+
+Two checkers sit beside the plan, never in front of it:
+
+- the engine, through `PLAN_V6_CHECKS` (arithmetic against `DATALOG` and live state);
+- the model, through `reviewPlanWithAI()` — the same fact pack the rest of the AI layer uses
+  (`buildAIContext`: rules, Data Log, MR74/MR17&28, competitor prices, liquidity by currency, the
+  demand model), plus each action's engine verdict, so the model is told what the arithmetic found
+  instead of re-deriving it blind. It may approve, qualify, propose a point fix, or block — it may
+  **not** rewrite the plan, and the prompt says so.
+
+`planGaps()` is the safety valve: engine findings marked mandatory whose decision-form code appears
+in no plan action are promoted back above the fold. Recommended-only and already-blocked items are
+not — this section is for obligations, not suggestions. Losing a contract deadline because it was
+not in the written plan is the one failure this arrangement must not allow, and `planv6.cjs`
+asserts each of those four cases.
+
+Plan actions carry no send-to-simulator button: a plan line is prose plus a form code, and
+manufacturing a lever payload from it would be inventing numbers. The simulator/export path still
+runs through the engine's list in the background section.
+
 ## The decisions tab is four things, in this order
 
 It answers exactly what it was asked to answer, and nothing sits above the list that is not one
 of them:
 
 1. **`.focus` — the money.** Cash available · expected income · mandatory floor · what the chosen
-   actions cost · what is left. One level-1 surface, ~140px, followed by the allocation bar.
-2. **The list**, under a single compact header carrying the AI button.
+   actions cost · what is left. One level-1 surface, ~170px, followed by the allocation bar.
+2. **The list** — the plan's actions — under a single compact header carrying the AI button.
 3. The simulator/export footer.
 4. **One `<details>`, closed** — everything that explains rather than decides: how the list is
    built, how the budget is derived (Data Log 09 collection, the two-tier capacity, the no-sale
@@ -87,10 +113,10 @@ of them:
 The tab used to stack thirteen sections above the first decision. Nothing was deleted in the cut —
 it moved into (4). Two rules keep it that way, and both are asserted:
 
-- `tests/audit/wave5.cjs` measures the **first decision's own send button against the viewport**
-  on desktop, and the **first card's top** on a phone (a 390×844 phone spends 497px on app chrome
-  and a card is ~280px, so a button above the fold there is not achievable without hiding the
-  card's contents — asserting it would only be satisfiable by making the page worse).
+- `tests/audit/wave5.cjs` measures **the first decision card's top against the viewport** on both
+  form factors. It used to measure that card's send button; plan actions have none, and on a
+  390×844 phone the app chrome alone is 497px, so a button-above-the-fold assertion would only be
+  satisfiable by making the page worse.
 - `tests/decisions.cjs` splits every budget claim in two: the headline must be in `innerText`
   (visible), the working must still be in `textContent` (present, inside the closed disclosure).
   That is what stops a future cut from deleting the derivation instead of collapsing it.
@@ -98,7 +124,7 @@ it moved into (4). Two rules keep it that way, and both are asserted:
 The old `renderNextAction` strip was deleted, not disabled — with the list one screen from the
 top it duplicated the first card. The dead-code suite is what forces that choice.
 
-wave5 also measures the tab's **own** height above the first card (≤300px), not just the outcome.
+wave5 also measures the tab's **own** height above the first card (≤320px), not just the outcome.
 The app chrome eats most of a phone screen, so a change nowhere near this tab — a longer
 `APP_VERSION` wrapping a line in the sidebar was enough — can fail the outcome assertion and send
 the next reader to the wrong file. The pair localises the blame.

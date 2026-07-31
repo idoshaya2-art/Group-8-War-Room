@@ -34,7 +34,10 @@ const out=await page.evaluate(()=>({
   pwned:!!window.__pwned, pwned2:!!window.__pwned2,
   injectedImgs:document.querySelectorAll('img[src="x"],img[src="y"]').length,
   pwnedText:/PWNED/.test(document.body.innerText),
-  escapedVisible:/<img src=x/.test(document.body.innerText)
+  // The engine's list (where a model-authored action lands) is now a second opinion inside the
+  // decisions tab's background disclosure, so read textContent — the point of this assertion is
+  // that the markup is rendered as TEXT rather than parsed, not that it is on screen unopened.
+  escapedVisible:/<img src=x/.test(document.body.textContent)
 }));
 ck('D-01 · the injected action is accepted by the engine (so the render path is really exercised)',
   res.added===1, `added ${res.added}`);
