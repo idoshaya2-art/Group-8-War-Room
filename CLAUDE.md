@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **544 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **563 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **570**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **589**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -102,6 +102,33 @@ wave5 also measures the tab's **own** height above the first card (≤300px), no
 The app chrome eats most of a phone screen, so a change nowhere near this tab — a longer
 `APP_VERSION` wrapping a line in the sidebar was enough — can fail the outcome assertion and send
 the next reader to the wrong file. The pair localises the blame.
+
+## A report is loaded into a quarter you chose, not the one you happen to be viewing
+
+`S.activeQuarter` is what the selector at the top shows. The ingest panel was titled with it and
+`applyParsed` wrote into it, so with Q1–Q3 already in, the panel said "load Q3" while the report
+being waited for was Q4's — and dropping that file silently overwrote Q3.
+
+`ingestTarget()` is the write target: `S.ui.ingestQ` when set, otherwise `nextReportQuarter()` (the
+first quarter with no report). It is rendered as a visible `<select>` in the panel, because the
+parser cannot read the quarter off the sheet and guessing silently is what caused the bug.
+
+Two orderings matter and are commented at their call sites:
+
+- `handleFile` moves `S.activeQuarter` to the target **before** `parseWorkbook`, because
+  `parseWorkbook` writes market research into the active quarter as it parses. Switching after
+  would put the financials in one quarter and the MR in another.
+- Parsing does **not** set `entered`. `confirmQuarter()` does, and it is what runs
+  `updateLearning()`/`updateMasterPlan()`. Reading a file is not approving it.
+
+`tests/audit/ingest.cjs` pins all of this. It cannot exercise a real file drop — SheetJS loads from
+a CDN and the sandbox has no network — so the `handleFile` ordering is the one part held by comment
+rather than assertion; the suite says so out loud instead of implying coverage it does not have.
+
+The manual verification form is **collapsed, not deleted**. It is the confirmation step of an
+import and the only in-app way to fix a figure the parser misread (three capacity figures came from
+an OCR reconstruction), so every path that tells you to use it — a parse error, SheetJS missing —
+opens it.
 
 ## A label may not describe an operation the number did not undergo
 

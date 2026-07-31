@@ -476,7 +476,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.2 · החלטות: כסף → רשימה → רקע';
+const APP_VERSION = 'v12.3 · קליטה לרבעון הנכון';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -4387,14 +4387,40 @@ ROLE_PANEL.intel=(base)=>{ const mi=S.quarters[base].marketIntel||{}; const comp
     ${ls&&ls.gaps.length?`<div class="tag a" style="margin-top:14px;display:block;line-height:1.7"><b>${IC('search')} המחקר המשתלם לקנות עכשיו:</b><br>${ls.gaps.map(g=>'• '+esc(g.mr)+' — '+esc(g.why)).join('<br>')}</div>`:''}`;
 };
 
+/* The report you are waiting to load is the first quarter that does NOT have one yet — not the
+   quarter the selector at the top happens to be showing. Those are different once a quarter has
+   been ingested: with Q1-Q3 in, the panel used to say "load Q3" because the selector sat on Q3,
+   which invited you to re-import a report you already had and made the tool look stuck. */
+function nextReportQuarter(){
+  return QUARTERS.find(q=>!S.quarters[q].entered) || S.activeQuarter;
+}
+/* The quarter a dropped file is written into. It defaults to the next report you are waiting for,
+   but it is a stored, VISIBLE choice rather than an inference — the parser cannot read the quarter
+   off the sheet, so the only honest thing is to show which quarter is about to be overwritten and
+   let it be changed. Before this, applyParsed always wrote into S.activeQuarter, so a Q4 report
+   dropped while the selector sat on Q3 silently overwrote Q3. */
+function ingestTarget(){
+  S.ui=S.ui||{};
+  const t=S.ui.ingestQ;
+  return (t && QUARTERS.includes(t)) ? t : nextReportQuarter();
+}
+window.setIngestTarget=(q)=>{ S.ui=S.ui||{}; S.ui.ingestQ=q; save(); go('data'); };
 /* ----- INGEST (F1) ----- */
 function bodyIngest(c){
-  const q=S.activeQuarter;
+  const q=ingestTarget();
+  const done=enteredQuarters();
+  const viewing=S.activeQuarter;
   c.innerHTML=`
     <div class="grid" style="grid-template-columns:minmax(0,1fr);gap:18px">
       <div class="card pad">
-        <div class="between" style="margin-bottom:12px">
-          <div><h3>קליטת דוח תוצאות — ${q}</h3><div class="small muted">גרור קובץ XLSX/XLS, או הזן ידנית. המערכת מזהה גיליונות ידועים ומאפשרת אימות.</div></div>
+        <div class="between" style="margin-bottom:12px;flex-wrap:wrap;gap:10px">
+          <div><h3>קליטת דוח תוצאות — ${q}</h3><div class="small muted">גרור קובץ XLSX/XLS. המערכת מזהה גיליונות ידועים ומאפשרת אימות לפני שמירה.
+          ${done.length?`<br>כבר נקלטו: <b>${done.join(' · ')}</b>${S.quarters[q].entered?` — <b style="color:var(--sig-warn)">${q} כבר קיים, קליטה תדרוס אותו</b>`:''}.`:''}
+          ${q!==viewing?`<br>הבורר למעלה מציג את <b>${viewing}</b>; הוא קובע מה רואים בדוחות, לא לאן נקלט הקובץ.`:''}</div></div>
+          <label class="small muted" style="display:flex;align-items:center;gap:6px">נקלט לרבעון
+            <select class="f" style="max-width:110px" onchange="setIngestTarget(this.value)">
+              ${QUARTERS.map(x=>`<option value="${x}"${x===q?' selected':''}>${x}${S.quarters[x].entered?' ✓':''}</option>`).join('')}
+            </select></label>
         </div>
         <div class="drop" id="drop">
           <div class="big">${IC('file')}</div>
@@ -4405,10 +4431,13 @@ function bodyIngest(c){
         </div>
         <div id="sheetInfo" style="margin-top:14px"></div>
       </div>
-      <div class="card">
-        <div class="ch"><h3>${IC('edit')} אימות ותיקון נתונים — ${q}</h3></div>
-        <div class="cb" id="verifyForm"></div>
-      </div>
+      <!-- Level 3. This is the confirmation step of an import and the only way to fix a figure the
+           parser misread, so it stays — but it is a wall of number fields nobody needs open while
+           simply dropping a file, so it starts closed and opens itself once a file has been read. -->
+      <details class="sec ref" id="verifyWrap">
+        <summary>${IC('edit')} אימות ותיקון נתונים — ${q} <span class="small muted" style="font-weight:400">— נפתח מעצמו אחרי קליטת קובץ</span></summary>
+        <div class="secbody" id="verifyForm"></div>
+      </details>
     </div>`;
   c.insertAdjacentHTML('beforeend', qaSectionHTML());
   setupDrop(); renderVerifyForm($('#verifyForm'));
@@ -4424,19 +4453,31 @@ function setupDrop(){
 function xlsxReady(){ return typeof XLSX!=='undefined' && XLSX && XLSX.read; }
 function handleFile(file){
   const info=$('#sheetInfo');
-  if(!xlsxReady()){ info.innerHTML=`<div class="tag r">ספריית קריאת האקסל לא נטענה (אין חיבור אינטרנט?). ניתן להזין את נתוני הרבעון ידנית בטופס למטה.</div>`; return; }
+  // The verify form is collapsed by default, so any path that tells you to use it must open it.
+  const openVerify=()=>{ const v=$('#verifyWrap'); if(v){ v.open=true; renderVerifyForm($('#verifyForm')); } };
+  if(!xlsxReady()){ info.innerHTML=`<div class="tag r">ספריית קריאת האקסל לא נטענה (אין חיבור אינטרנט?). הזינו את נתוני הרבעון ידנית בטופס שנפתח למטה.</div>`; openVerify(); return; }
   info.innerHTML=`<div class="chip">${IC('clock')} מנתח ${esc(file.name)}…</div>`;
   const reader=new FileReader();
   reader.onload=e=>{
     try{
       const wb=XLSX.read(e.target.result,{type:'array'});
+      // Point the whole app at the quarter this report belongs to BEFORE parsing: parseWorkbook
+      // writes market research into S.activeQuarter as it goes, so switching afterwards would
+      // split one report across two quarters.
+      const tq=ingestTarget();
+      S.activeQuarter=tq; S.cumulative=false;
       const parsed=parseWorkbook(wb); applyParsed(parsed);
+      // Deliberately NOT marking the quarter as entered here — that is confirmQuarter's job, and
+      // it is what runs updateLearning/updateMasterPlan. Parsing a file is not approving it.
+      renderQuarterSelect(); renderNorthStar();
       info.innerHTML=`
         <div class="tag g" style="margin-bottom:8px">✓ נקלט: ${esc(file.name)}</div>
         <div class="small muted">גיליונות: ${wb.SheetNames.map(n=>`<span class="chip" style="margin:2px">${esc(n)} ${matchSheet(n)?IC('check'):''}</span>`).join('')}</div>
         <div class="small" style="margin-top:8px">חולצו: ${parsed.summary}. אמת/תקן למטה ואשר. <b>MR שנקלטו: ${parsed.mrCount}</b></div>`;
-      renderVerifyForm($('#verifyForm')); toast('קובץ נותח — אמת את הערכים','g');
-    }catch(err){ info.innerHTML=`<div class="tag r">שגיאת ניתוח: ${esc(err.message)}</div><div class="small muted" style="margin-top:6px">ניתן להזין ידנית בטופס למטה.</div>`; }
+      renderVerifyForm($('#verifyForm'));
+      const vw=$('#verifyWrap'); if(vw){ vw.open=true; vw.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+      toast('קובץ נותח — אמת את הערכים','g');
+    }catch(err){ info.innerHTML=`<div class="tag r">שגיאת ניתוח: ${esc(err.message)}</div><div class="small muted" style="margin-top:6px">הטופס למטה נפתח — אפשר להזין ידנית.</div>`; openVerify(); }
   };
   reader.readAsArrayBuffer(file);
 }
@@ -4541,6 +4582,9 @@ function parseWorkbook(wb){
   return {scan,mrCount,summary: uniq.length? uniq.join(' · ') : 'לא זוהו שדות מוכרים — בדוק שהקובץ הוא דוח INTOPIA', applied:uniq};
 }
 function applyParsed({scan}){
+  // handleFile has already switched S.activeQuarter to the ingest target, and it must do it there
+  // rather than here: parseWorkbook calls ingestMR while parsing, so switching at this point would
+  // put the financials in the new quarter and the market research in the old one.
   const Q=S.quarters[S.activeQuarter], f=Q.financial, op=Q.operational;
   if(scan.cash){ REGIONS.forEach(r=>{ if(scan.cash[r.id]!==undefined) f.cash[r.id]=scan.cash[r.id]; }); }
   ['consolidated','netProfit','revenue','grossMargin','retainedEarnings','loans','ap','ar','supplierCredit','securities','netPlant','totalAssets','commonStock','totalEquity','interestExp','marketResearch'].forEach(k=>{ if(scan[k]!==undefined&&scan[k]!==null) f[k]=scan[k]; });
@@ -4694,7 +4738,10 @@ window.setInv=(i,k,v)=>{ const it=S.quarters[S.activeQuarter].operational.invent
   if(k==='price'||k==='qty'){ const el=$(`#invTable tbody tr:nth-child(${i+1}) td:nth-child(5) input`); if(el)el.style.borderColor=(!(it.price>0)&&it.qty>0)?'var(--red)':''; } };
 window.delInv=(i)=>{ S.quarters[S.activeQuarter].operational.inventory.splice(i,1); save(); renderInventoryTable(); };
 window.confirmQuarter=()=>{ const q=S.activeQuarter;
-  S.quarters[q].entered=true; updateLearning(); updateMasterPlan(); save();
+  S.quarters[q].entered=true;
+  // the pending ingest is done, so the panel goes back to offering the NEXT missing report
+  S.ui=S.ui||{}; S.ui.ingestQ=null;
+  updateLearning(); updateMasterPlan(); save();
   // I-4: ingestion is the moment the forecast for this quarter becomes checkable. Saying it out
   // loud here — rather than only in a panel — is what turns a projection into a calibration.
   let v=null; try{ v=forecastVariance(q); }catch(e){}
