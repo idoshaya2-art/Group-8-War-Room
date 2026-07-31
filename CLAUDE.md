@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **598 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **603 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **624**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **629**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -176,6 +176,17 @@ The manual verification form is **collapsed, not deleted**. It is the confirmati
 import and the only in-app way to fix a figure the parser misread (three capacity figures came from
 an OCR reconstruction), so every path that tells you to use it — a parse error, SheetJS missing —
 opens it.
+
+## MR74 is in thousands; everything we hold about ourselves is in units
+
+`marketRdAvgSF()` is the only place the two meet. The competitor read-out printed **"our R&D 0 vs
+a market average of 419"** while the team's own report held 90,000 — two faults in one line: it
+took OUR figure out of MR74 (a report about the *other* companies, which does not always carry it)
+and compared MR74's thousands against a number in units. A missing cell became a confident zero.
+
+Our own report is authoritative for our own figures. MR74 is the fallback, scaled ×1000, and when
+neither has a figure the line says "not reported" rather than claiming zero. `renderIntelAnchor`'s
+market-average line was carrying the same unscaled number and now shares the helper.
 
 ## A label may not describe an operation the number did not undergo
 

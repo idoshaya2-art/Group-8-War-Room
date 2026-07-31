@@ -355,6 +355,48 @@ const folded=await page.evaluate(()=>{
 ck('the engine\'s second-opinion list exists and is folded shut',
   folded.exists===true && folded.open===false);
 
+/* ---------------- our own R&D is read from our own report, in our own units.
+   The competitor read-out printed "our R&D 0 vs a market average of 419" while the team's report
+   held 90,000. Two faults in one line: it took OUR figure out of MR74 — a report about the other
+   companies, which does not always carry it — and it compared MR74's thousands-of-CHF against a
+   number that is in units. A missing cell became a confident zero. */
+const rd=await page.evaluate(()=>{
+  const q=S.activeQuarter, mi=S.quarters[q].marketIntel;
+  const comps=Object.values(mi.competitors||{}).filter(x=>x.retainedEarnings!=null)
+    .map(c=>({...c, rdChip:c.num===2?400:(c.num===5?300:0), rdPc:c.num===2?100:0}));
+  const line=()=>intelInsights(comps,mi,q).find(x=>/מו״פ שלנו|ממוצע המו״פ/.test(x))||'';
+  const withReport=line();
+  const keep=S.quarters[q].operational.rd;
+  S.quarters[q].operational.rd=0;
+  const withoutReport=line();
+  S.quarters[q].operational.rd=keep;
+  return { ourRd:keep, avg:marketRdAvgSF(comps), rawAvg:comps.reduce((a,c)=>a+c.rdChip+c.rdPc,0)/comps.length,
+    withReport:withReport.replace(/<[^>]+>/g,''), withoutReport:withoutReport.replace(/<[^>]+>/g,'') };
+});
+ck('MR74\'s thousands are scaled to units before being compared to ours',
+  rd.avg===Math.round(rd.rawAvg*1000), `${rd.rawAvg} (000) → ${rd.avg} SF`);
+ck('our R&D comes from our own report, not from the competitor sheet',
+  rd.withReport.includes(String(rd.ourRd).replace(/\B(?=(\d{3})+(?!\d))/g,',')) && /מהדוח שלנו/.test(rd.withReport),
+  rd.withReport.slice(0,80));
+ck('...and it is never reported as 0 when the report simply lacks the figure',
+  /לא דווח/.test(rd.withoutReport) && !/מו״פ שלנו 0/.test(rd.withoutReport),
+  rd.withoutReport.slice(0,80));
+
+// ---------------- the dashboard's competitor read-out is orientation, so it folds
+await page.evaluate(()=>go('dash')); await page.waitForTimeout(700);
+const dash=await page.evaluate(()=>{
+  const det=[...document.querySelectorAll('.content details')]
+    .find(x=>/מול המתחרים/.test((x.querySelector('summary')||{}).textContent||''));
+  return { exists:!!det, open:det?det.open:null,
+    holdsInsights:det?/מו״פ|רווחים צבורים/.test(det.textContent):false,
+    holdsTables:det?det.querySelectorAll('table').length:0 };
+});
+ck('the dashboard\'s competitor section is one disclosure that starts closed',
+  dash.exists===true && dash.open===false);
+ck('...and still holds the insights and both MR tables inside it',
+  dash.holdsInsights===true && dash.holdsTables>=1, `${dash.holdsTables} tables`);
+await page.evaluate(()=>go('plan')); await page.waitForTimeout(500);
+
 ck('no JavaScript errors',
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.slice(0,2).join(' | '));
