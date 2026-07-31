@@ -50,7 +50,7 @@ const fl=await page.evaluate(()=>{
   S.quarters.Q3.financial.loans=643433; save();
   const fc=floorComponents('Q3');
   const has=re=>fc.items.find(i=>re.test(i.label));
-  const withAmort={ legal:has(/מינימום חוקי/), buffer:has(/כרית ביטחון/),
+  const withAmort={ legal:has(/^מזומן שחייב להישאר במטה/), buffer:has(/כרית ביטחון/),
     debt:has(/החזר הלוואה/), interestOnly:has(/^ריבית על חוב/) };
   // break the series and the floor must fall back to interest only, and say so
   S.quarters.Q1.financial.loans=0; S.quarters.Q2.financial.loans=0; save();
@@ -65,9 +65,11 @@ const fl=await page.evaluate(()=>{
       src:fallback.interestOnly&&fallback.interestOnly.src },
     everyItemSourced:floorComponents('Q3').items.every(i=>i.sf>0) };
 });
-ck('the legal HQ minimum and the team\'s own cushion are separate lines, not one merged number',
-  fl.withAmort.legal===20000 && fl.withAmort.buffer===100000,
-  `legal ${fl.withAmort.legal} · buffer ${fl.withAmort.buffer}`);
+/* One HQ line, not two: holding the 100,000 cushion already satisfies the 20,000 legal minimum,
+   so reserving both counted the same franc twice. The larger binds, and the line says which. */
+ck('the HQ hold is the larger of the legal minimum and the team\'s cushion, counted once',
+  fl.withAmort.legal===100000 && fl.withAmort.buffer===undefined,
+  `hold ${fl.withAmort.legal}`);
 ck('the floor reserves the whole loan payment, not only its interest',
   Math.abs(fl.withAmort.debt-136511)<=2 && fl.withAmort.interestOnly===false,
   `${fl.withAmort.debt} SF`);
@@ -145,6 +147,77 @@ ck('the dashboard states plants and the capacity they buy', dash.hasPlants===tru
 ck('...and cash per region, each in its own currency with the SF equivalent beside it',
   dash.hasRegionCash===true && dash.regionRowsLabelled===true);
 ck('the headline KPIs name their currency', dash.kpisLabelled===true);
+
+/* ---------------- the three unavoidable costs that were missing entirely */
+const extra=await page.evaluate(()=>{
+  const Q=S.quarters.Q3.financial;
+  Q.supplierCredit=1136879; Q.cash.europe=-422999; save();
+  const it=l=>{ const x=floorComponents('Q3').items.find(i=>new RegExp(l).test(i.label)); return x||null; };
+  const sc=it('ריבית אשראי ספקים'), carry=it('דמי אחסנה'), neg=it('ריבית על יתרה שלילית');
+  // and the discretionary lines must NOT be there — a floor is what you cannot decide away
+  const adv=it('^פרסום'), varProd=it('חלק המזומן בעלות ייצור');
+  const fc=floorComponents('Q3');
+  return { sc:sc&&{sf:sc.sf,src:sc.src}, carry:carry&&{sf:carry.sf,src:carry.src}, neg:neg&&{sf:neg.sf,src:neg.src},
+    adv:!!adv, varProd:!!varProd, totalIsMandatory:fc.total===fc.mandatory,
+    rd:(floorComponents('Q3').items.find(i=>/מו״פ/.test(i.label))||{}).sf,
+    carryExpect:Math.round(35000*DATALOG.carryingCostPerUnit.Y.europe*fxRate('EUR')),
+    negExpect:Math.round(422999*(DATALOG.interest.negBalance.below.europe/100)*fxRate('EUR')),
+    rdMin:DATALOG.rdMinPerQuarter.X };
+});
+ck('supplier credit is charged its Data Log 07 rate, with the band named',
+  extra.sc && extra.sc.sf>0 && /Data Log 07/.test(extra.sc.src) && /מדרגת/.test(extra.sc.src),
+  extra.sc && `${extra.sc.sf} SF`);
+ck('stock carries a Data Log 06 charge, per unit and per region',
+  extra.carry && extra.carry.sf===extra.carryExpect,
+  extra.carry && `${extra.carry.sf} vs ${extra.carryExpect}`);
+ck('...and it says out loud that this is the linear base, not the real accelerating charge',
+  extra.carry && /היסוד הליניארי/.test(extra.carry.src));
+ck('an area in overdraft is charged interest on it',
+  extra.neg && extra.neg.sf===extra.negExpect, extra.neg && `${extra.neg.sf} vs ${extra.negExpect}`);
+/* A floor is what you must pay whatever you decide. Advertising and planned production ARE the
+   decision — they are costed in the list — so carrying them here too made the floor larger than
+   the obligation it stands for, and left total and mandatory meaning different things. */
+ck('advertising and planned production are no longer counted as floor',
+  extra.adv===false && extra.varProd===false);
+ck('...so the floor total IS the mandatory total, with no second meaning', extra.totalIsMandatory===true);
+ck('R&D reserves only the legal minimum, since the planned spend is a ticked action',
+  extra.rd===extra.rdMin, `${extra.rd} SF`);
+
+/* ---------------- ticking a plan action moves the quarter's money */
+await page.evaluate(()=>{ S.ui=S.ui||{}; S.ui.planPicks={}; save(); go('plan'); });
+await page.waitForTimeout(700);
+const tick=await page.evaluate(async()=>{
+  const q='Q4';
+  const read=()=>{ const m=[...document.querySelectorAll('.focus')].find(c=>/הכסף של Q/.test(c.textContent));
+    return [...m.querySelectorAll('.ledger>div>b')]
+      .map(b=>Number(b.textContent.replace(/[^\d-]/g,''))*(/−/.test(b.textContent)?-1:1)); };
+  const none=read();
+  togglePlanPick(7); await new Promise(r=>setTimeout(r,400));          // R&D, cost only
+  const cost=read();
+  togglePlanPick(11); await new Promise(r=>setTimeout(r,400));         // Europe sale, revenue
+  const withSale=read();
+  const p=planPickedCash(q);
+  togglePlanPick(4); await new Promise(r=>setTimeout(r,400));          // Spitzer — already in the floor
+  const withFloorItem=read();
+  const pf=planPickedCash(q);
+  return { none, cost, withSale, withFloorItem, gross:p.gross, inNow:p.inNow, inFloor:pf.inFloor,
+    euroPct:DATALOG.collection.europe[0] };
+});
+ck('with nothing ticked the quarter costs nothing', tick.none[4]===0 && tick.none[0]+tick.none[1]+tick.none[2]===tick.none[3]);
+ck('ticking a costed action moves the cost line and the total, and the ledger still sums',
+  tick.cost[4]===-530000 && tick.cost[3]+tick.cost[4]===tick.cost[5],
+  `cost line ${tick.cost[4]}`);
+ck('ticking a sale adds only the part Data Log 09 collects THIS quarter',
+  tick.withSale[1]===Math.round(tick.gross*tick.euroPct/100) && tick.withSale[1]===tick.inNow,
+  `${tick.withSale[1]} of ${tick.gross} at ${tick.euroPct}%`);
+ck('...and the ledger still adds up after it',
+  tick.withSale[0]+tick.withSale[1]+tick.withSale[2]===tick.withSale[3] &&
+  tick.withSale[3]+tick.withSale[4]===tick.withSale[5]);
+/* The Spitzer instalment is already reserved in the floor. Ticking it must not charge it again —
+   that is the same franc counted as unavoidable and as chosen. */
+ck('an action whose cost is already in the floor adds nothing when ticked',
+  tick.withFloorItem[4]===tick.withSale[4] && tick.inFloor>0,
+  `cost line unchanged at ${tick.withFloorItem[4]}, ${tick.inFloor} SF recognised as floor`);
 
 ck('no JavaScript errors',
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,

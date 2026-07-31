@@ -61,7 +61,10 @@ const R=await p.evaluate(()=>{
   ck('floors currently default to 0 (no real floor)', QUARTERS.every(q=>!(S.config.goals.floors[q]>0)));
   const fc=floorComponents('Q4');
   ck('floor is itemised with sources', fc.items.length>=4 && fc.items.every(i=>i.src&&i.sf>0), fc.items.length+' items');
-  ck('floor includes the legal HQ minimum', fc.items.some(i=>i.sf===DATALOG.minHOCashSF));
+  // One HQ line now: the team's cushion contains the legal minimum, so the larger of the two is
+  // reserved once rather than both being added together.
+  ck('floor reserves the HQ hold, at least the legal minimum',
+    fc.items.some(i=>/מזומן שחייב להישאר במטה/.test(i.label) && i.sf>=DATALOG.minHOCashSF));
   ck('floor includes fixed plant cost (paid from cash)', fc.items.some(i=>/מפעלים/.test(i.label)));
   ck('floor includes the R&D legal minimum', fc.items.some(i=>/מו״פ/.test(i.label)));
   ck('floor includes interest on existing debt', fc.items.some(i=>/ריבית/.test(i.label)));

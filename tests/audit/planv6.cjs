@@ -210,8 +210,13 @@ const asList=await page.evaluate(()=>{
 ck('the page\'s decision list is the written plan, not the engine\'s list',
   asList.visible===15 && asList.allFromPlan===true, `${asList.visible} visible cards`);
 ck('...and says so in its header', /התוכנית שלי/.test(asList.header), asList.header.slice(0,50));
-ck('the engine\'s own list still exists, as a second opinion that starts closed',
-  asList.engineHidden===true && asList.engineCards>0, `${asList.engineCards} engine cards, collapsed`);
+/* The engine's generated list is not the page's list any more — it is one collapsed section at the
+   foot of the background disclosure. It is kept rather than deleted for two reasons: planGaps
+   depends on buildActionPlan to promote obligations the plan does not cover, and it is the render
+   path a model-authored action actually travels, which is what the D-01 escaping guards. */
+ck('the engine\'s list is kept as a folded second opinion, never as the page\'s list',
+  asList.engineHidden===true && asList.engineCards>0,
+  `${asList.engineCards} engine cards, collapsed`);
 ck('one button checks the plan with the AI', asList.aiButton===true);
 
 // mandatory engine findings the plan does not cover must be promoted back to the surface
@@ -352,7 +357,7 @@ const folded=await page.evaluate(()=>{
   return { exists:!!d, open:d?d.open:null,
     parentShut:d?!!d.closest('details:not([open])'):null };
 });
-ck('the engine\'s second-opinion list exists and is folded shut',
+ck('the engine\'s second-opinion list is folded shut',
   folded.exists===true && folded.open===false);
 
 /* ---------------- our own R&D is read from our own report, in our own units.

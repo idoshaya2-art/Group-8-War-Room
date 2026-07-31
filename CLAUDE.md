@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **630 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **642 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **656**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **668**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -192,12 +192,37 @@ import and the only in-app way to fix a figure the parser misread (three capacit
 an OCR reconstruction), so every path that tells you to use it — a parse error, SheetJS missing —
 opens it.
 
+## Ticking an action is what moves the money
+
+`planPicks(q)` records which plan actions the team has chosen; `planPickedCash(q)` turns them into
+the quarter's cash. Every figure is the plan's **own**, transcribed from the action's stated
+economics — the conversion to francs (EUR ×1.5, BRL ×0.5) is the only arithmetic applied and each
+line records it. Two rules keep it honest:
+
+- An action whose cost is already reserved in the floor carries `cash.floor` and adds **nothing**
+  when ticked. Otherwise the same franc is counted as unavoidable *and* as chosen.
+- Revenue is split by Data Log 09's collection schedule for the region the plan names, so the
+  budget only ever spends the part that actually arrives this quarter.
+
+The ledger is **not clamped**. A `max(0,…)` on spendable made it stop adding up the moment cash
+fell below the floor — line 4 printed 0 while lines 1–3 summed to a negative. Below the floor is
+real information and shows as the negative it is.
+
+The submission tab leads with exactly the ticked set and their form codes, and keeps the pre-submit
+checklist on the surface; everything else there is behind a disclosure.
+
 ## The floor is everything you cannot choose not to pay
 
-`floorComponents()` reserves, beyond the legal minimum: the **whole loan payment**, an **expected
-penalty** on a commitment that can no longer be met, and a **100,000 SF cushion at HQ** on top of
-Data Log 10's 20,000 legal minimum (`DEFAULT_HQ_BUFFER_SF`, overridable via
-`S.config.goals.hqBufferSF` — it is team policy, not a rule, and the line says so).
+`floorComponents()` reserves only the unavoidable, and `total === mandatory` — advertising and
+planned production were removed, because a floor is what you must pay *whatever you decide* and
+both of those **are** the decision (they are costed by the ticks). R&D reserves the legal minimum
+only, for the same reason.
+
+Beyond that it holds: the **whole loan payment**, an **expected penalty** on a commitment that can
+no longer be met, **supplier-credit interest**, **carrying cost** on stock, **interest on any area
+in overdraft**, and **one HQ line** — the larger of Data Log 10's 20,000 legal minimum and the
+team's 100,000 cushion (`DEFAULT_HQ_BUFFER_SF`, overridable via `S.config.goals.hqBufferSF`).
+Reserving both was counting the same franc twice; holding the cushion already satisfies the law.
 
 `loanAmortisation()` derives the payment instead of asking for it. A constant-payment loan leaves
 a fingerprint in three consecutive balances: `(1+r) = (b2-b1)/(b1-b0)`, then `P = b0(1+r) - b1`.

@@ -97,7 +97,7 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
       listTop: Math.round(list.getBoundingClientRect().top),
       // the four figures the tab was asked to lead with
       // the ledger must show every step, and its lines must actually reach the total it prints
-      hasFour:['מזומן שיש עכשיו','ייכנס עוד ברבעון הזה','רצפה','עלות הפעולות ברשימה','זמין להוצאה','נשאר']
+      hasFour:['מזומן שיש עכשיו','ייכנס עוד ברבעון הזה','רצפה','עלות הפעולות','זמין להוצאה','נשאר']
         .every(t=>money.textContent.includes(t)),
       ledgerAddsUp:(()=>{ const n=[...money.querySelectorAll('.ledger>div>b')]
           .map(b=>Number(b.textContent.replace(/[^\d-]/g,''))*(/−/.test(b.textContent)?-1:1));
@@ -147,13 +147,15 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
 {
 const {browser,page}=await open();
 await page.evaluate(()=>go('plan')); await page.waitForTimeout(800);
+/* The list is the written plan now, and a plan action is ticked rather than fired at the
+   simulator, so "is the full list rendered" is counted in cards, not in send buttons. */
 const a=await page.evaluate(()=>({ anchor:!!document.getElementById('decisionsTop'),
-  decisionsStillListed:[...document.querySelectorAll('button')].filter(b=>/שלח לסימולטור/.test(b.textContent)).length,
+  decisionsStillListed:document.querySelectorAll('.content .act').length,
   // the background material was moved, not deleted — a closed disclosure at the end holds it
   background:[...document.querySelectorAll('details.sec')].some(d=>/רקע — למה זו הרשימה/.test(d.textContent) && !d.open) }));
 ck('I-3 · the in-page anchor still exists', a.anchor===true);
 ck('I-3 · the full decision list is rendered, not a summary of it',
-  a.decisionsStillListed>1, `${a.decisionsStillListed} send buttons on the page`);
+  a.decisionsStillListed>=15, `${a.decisionsStillListed} action cards on the page`);
 ck('I-3 · the orientation material still exists, in one disclosure that starts closed',
   a.background===true);
 await browser.close();

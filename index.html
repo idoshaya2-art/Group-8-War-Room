@@ -199,6 +199,13 @@ details.sec.ref .secbody{padding:2px 2px 12px;color:var(--muted)}
 /* A running sum you can read top to bottom: label on the start edge, number on the end edge,
    a rule before each result line. The point is that the arithmetic is visible — a figure that
    does not participate in the total does not belong here. */
+/* The tick is the primary control on a plan action, so it reads as one — not a bare checkbox
+   glued to a label. */
+.pick{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;cursor:pointer;
+  border:1px solid var(--line2);font-size:12.5px;font-weight:700;color:var(--muted);transition:.15s}
+.pick:hover{border-color:var(--accent)}
+.pick input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+.pick.on{background:rgba(79,140,255,.14);border-color:var(--accent);color:var(--txt)}
 .ledger{display:flex;flex-direction:column}
 .ledger>div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:2px 0}
 .ledger>div>span{font-size:12.5px;color:var(--muted);line-height:1.45}
@@ -550,7 +557,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.8 · רצפה מלאה, מפעלים, ומטבע בכל סכום';
+const APP_VERSION = 'v13.0 · מסמנים פעולות, והכסף מתעדכן';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1674,12 +1681,14 @@ function floorComponents(forQuarter){
   // subtract it as well — that would charge the same advertising twice.
   const items=[]; const add=(label,sf,src,disc)=>{ if(sf>0) items.push({label,sf:Math.round(sf),src,disc:!!disc}); };
 
-  add('מינימום חוקי במטה', DATALOG.minHOCashSF, 'Data Log 10 — נדרש בכל עת');
-  // The legal minimum is 20,000 SF and it is not a working buffer: a quarter that lands exactly
-  // on it has no room for a mis-forecast. This is the team's own cushion above it, and it is a
-  // configured policy rather than a rule, so it says so.
+  /* One HQ line, not two. Holding the team's 100,000 SF cushion already satisfies Data Log 10's
+     20,000 legal minimum, so reserving both counted the same franc twice. It is the LARGER of the
+     two that must be held, and the line says which one is binding. */
   const buf=(S.config.goals.hqBufferSF!=null)?S.config.goals.hqBufferSF:DEFAULT_HQ_BUFFER_SF;
-  add('כרית ביטחון במטה', buf, 'מדיניות הצוות — מעל המינימום החוקי, כדי ששגיאת חיזוי לא תשבור את הרצפה');
+  add('מזומן שחייב להישאר במטה', Math.max(DATALOG.minHOCashSF, buf),
+    buf>=DATALOG.minHOCashSF
+      ? `כרית הצוות ${fmt(buf)} SF — כוללת בתוכה את המינימום החוקי ${fmt(DATALOG.minHOCashSF)} SF [Data Log 10]`
+      : `מינימום חוקי ${fmt(DATALOG.minHOCashSF)} SF [Data Log 10]`);
 
   // Fixed plant cost — paid directly out of cash, never deferred (Data Log 09)
   let plantFixed=0;
@@ -1693,17 +1702,17 @@ function floorComponents(forQuarter){
     if(n>0) offices += ((DATALOG.officeFixedCost.central[r.id]||0) + Math.max(0,n-1)*(DATALOG.officeFixedCost.regional[r.id]||0))*fxRate(r.cur); });
   add('משרדי מכירות', offices, 'Data Log 04 — מרכזי + אזוריים');
 
-  // R&D at least at the legal minimum for whatever we are actually pursuing
-  const rdPlanned=(lev&&lev.rd)||0;
-  add('מו״פ', Math.max(rdPlanned, DATALOG.rdMinPerQuarter.X), 'Data Log 06 — מינימום חוקי לרבעון');
+  /* The legal minimum only. Reserving the PLANNED R&D here charged it twice — once as floor the
+     decisions may not touch, and again as the cost of the R&D action in the list. What you cannot
+     choose not to pay is the minimum; everything above it is a decision. */
+  add('מו״פ — מינימום חוקי בלבד', DATALOG.rdMinPerQuarter.X,
+    'Data Log 06 — מתחת לזה ההזנה אינה חוקית. ההשקעה המתוכננת מעבר לכך היא החלטה ונספרת ברשימה, לא כאן');
 
-  // Cash share of variable manufacturing
-  let varCash=0, adv=0;
-  if(lev) REGIONS.filter(r=>r.id!=='hq').forEach(r=>{ const rl=lev.regions[r.id]||{};
-    varCash += (rl.production||0)*(rl.unitCost||0)*((p.productionPay[0]||0)/100)*fxRate(r.cur);
-    adv += (rl.advertising||0)*fxRate(r.cur); });
-  add('חלק המזומן בעלות ייצור משתנה', varCash, 'Data Log 09 — היתר ב-A/P', true);
-  add('פרסום', adv, 'הוצאה שוטפת — יוצאת מהמזומן', true);
+  /* Advertising and planned production used to sit here as "discretionary floor" lines. They are
+     not floor at all: a floor is what you must pay whatever you decide, and both of these ARE the
+     decision — they are costed in the list. Carrying them here as well made the floor look larger
+     than the obligation it stands for, and left `total` and `mandatory` meaning different things.
+     Contractual production is different and stays, below: a commitment cannot be decided away. */
 
   // Tax accrued this quarter lands next quarter (A/P1)
   const projNow=projectCashflow(base, sc?sc.levers:null);
@@ -1718,6 +1727,53 @@ function floorComponents(forQuarter){
     `${amort.src} · קרן ${fmt(amort.principal)} + ריבית ${fmt(amort.interest)} SF`);
   else add('ריבית על חוב קיים', ((f.loans||0)*((p.interest.bank||0)/100)/4),
     'Data Log 07 — ריבית בלבד; לא נמצאה סדרת מאזנים שממנה ניתן לגזור לוח סילוקין');
+
+  /* Supplier credit is not free money. Data Log 07 charges it every quarter it is outstanding, at
+     a rate that steps up above a per-area threshold. The balance sheet reports it consolidated
+     only, so the band is taken from the area holding most of our cash, and the line says which —
+     an unlabelled rate is how the earlier scale bugs started. */
+  const scBal=f.supplierCredit||0;
+  if(scBal>0){
+    const t=DATALOG.interest.supplierCredit;
+    // Supplier credit follows purchasing, which follows production — so the band is taken from
+    // where the plants are, not from where the cash happens to sit.
+    const pb=op.plantsByRegion||{};
+    const home=REGIONS.filter(x=>x.id!=='hq')
+      .sort((a,b)=>((pb[b.id]||0)-(pb[a.id]||0)) || (((f.cash[b.id]||0)*fxRate(b.cur))-((f.cash[a.id]||0)*fxRate(a.cur))))[0]
+      ||{id:'europe',name:'אירופה'};
+    const sw=t.switchover[home.id]||Infinity;
+    const rate=((scBal>=sw?t.above:t.below)[home.id])||0;
+    add('ריבית אשראי ספקים', Math.round(scBal*rate/100),
+      `Data Log 07 — ${rate}% לרבעון על ${fmt(scBal)} (מדרגת ${home.name}${scBal>=sw?', מעל ':', מתחת ל-'}${fmt(sw)})`);
+  }
+
+  /* Carrying cost on stock we hold. Data Log 06 charges per unit per quarter in the local currency
+     of wherever it sits. The Data Log calls this the linear base — the real charge accelerates with
+     quantity — so this is a floor ON the cost, not an estimate OF it. */
+  let carry=0; const carryBits=[];
+  (op.inventory||[]).forEach(i=>{
+    const rid=i.region||'europe', prod=(i.product==='X')?'X':'Y', qty=i.qty||0;
+    if(!(qty>0)) return;
+    const per=((DATALOG.carryingCostPerUnit[prod]||{})[rid])||0;
+    const r=REGIONS.find(x=>x.id===rid)||{cur:'EUR',name:rid};
+    const sf=qty*per*fxRate(r.cur);
+    if(sf>0){ carry+=sf; carryBits.push(`${fmt(qty)} ${prod} ב${r.name} × ${per} ${r.cur}`); }
+  });
+  add('דמי אחסנה על המלאי', carry,
+    carryBits.length?`Data Log 06 — ${carryBits.join(' · ')}. היסוד הליניארי בלבד; החיוב בפועל מואץ עם הכמות`:'');
+
+  /* Interest on any area sitting in overdraft — the same table projectCashflow uses, so the floor
+     and the projection cannot disagree about what a negative balance costs. */
+  let negI=0; const negBits=[];
+  REGIONS.forEach(r=>{
+    const bal=f.cash[r.id]||0; if(bal>=0) return;
+    const owed=-bal;
+    const sw=(DATALOG.interest.supplierCredit.switchover[r.id]||Infinity);
+    const rate=((owed>sw?DATALOG.interest.negBalance.above:DATALOG.interest.negBalance.below)[r.id])||0;
+    const sf=Math.round(owed*(rate/100)*fxRate(r.cur));
+    if(sf>0){ negI+=sf; negBits.push(`${r.name} ${fmt(owed)} ${r.cur} × ${rate}%`); }
+  });
+  add('ריבית על יתרה שלילית', negI, negBits.length?`Data Log 07 — ${negBits.join(' · ')}`:'');
 
   /* Penalty exposure on a commitment whose production deadline has ALREADY passed. Before the
      deadline the cost of meeting it is the production line above and adding a penalty too would
@@ -2980,6 +3036,31 @@ function slot(c, fn, cls){
 }
 
 /* 1 · Where the company stands. Read-only: nothing here asks for a decision. */
+/* Plants, capacity and cash-by-region are standing facts, not quarter narrative, so they render on
+   the cumulative view as well. bodyDashboard early-returns into renderCumulativeDashboard when the
+   selector is on "מצטבר", which is why they vanished there: the blocks were only in the other branch. */
+function standingFactsHTML(q){
+  const fin=S.quarters[q].financial;
+  return `<div class="read" style="margin-bottom:22px">
+      <span class="rh">מפעלים וקיבולת ייצור</span>
+      <div style="margin-top:10px">${renderPlantOverview(q)}</div>
+    </div>
+    <div class="read" style="margin-bottom:22px">
+      <span class="rh">מזומן לפי אזור — לא ניתן להעברה חופשית</span>
+      <div class="small muted" style="margin-top:3px;line-height:1.7">יתרה עשירה באזור אחד אינה מכסה מחסור באחר: העברה דורשת A3-1, עם עמלה ועיכוב. כל שורה במטבע שלה, ולצידה השווי בפרנקים.</div>
+      <div style="overflow-x:auto;margin-top:10px"><table class="tbl compact">
+        <thead><tr><th>אזור</th><th>במטבע מקומי</th><th>שווי ב-SF</th><th>מס</th></tr></thead>
+        <tbody>${REGIONS.map(r=>{ const v=fin.cash[r.id]||0; return `<tr>
+          <td style="text-align:start"><b>${esc(r.name)}</b></td>
+          <td style="text-align:start"><b class="num" style="${v<0?'color:var(--sig-block)':''}">${fmt(v)}</b> ${esc(r.cur)}</td>
+          <td style="text-align:start"><span class="num muted">${fmt(Math.round(v*fxRate(r.cur)))}</span> SF</td>
+          <td class="num muted">${(DATALOG.tax[r.id]!=null)?DATALOG.tax[r.id]+'%':'—'}</td></tr>`; }).join('')}
+          <tr style="background:rgba(139,124,255,.08)"><td><b>מאוחד</b></td><td></td>
+            <td style="text-align:start"><b class="num">${fmt(Math.round(unifiedCashOf(q)))}</b> SF</td><td></td></tr>
+        </tbody></table></div>
+      <div class="small muted" style="margin-top:8px">שערי המשחק: EUR = 1.5 SF · BRL = 0.5 SF · USD = 1 SF.</div>
+    </div>`;
+}
 PAGE_RENDER.dash = (c)=>{
   const q=S.activeQuarter, Q=S.quarters[q];
   if(!Q.entered){
@@ -3245,25 +3326,7 @@ function bodyDashboard(c){
       ${kpi('ROE',fin.roe?fin.roe+'%':'—','')}
       ${kpi('ROS',fin.ros?fin.ros+'%':'—','')}
     </div>
-    <div class="read" style="margin-bottom:22px">
-      <span class="rh">מפעלים וקיבולת ייצור</span>
-      <div style="margin-top:10px">${renderPlantOverview(q)}</div>
-    </div>
-    <div class="read" style="margin-bottom:22px">
-      <span class="rh">מזומן לפי אזור — לא ניתן להעברה חופשית</span>
-      <div class="small muted" style="margin-top:3px;line-height:1.7">יתרה עשירה באזור אחד אינה מכסה מחסור באחר: העברה דורשת A3-1, עם עמלה ועיכוב. כל שורה במטבע שלה, ולצידה השווי בפרנקים.</div>
-      <div style="overflow-x:auto;margin-top:10px"><table class="tbl compact">
-        <thead><tr><th>אזור</th><th>במטבע מקומי</th><th>שווי ב-SF</th><th>מס</th></tr></thead>
-        <tbody>${REGIONS.map(r=>{ const v=fin.cash[r.id]||0; return `<tr>
-          <td style="text-align:start"><b>${esc(r.name)}</b></td>
-          <td style="text-align:start"><b class="num" style="${v<0?'color:var(--sig-block)':''}">${fmt(v)}</b> ${esc(r.cur)}</td>
-          <td style="text-align:start"><span class="num muted">${fmt(Math.round(v*fxRate(r.cur)))}</span> SF</td>
-          <td class="num muted">${(DATALOG.tax[r.id]!=null)?DATALOG.tax[r.id]+'%':'—'}</td></tr>`; }).join('')}
-          <tr style="background:rgba(139,124,255,.08)"><td><b>מאוחד</b></td><td></td>
-            <td style="text-align:start"><b class="num">${fmt(Math.round(cashNow))}</b> SF</td><td></td></tr>
-        </tbody></table></div>
-      <div class="small muted" style="margin-top:8px">שערי המשחק: EUR = 1.5 SF · BRL = 0.5 SF · USD = 1 SF.</div>
-    </div>
+    ${standingFactsHTML(q)}
     <div class="grid" style="grid-template-columns:1.15fr .85fr;align-items:start">
       <div class="card">
         <div class="ch"><h3>${IC('bell')} נורות אזהרה</h3><span class="tag ${activeAlerts().some(a=>a.level==='red')?'r':'g'}">${activeAlerts().filter(a=>a.level!=='ok').length||'0'} פעילות</span></div>
@@ -3350,11 +3413,12 @@ function renderCumulativeDashboard(c){
   }
   const last=latestEntered();
   const sum=k=> ent.reduce((a,q)=>a+(S.quarters[q].financial[k]||0),0);
+  const _standing=standingFactsHTML(last);
   const totalProfit=sum('netProfit'), totalRevenue=sum('revenue');
   const lastFin=S.quarters[last].financial, lastOp=S.quarters[last].operational;
   const totalRD=ent.reduce((a,q)=>a+(S.quarters[q].operational.rd||0),0);
   const avgMargin=totalRevenue>0?(totalProfit/totalRevenue*100):null;
-  c.innerHTML=`
+  c.innerHTML=_standing+`
     <div class="card pad" style="margin-bottom:18px">
       <div class="between"><h3>${IC('lineChart')} תמונה מצטברת — ${ent[0]}–${last}</h3><span class="tag b">${ent.length} רבעונים</span></div>
       <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">
@@ -3733,8 +3797,24 @@ function bodyDecisions(c){
   const decisionCount=decisionIdx.length;
   const sentCount=decisionIdx.filter(i=>isSent(targetQ,sentKeyFor(items[i]))).length;
   const _topPivot=(mp.pivots&&mp.pivots.length)?mp.pivots[0].replace(/<[^>]+>/g,''):'';
-  const _income=alloc.inNow+alloc.inLater;
-  const _left=alloc.capacity-alloc.totalOut;
+  /* The ledger follows what the team TICKED, not what the engine would have proposed. `alloc` is
+     still computed (planGaps and the engine's own arithmetic need it) but the money on screen is
+     the plan's: ticked costs out, ticked revenue in, split by Data Log 09's collection schedule.
+     Actions whose cost is already in the floor contribute nothing — see planPickedCash. */
+  const _pick=planPickedCash(targetQ);
+  const _hasPlan=!!planV6For(targetQ);
+  const _out   = _hasPlan?_pick.out   : alloc.totalOut;
+  const _inNow = _hasPlan?_pick.inNow : alloc.inNow;
+  const _inLater=_hasPlan?_pick.inLater: alloc.inLater;
+  const _income=_inNow+_inLater;
+  /* No clamping. A max(0,...) here made the ledger stop adding up the moment cash fell below the
+     floor — line 4 would print 0 while lines 1-3 summed to a negative — and a ledger that does not
+     sum is the exact failure this block was rebuilt to remove. Below the floor is real information
+     and it is shown as the negative it is. */
+  const _capacity=alloc.available-alloc.floor+_inNow;
+  const _left=_capacity-_out;
+  const _over=Math.max(0,_out-_capacity);
+  const _strict=alloc.available-alloc.floor-_out;
   let _wb=null; try{ _wb=whatBreaksFirst(q, (S.scenarios[0]||{}).levers||null); }catch(e){}
   // The written plan for this quarter, if there is one. When there is, it IS the list and the
   // engine's own list becomes the second opinion below. When there is not (a quarter the plan
@@ -3748,33 +3828,36 @@ function bodyDecisions(c){
      the last thing you reached. All of that still exists and none of it was deleted — it moved
      into ONE closed disclosure at the bottom, because it is background, not a decision. */
   c.innerHTML=`
-    <div class="focus${alloc.over>0?' is-block':''}">
+    <div class="focus${_over>0?' is-block':''}">
       <!-- The conclusion on the headline, its four components as one flowing line beneath.
            Stacking label-over-value in a grid put the block at 245px on a 390px phone and pushed
            the first decision off the screen; this says the same four numbers in ~90px. -->
       <!-- The conclusion is the ledger's last line, so the headline no longer repeats it: the same
            number twice in one block is what made this hard to read in the first place. -->
-      <div class="eyebrow" style="margin:0;color:${alloc.over>0?'var(--sig-block)':'var(--sig-act)'}">${IC('dollar')} הכסף של ${targetQ}</div>
+      <div class="eyebrow" style="margin:0;color:${_over>0?'var(--sig-block)':'var(--sig-act)'}">${IC('dollar')} הכסף של ${targetQ}${_hasPlan?` — לפי ${_pick.picked} הפעולות שסימנת`:''}</div>
       <!-- A LEDGER, not a row of figures. The row showed cash · expected income · floor · cost,
            but the headline is computed from the income that arrives THIS quarter only — so the
            four numbers on screen did not add up to the number above them, which is exactly why
            it read as noise. Every line here is one operation, and they reach the total. -->
       <div class="ledger" style="margin-top:6px">
-        <div title="מזומן מאוחד בכל האזורים, בשווי פרנקים"><span>מזומן שיש עכשיו</span><b class="num">${fmt(alloc.available)} SF</b></div>
-        <div title="החלק מהמכירות שברשימה שנגבה כבר ברבעון הזה (Data Log 09). היתר מגיע ברבעונים הבאים."><span>ייכנס עוד ברבעון הזה</span><b class="num pos">+${fmt(alloc.inNow)} SF</b></div>
-        <div title="מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית"><span>רצפה — אסור לרדת מתחתיה</span><b class="num neg">−${fmt(alloc.floor)} SF</b></div>
-        <div class="sum"><span>זמין להוצאה</span><b class="num">${fmt(alloc.capacity)} SF</b></div>
-        <div><span>עלות הפעולות ברשימה</span><b class="num neg">−${fmt(alloc.totalOut)} SF</b></div>
-        <div class="tot"><span>${alloc.over>0?'חסר':'נשאר'}</span><b class="num ${alloc.over>0?'neg':'pos'}">${alloc.over>0?'−':''}${fmt(Math.abs(_left))} SF</b></div>
+        <div title="מזומן מאוחד בכל האזורים, בשווי פרנקים"><span>מזומן שיש עכשיו</span><b class="num figure">${fmt(alloc.available)} SF</b></div>
+        <div title="החלק מהמכירות שברשימה שנגבה כבר ברבעון הזה (Data Log 09). היתר מגיע ברבעונים הבאים."><span>ייכנס עוד ברבעון הזה</span><b class="num figure pos">+${fmt(_inNow)} SF</b></div>
+        <div title="מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית"><span>רצפה — אסור לרדת מתחתיה</span><b class="num figure neg">−${fmt(alloc.floor)} SF</b></div>
+        <div class="sum"><span>זמין להוצאה</span><b class="num figure${_capacity<0?' neg':''}">${_capacity<0?'−':''}${fmt(Math.abs(_capacity))} SF</b></div>
+        <div><span>${_hasPlan?'עלות הפעולות שסימנתי':'עלות הפעולות ברשימה'}</span><b class="num figure neg">−${fmt(_out)} SF</b></div>
+        <div class="tot"><span>${_over>0?'חסר':'נשאר'}</span><b class="num figure ${_over>0?'neg':'pos'}">${_over>0?'−':''}${fmt(Math.abs(_left))} SF</b></div>
       </div>
       <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
-        <i style="display:block;height:100%;width:${Math.min(100,alloc.capacity?alloc.totalOut/alloc.capacity*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
+        <i style="display:block;height:100%;width:${Math.min(100,_capacity?_out/_capacity*100:0).toFixed(0)}%;background:${_over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
       <div class="small" style="margin-top:7px;line-height:1.6;color:var(--muted)">
-        ${alloc.over>0
-          ? `<b style="color:var(--sig-block)">הפעולות עולות ${fmt(alloc.over)} SF יותר ממה שיש.</b>`
-          : `הכל נכנס בתקציב.`}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">בהמשך הדרך התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}
-        ${alloc.inNow>0?`<details class="fverd" style="margin-top:5px"><summary>שורה 2 מותנית במכירה — מה קורה אם לא יימכר ⌄</summary>
-          <div class="small muted" style="line-height:1.75;margin-top:6px">המכירות שברשימה מכניסות <b>${fmt(_income)} SF</b> בסך הכול, אבל לפי Data Log 09 רק <b>${fmt(alloc.inNow)}</b> נגבים כבר ברבעון הזה (ארה״ב 40% · אירופה 50% · ברזיל 30%); היתר, ${fmt(alloc.inLater)} SF, מגיע ברבעונים הבאים. לכן שורה 2 מותנית בכך שהסחורה באמת תימכר במחיר שהוזן. אם לא יימכר כלום — ${alloc.strictBalance<0?`<b style="color:var(--sig-warn)">תרד ${fmt(-alloc.strictBalance)} SF מתחת לרצפה</b>. זה הסיכון.`:`עדיין תישאר מעל הרצפה, עם ${fmt(alloc.strictBalance)} SF מרווח.`}</div></details>`:''}
+        ${_hasPlan&&_pick.picked===0
+          ? `<span style="color:var(--sig-warn)">עדיין לא סימנת אף פעולה — סמן פעולות ברשימה למטה והמאזן יתעדכן.</span>`
+          : (_over>0
+            ? `<b style="color:var(--sig-block)">הפעולות שסימנת עולות ${fmt(_over)} SF יותר ממה שיש.</b>`
+            : `מה שסימנת נכנס בתקציב.`)}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">בהמשך הדרך התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}
+        ${_pick.inFloor>0?`<br><span class="muted">${fmt(_pick.inFloor)} SF מהפעולות שסימנת כבר שמורים ברצפה ולכן אינם נספרים שוב.</span>`:''}
+        ${_inNow>0?`<details class="fverd" style="margin-top:5px"><summary>שורה 2 מותנית במכירה — מה קורה אם לא יימכר ⌄</summary>
+          <div class="small muted" style="line-height:1.75;margin-top:6px">המכירות שסימנת מכניסות <b>${fmt(_income)} SF</b> בסך הכול, אבל לפי Data Log 09 רק <b>${fmt(_inNow)}</b> נגבים כבר ברבעון הזה (ארה״ב 40% · אירופה 50% · ברזיל 30%); היתר, ${fmt(_inLater)} SF, מגיע ברבעונים הבאים. לכן שורה 2 מותנית בכך שהסחורה באמת תימכר במחיר שהוזן. אם לא יימכר כלום — ${_strict<0?`<b style="color:var(--sig-warn)">תרד ${fmt(-_strict)} SF מתחת לרצפה</b>. זה הסיכון.`:`עדיין תישאר מעל הרצפה, עם ${fmt(_strict)} SF מרווח.`}</div></details>`:''}
       </div>
     </div>
 
@@ -3804,29 +3887,19 @@ function bodyDecisions(c){
     <!-- Everything that explains, rather than decides. One disclosure, closed. -->
     <details class="sec" style="margin-top:22px"><summary>${IC('book')} רקע — למה זו הרשימה, התוכנית הכתובה, והדרך עד Q9</summary>
       <div class="secbody">
-        <div class="read">
-          <span class="rh">איך עובדים כאן</span>
-          <div class="small" style="line-height:2;margin-top:6px">
-            <b>1.</b> ההחלטות ממוספרות <b>לפי עדיפות</b> — עבור מלמעלה למטה. תגיות: <span class="tag r">חובה</span> <span class="tag a">מומלץ</span> <span class="tag b">אופציונלי</span> <span class="tag r">⛔ חסום</span> (אסור עד שהתלות מתקיימת).<br>
-            <b>2.</b> השורה האפורה <b>"להזנה →"</b> = המספרים שתקליד בטופס. <b>"⚡ שלח לסימולטור"</b> מעביר את הפעולה לתרחיש.<br>
-            <b>3.</b> הרשימה נבנית משלוש שכבות דטרמיניסטיות (חוקי המשחק · המצב מהדוח האחרון · היעדים) שרצות תמיד. <b>ה-AI הוא שכבה רביעית לפי בקשה</b> — הוא בוחן כל פעולה (לאשר · לשנות · לוותר) ומחזיר רשימה מסודרת, אבל <b>למנוע המילה האחרונה</b>: שינוי שנכשל בבדיקות החוקיות נדחה, ופעולת חובה לא ניתנת להסרה.<br>
-            <b>4.</b> <b>איך מחושב התקציב למעלה:</b> מזומן זמין <b class="num">${fmt(alloc.available)}</b> פחות <b>החלק המחייב</b> של הרצפה (<b class="num">${fmt(alloc.floor)}</b> — מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית; ההוצאות שההחלטות עצמן מקצות אינן מנוכות פעמיים) ועוד <b class="num">${fmt(alloc.inNow)}</b> SF שנגבים כבר ברבעון הזה מהמכירות שברשימה. לפי Data Log 09 הגבייה המיידית היא ארה״ב 40% · אירופה 50% · ברזיל 30%, והיתרה — <b class="num">${fmt(alloc.inLater)}</b> SF — מגיעה ברבעונים הבאים. הסכום המיידי <b>מותנה</b> בכך שהסחורה תימכר במחיר שהוזן: ${alloc.strictBalance<0?`בתרחיש שבו לא נמכר כלום תרד <b style="color:var(--sig-warn)">${fmt(-alloc.strictBalance)} SF מתחת לרצפה</b>.`:`גם אם לא יימכר כלום תישאר מעל הרצפה, עם ${fmt(alloc.strictBalance)} SF מרווח.`}<br>
-            <b>5.</b> מצב היעד והקצב: ${mp.remaining} רבעונים ל-Q9${mp.required>0?`, נדרש <b>${mp.required.toFixed(1)}</b> נק׳ לרבעון כדי להגיע ל-${mp.tScore}`:''}. <span class="tag ${trackTag}">${trackTxt}</span>
-          </div>
-        </div>
-        ${_planList?`<details class="sec" style="margin-bottom:14px"><summary>${IC('sliders')} מה המנוע היה מציע מעצמו — ${decisionCount} פעולות (חוות דעת שנייה, לא הרשימה)</summary>
+        <details class="sec" style="margin-bottom:14px"><summary>${IC('cpu')} מה המנוע היה מציע מעצמו — ${decisionCount} פעולות (חוות דעת שנייה)</summary>
           <div class="secbody">
-            <div class="small muted" style="line-height:1.8;margin-bottom:10px">${IC('info')} הרשימה הזו נבנית מחוקי המשחק, מהדוח האחרון ומהיעדים — בלי לראות את התוכנית הכתובה. היא כאן כדי להשוות, לא כדי להחליף. מה שהיא מסמנת כ<b>חובה</b> ואינו מכוסה בתוכנית כבר עלה למעלה.
-              <span class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">
-                <button class="btn sm" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'תן ל-AI לבחון גם את רשימת המנוע'}</button>
-                ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
-              <div id="enrichOut" style="margin-top:8px"></div>
-              ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
-              ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
-                <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
-              ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b>: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
-            </div>
-            ${actionList}</div></details>`:''}
+            <div class="small muted" style="line-height:1.8">${IC('info')} נבנה מחוקי המשחק, מהדוח האחרון ומהיעדים — בלי לראות את התוכנית הכתובה. מה שהמנוע מסמן כ<b>חובה</b> ואינו מכוסה בתוכנית כבר עלה למעלה, אז זה כאן להשוואה בלבד.</div>
+            <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+              <button class="btn sm" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'תן ל-AI לבחון את רשימת המנוע'}</button>
+              ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</div>
+            <div id="enrichOut" style="margin-top:8px"></div>
+            ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
+            ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
+              <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
+            ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b>: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
+            <div style="margin-top:10px">${actionList}</div>
+          </div></details>
         ${_topPivot?`<div class="note is-warn" style="margin-top:12px">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
         ${renderWhatBreaksFirst(q)}
         ${(()=>{ try{ return renderPlanV6(q,targetQ); }catch(e){ return ''; } })()}
@@ -5766,21 +5839,21 @@ const PLAN_V6 = {
       floorTotal:2942061,
       sources:'מזומן 1,067,452 + מזומן ממכירות Q4 (50% מ-1,920,000 EUR = 1,440,000 SF) = 2,507,452 SF. הפער נסגר בדחיית פירעון אשראי הספקים ל-Q5 (עלות: 28,508 EUR ריבית) ובקיצוץ הפרסום ל-250,000 EUR. אפס הלוואות חדשות.',
       actions:[
-        {n:1,  what:'חילוץ מזומן מברזיל: העברת 1,600,000 BRL לאירופה', form:'A3-1 + A3-3', value:'+529,067 EUR נטו (עמלה 0.8%). משאירים ~495,000 BRL בברזיל לתשלום סוכנים ופרסום ב-Q5', check:'brazilCash'},
-        {n:2,  what:'סגירת גירעון ה-EUR במטה: המרת 338,790 SF ל-225,860 EUR', form:'W3', value:'עמלה 0.4%; חוסך ריבית שלילית של 8,470 SF לרבעון — מאומת מדוחות Q2 ו-Q3', check:null},
-        {n:3,  what:'תשלום A/P P4 בשני האזורים', form:'אוטומטי', value:'−341,030 EUR ו-−9,288 BRL', check:null},
-        {n:4,  what:'תשלום הלוואת שפיצר', form:'A3-2', value:'−136,510 SF. אין פירעון מוקדם — 2% היא הריבית הזולה במשחק', check:'spitzer'},
-        {n:5,  what:'אשראי הספקים: תשלום ריבית בלבד; הקרן נפרעת ב-Q5', form:'—', value:'−28,508 EUR. זול מכל חלופת מימון', check:'supplierInterest'},
-        {n:6,  what:'העברת 400,000 EUR מאירופה למטה', form:'A3-1', value:'+600,000 SF למימון המו״פ', check:'hqTransfer'},
-        {n:7,  what:'מו״פ: שבבים 500,000 SF (יעד X3) · מחשבים 70,000 SF', form:'H1-1', value:'−570,000 SF. מבטל את קנס העקביות מ-Q3', check:'rdChipGrade'},
-        {n:8,  what:'מחקרי שוק: MR24 (קיבולת אופטימלית), MR21 (הסתברות פטנט X), MR18 (התיישנות מפעלים) + 17/28/74 חינם', form:'H1-2', value:'−60,000 SF. MR24 יהפוך את תקרת הביקוש ממשוערת לידועה', check:'mr24'},
-        {n:9,  what:'תמחור: Y0 באירופה 120 EUR', form:'A1-2', value:'מחיר חדירה. ללא הזנת מחיר — הסחורה נשארת במלאי [מדריך 4.10.1]', check:null},
-        {n:10, what:'פרסום אירופה: 250,000 EUR', form:'A1-2', value:'המנוף היחיד נגד קשיי חדירה; השפעה מיידית', check:null},
-        {n:11, what:'מכירה: 16,000 יח׳ Y0 באירופה', form:'A1-2', value:'+1,920,000 EUR', check:'europeVolume'},
-        {n:12, what:'שינוע יבשתי: 14,000 יח׳ Y0 לברזיל', form:'H6 / A4', value:'−270,000 EUR. אין דמי אחסנה ברבעון המשלוח', check:'freightBrazil'},
-        {n:13, what:'שמירת 5,000 יח׳ Y0 כדגם Standard ל-Q5', form:'—', value:'−40,000 EUR אחסנה; מאפשר שני דגמים ב-Q5', check:'carrying'},
-        {n:14, what:'ייצור: 52,000 שבבי X2 (30,000 לחוזה + 22,000 לצריכה) ו-22,000 מחשבי Y1', form:'A2-3 / A2-4', value:'−1,333,000 EUR', check:'productionQ4'},
-        {n:15, what:'פתיחת מגעים: הרחבת חוזה השבבים (H6) ורישוי X3 (H5)', form:'H6 / H5', value:'נכס "שותפויות" לרכיב הפוטנציאל בציון', check:null},
+        {n:1,  what:'חילוץ מזומן מברזיל: העברת 1,600,000 BRL לאירופה', form:'A3-1 + A3-3', value:'+529,067 EUR נטו (עמלה 0.8%). משאירים ~495,000 BRL בברזיל לתשלום סוכנים ופרסום ב-Q5', cash:{out:6400,  in:0, note:'עמלת העברה 0.8% על 1,600,000 BRL [DL-07] — ההעברה עצמה אינה משנה את המזומן המאוחד, רק את פיזורו'}, check:'brazilCash'},
+        {n:2,  what:'סגירת גירעון ה-EUR במטה: המרת 338,790 SF ל-225,860 EUR', form:'W3', value:'עמלה 0.4%; חוסך ריבית שלילית של 8,470 SF לרבעון — מאומת מדוחות Q2 ו-Q3', cash:{out:1355,  in:0, note:'עמלת המרה 0.4% על 338,790 SF'}, check:null},
+        {n:3,  what:'תשלום A/P P4 בשני האזורים', form:'אוטומטי', value:'−341,030 EUR ו-−9,288 BRL', cash:{out:516189,in:0, floor:true, note:'341,030 EUR + 9,288 BRL. תשלום מחויב — כבר שמור ברצפה'}, check:null},
+        {n:4,  what:'תשלום הלוואת שפיצר', form:'A3-2', value:'−136,510 SF. אין פירעון מוקדם — 2% היא הריבית הזולה במשחק', cash:{out:136510,in:0, floor:true, note:'תשלום שפיצר — כבר שמור ברצפה'}, check:'spitzer'},
+        {n:5,  what:'אשראי הספקים: תשלום ריבית בלבד; הקרן נפרעת ב-Q5', form:'—', value:'−28,508 EUR. זול מכל חלופת מימון', cash:{out:42762, in:0, floor:true, note:'28,508 EUR ריבית — כבר שמורה ברצפה'}, check:'supplierInterest'},
+        {n:6,  what:'העברת 400,000 EUR מאירופה למטה', form:'A3-1', value:'+600,000 SF למימון המו״פ', cash:{out:2400,  in:0, note:'עמלה על העברת 400,000 EUR (600,000 SF) למטה; ההעברה עצמה פנימית'}, check:'hqTransfer'},
+        {n:7,  what:'מו״פ: שבבים 500,000 SF (יעד X3) · מחשבים 70,000 SF', form:'H1-1', value:'−570,000 SF. מבטל את קנס העקביות מ-Q3', cash:{out:530000,in:0, note:'570,000 SF מו״פ פחות 40,000 המינימום החוקי שכבר שמור ברצפה'}, check:'rdChipGrade'},
+        {n:8,  what:'מחקרי שוק: MR24 (קיבולת אופטימלית), MR21 (הסתברות פטנט X), MR18 (התיישנות מפעלים) + 17/28/74 חינם', form:'H1-2', value:'−60,000 SF. MR24 יהפוך את תקרת הביקוש ממשוערת לידועה', cash:{out:60000, in:0, note:'MR24 + MR21 + MR18 לפי מחירון החוברת'}, check:'mr24'},
+        {n:9,  what:'תמחור: Y0 באירופה 120 EUR', form:'A1-2', value:'מחיר חדירה. ללא הזנת מחיר — הסחורה נשארת במלאי [מדריך 4.10.1]', cash:{out:0,     in:0, note:'הזנת מחיר — אין לה עלות; היא תנאי למכירה'}, check:null},
+        {n:10, what:'פרסום אירופה: 250,000 EUR', form:'A1-2', value:'המנוף היחיד נגד קשיי חדירה; השפעה מיידית', cash:{out:375000,in:0, note:'250,000 EUR פרסום'}, check:null},
+        {n:11, what:'מכירה: 16,000 יח׳ Y0 באירופה', form:'A1-2', value:'+1,920,000 EUR', cash:{out:0, in:2880000, region:'europe', note:'16,000 יח׳ × 120 EUR = 1,920,000 EUR. הגבייה מתפצלת לפי Data Log 09'}, check:'europeVolume'},
+        {n:12, what:'שינוע יבשתי: 14,000 יח׳ Y0 לברזיל', form:'H6 / A4', value:'−270,000 EUR. אין דמי אחסנה ברבעון המשלוח', cash:{out:405000,in:0, note:'270,000 EUR שינוע יבשתי [DL-05] — מאומת מול freightCostLC'}, check:'freightBrazil'},
+        {n:13, what:'שמירת 5,000 יח׳ Y0 כדגם Standard ל-Q5', form:'—', value:'−40,000 EUR אחסנה; מאפשר שני דגמים ב-Q5', cash:{out:60000, in:0, floor:true, note:'40,000 EUR אחסנה — דמי האחסנה כבר שמורים ברצפה'}, check:'carrying'},
+        {n:14, what:'ייצור: 52,000 שבבי X2 (30,000 לחוזה + 22,000 לצריכה) ו-22,000 מחשבי Y1', form:'A2-3 / A2-4', value:'−1,333,000 EUR', cash:{out:999750,in:0, note:'1,333,000 EUR ייצור = 1,999,500 SF, מתוכם 50% במזומן ברבעון זה והיתר ב-A/P [DL-09]'}, check:'productionQ4'},
+        {n:15, what:'פתיחת מגעים: הרחבת חוזה השבבים (H6) ורישוי X3 (H5)', form:'H6 / H5', value:'נכס "שותפויות" לרכיב הפוטנציאל בציון', cash:{out:0,     in:0, note:'פתיחת מגעים — ללא עלות ישירה'}, check:null},
       ],
       close:[
         ['מכירות אירופה','1,920,000 EUR (16,000 יח׳)'],
@@ -6262,6 +6335,58 @@ function planGaps(engineItems, blk){
     return !(m && planForms.has(m[1]));
   });
 }
+/* Which plan actions are ticked, per quarter. A tick means "this is in my quarter", and the money
+   ledger above the list is computed from exactly these — that is the whole point of the checkbox.
+   Nothing is ticked by default: the ledger must start from what the team has actually chosen. */
+function planPicks(q){ S.ui=S.ui||{}; S.ui.planPicks=S.ui.planPicks||{};
+  S.ui.planPicks[q]=S.ui.planPicks[q]||{}; return S.ui.planPicks[q]; }
+function isPicked(q,n){ return !!planPicks(q)[n]; }
+window.togglePlanPick=(n)=>{
+  const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const picks=planPicks(q); if(picks[n]) delete picks[n]; else picks[n]=true;
+  save(); go('plan');
+};
+window.planPickAll=(on)=>{
+  const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter, blk=planV6For(q);
+  if(!blk) return;
+  const picks=planPicks(q);
+  Object.keys(picks).forEach(k=>delete picks[k]);
+  if(on) blk.actions.forEach((a,i)=>{ picks[a.n!=null?a.n:(i+1)]=true; });
+  save(); go('plan');
+};
+/* What the ticked actions do to the quarter's cash.
+
+   Every figure is the plan's OWN, transcribed from the action's stated economics — the conversion
+   to francs (EUR x1.5, BRL x0.5) is the only arithmetic applied, and each line records it. Actions
+   whose cost is already reserved in the floor are marked `floor` and contribute nothing here, or
+   the same franc would be counted twice: once as unavoidable and once as chosen.
+
+   Income is split by Data Log 09's collection schedule for the region the plan names, so what the
+   budget can actually spend this quarter is the collected part only — the rest is receivable. */
+function planPickedCash(q){
+  const blk=planV6For(q);
+  const out={ out:0, inNow:0, inLater:0, gross:0, picked:0, inFloor:0, lines:[] };
+  if(!blk) return out;
+  const picks=planPicks(q);
+  blk.actions.forEach((a,i)=>{
+    const n=a.n!=null?a.n:(i+1);
+    if(!picks[n]) return;
+    out.picked++;
+    const c=a.cash||{};
+    if(c.floor){ out.inFloor+=(c.out||0); out.lines.push({n, what:a.what, floor:true, out:c.out||0}); return; }
+    const o=c.out||0, gross=c.in||0;
+    out.out+=o; out.gross+=gross;
+    let now=gross, later=0;
+    if(gross>0){
+      const rid=c.region||'europe';
+      const sched=DATALOG.collection[rid]||[100,0,0];
+      now=Math.round(gross*(sched[0]||0)/100); later=gross-now;
+    }
+    out.inNow+=now; out.inLater+=later;
+    out.lines.push({n, what:a.what, out:o, gross, now, later, region:c.region||null});
+  });
+  return out;
+}
 /* A plan action names its INTOPIA decision form ("A1-2", "H6 / A4", "A3-1 + A3-3"). That code is
    the one thing about it that is machine-usable, so it is what the sheet button carries: the form
    is added to the quarter's scenario and you type the numbers into it. No lever payload is
@@ -6308,6 +6433,7 @@ function renderPlanActions(base, targetQ, engineItems){
   const rv=(S.ai&&S.ai.planReview&&S.ai.planReview.q===targetQ)?S.ai.planReview:null;
   const gaps=planGaps(engineItems, blk);
   const tally=planV6Tally(blk.actions);
+  const _picked=planPickedCash(targetQ).picked;
   const cards=blk.actions.map((a,i)=>{
     const n=a.n!=null?a.n:(i+1);
     const ev=planV6Check(a.check);
@@ -6316,6 +6442,7 @@ function renderPlanActions(base, targetQ, engineItems){
                 : (ev.state==='warn'||(av&&(av.verdict==='risk'||av.verdict==='fix'))) ? 'amber' : 'info';
     const as=av?PLAN_AI_STATES[av.verdict]:null;
     const _codes=planFormCodes(a);
+    const _n=n, _on=isPicked(targetQ,n), _cash=a.cash||{};
     return `<div class="act ${worst}">
       <div class="an">${n}</div>
       <div class="at">
@@ -6328,10 +6455,15 @@ function renderPlanActions(base, targetQ, engineItems){
         ${a.value?`<div class="small muted" style="margin-top:5px;line-height:1.7">${esc(a.value)}</div>`:''}
         ${av?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.75;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">
           ${IC('cpu')} <b>ה-AI:</b> ${av.why}${av.fix?`<br><b style="color:var(--sig-warn)">מה לשנות:</b> ${av.fix}`:''}</div>`:''}
-        <div class="row" style="gap:8px;margin-top:9px;flex-wrap:wrap;align-items:center">
-          ${_codes.length?`<button class="btn sm" onclick="planAddToSheet(${i})" title="מוסיף את ${_codes.join(' + ')} לגיליון ההזנה של ${targetQ}. את המספרים תמלא שם — התוכנית אומרת מה לעשות, לא באילו שדות.">${IC('share')} הוסף לגיליון הזנה</button>`
-            :`<span class="small muted">${IC('info')} אין טופס הזנה לפעולה הזו</span>`}
+        <div class="row" style="gap:10px;margin-top:9px;flex-wrap:wrap;align-items:center">
+          <label class="pick${_on?' on':''}" title="סימון מכניס את הפעולה לרבעון: העלות וההכנסה שלה נכנסות למאזן הכסף למעלה, והטופס שלה מופיע בגיליון ההזנה.">
+            <input type="checkbox" ${_on?'checked':''} onchange="togglePlanPick(${_n})"><span>${_on?'בתוכנית שלי לרבעון':'סמן כדי לכלול ברבעון'}</span></label>
+          ${_cash.floor
+            ? `<span class="small muted">${IC('info')} העלות כבר שמורה ברצפה — סימון לא מוסיף הוצאה</span>`
+            : `<span class="small muted">${_cash.out?`עלות <b class="num">${fmt(_cash.out)}</b> SF`:''}${_cash.in?`${_cash.out?' · ':''}הכנסה <b class="num" style="color:var(--sig-ok)">${fmt(_cash.in)}</b> SF`:''}${(!_cash.out&&!_cash.in)?'ללא השפעה ישירה על המזומן':''}</span>`}
+          ${_codes.length?`<span class="small muted">· טופס ${_codes.join(' + ')}</span>`:`<span class="small muted">· אין טופס הזנה</span>`}
         </div>
+        ${_cash.note?`<div class="small muted" style="margin-top:5px;line-height:1.65">${IC('info')} ${esc(_cash.note)}</div>`:''}
         <details class="fverd" style="margin-top:8px"><summary>${planV6Mark(ev.state)} — מה המנוע מודד ⌄</summary>
           <div class="small muted" style="line-height:1.75;margin-top:6px">${ev.txt}</div></details>
       </div></div>`;
@@ -6339,8 +6471,9 @@ function renderPlanActions(base, targetQ, engineItems){
   return `<div id="decisionsTop"></div>
     <div style="margin:14px 0 12px">
       <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
-        <b style="font-size:16px" title="הפעולות כפי שהוזנו בקובץ התוכנית, גרסה ${PLAN_V6_VERSION}">התוכנית שלי ל-${targetQ} · ${blk.actions.length} פעולות</b>
+        <b style="font-size:16px" title="הפעולות כפי שהוזנו בקובץ התוכנית, גרסה ${PLAN_V6_VERSION}">התוכנית שלי ל-${targetQ} · <span style="color:var(--sig-act)">${_picked}</span>/${blk.actions.length} מסומנות</b>
         <span class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn sm ghost" onclick="planPickAll(${_picked<blk.actions.length?'true':'false'})">${_picked<blk.actions.length?'סמן הכל':'נקה הכל'}</button>
           <button class="btn sm ${rv?'':'primary'}" id="planAiBtn" onclick="reviewPlanWithAI()">${IC('cpu')} ${rv?'בדוק מחדש':'בדוק עם AI'}</button>
           ${rv?`<button class="btn sm ghost" onclick="clearPlanReview()">נקה בדיקת AI</button>`:''}</span>
       </div>
@@ -6748,7 +6881,35 @@ window.submitScenario=(id)=>{ const i=S.scenarios.findIndex(s=>s.id===id); if(i<
 /* ----- EXPORT (F8) ----- */
 function bodySubmit(c){
   const q=S.activeQuarter; const sc=S.scenarios[0]; const targetQ=nextQuarters(q)[0]||q;
-  c.innerHTML=`
+  /* This tab answers one question: what do I type into the simulator this quarter. That is the
+     set of actions ticked in the decisions tab — nothing else. The full form catalogue, the plan
+     document and the scenario machinery moved below into disclosures, and the pre-submit
+     checklist stayed on the surface because it is the last thing that catches a missing price. */
+  const _blk=planV6For(targetQ), _picks=planPicks(targetQ);
+  const _chosen=_blk?_blk.actions.map((a,i)=>({a,n:(a.n!=null?a.n:i+1)})).filter(x=>_picks[x.n]):[];
+  const _forms=[]; _chosen.forEach(x=>planFormCodes(x.a).forEach(f=>{ if(!_forms.includes(f)) _forms.push(f); }));
+  const _noForm=_chosen.filter(x=>!planFormCodes(x.a).length);
+  const _pickedHTML = _blk ? `
+    <div class="read" style="margin-bottom:18px">
+      <div class="between" style="flex-wrap:wrap;gap:8px">
+        <span class="rh">מה שסימנתי ל-${targetQ} — ${_chosen.length} פעולות</span>
+        <button class="btn sm" onclick="go('plan')">${IC('clipboard')} חזרה לבחירה</button>
+      </div>
+      ${_chosen.length?`
+        <div style="overflow-x:auto;margin-top:10px"><table class="tbl compact">
+          <thead><tr><th>#</th><th>הפעולה</th><th>טופס להזנה</th><th>ערך כלכלי לפי התוכנית</th></tr></thead>
+          <tbody>${_chosen.map(x=>{ const codes=planFormCodes(x.a);
+            return `<tr><td class="num" style="opacity:.6">${x.n}</td>
+              <td style="text-align:start;white-space:normal"><b>${esc(x.a.what)}</b></td>
+              <td style="white-space:nowrap">${codes.length?codes.map(f=>`<span class="form">${esc(f)}</span>`).join(' '):'<span class="small muted">אין טופס</span>'}</td>
+              <td class="small muted" style="text-align:start;white-space:normal">${esc(x.a.value||'')}</td></tr>`; }).join('')}
+          </tbody></table></div>
+        <div class="small muted" style="margin-top:9px;line-height:1.8">${IC('info')} <b>הטפסים להזנה:</b> ${_forms.length?_forms.map(f=>`<span class="form">${esc(f)}</span>`).join(' '):'—'}.
+        ${_noForm.length?`<br>${_noForm.length} מהפעולות שסימנת מתבצעות מחוץ לגיליון (אוטומטי או מגעים) — הן כאן כדי שלא יישכחו.`:''}
+        <br>המספרים עצמם נקבעים על ידיכם: התוכנית קובעת <b>מה</b> לעשות, לא באילו שדות — לכן אין כאן ערכים מומצאים.</div>`
+      :`<div class="small muted" style="margin-top:8px">${IC('info')} לא סומנו פעולות ל-${targetQ}. סמנו אותן בלשונית <b>החלטות רבעוניות</b> והן יופיעו כאן.</div>`}
+    </div>` : '';
+  c.innerHTML=_pickedHTML+`
     <div class="between" style="margin-bottom:16px">
       <div class="small muted">גיליון הזנה לרבעון <b>${targetQ}</b> מבוסס על התרחיש הנבחר. בפורמט טפסי INTOPIA.</div>
       <div class="row">
@@ -6756,7 +6917,8 @@ function bodySubmit(c){
         <button class="btn primary" onclick="downloadInputSheet('${targetQ}')">${IC('download')} ייצוא XLSX</button>
       </div>
     </div>
-    <div class="card pad" style="margin-bottom:16px;border-inline-start:4px solid var(--purple)">
+    <details class="sec" style="margin-bottom:16px"><summary>${IC('clipboard')} מסמך התוכנית והשוואה למצב בפועל</summary>
+      <div class="secbody">
       <div class="between" style="flex-wrap:wrap;gap:8px">
         <div>
           <b>${IC('clipboard')} תוכנית העל הכתובה — Q4→Q9 (מסמך גרסה ${PLAN_DOC_VERSION})</b>
@@ -6770,18 +6932,17 @@ function bodySubmit(c){
         </div>
       </div>
       <div id="planDeltaPreview" style="margin-top:10px"></div>
+      </div></details>
+    <div class="read" style="margin-bottom:18px">
+      <span class="rh">${IC('check')} צ׳ק-ליסט לפני Submit</span>
+      <div class="small muted" style="margin-top:3px">הדבר האחרון שתופס מחיר שלא הוזן או מלאי שנשאר תקוע.</div>
+      <div style="margin-top:10px" id="checklist"></div>
     </div>
-    <div class="card" id="exportActions" style="margin-bottom:16px"></div>
-    <div class="grid" style="grid-template-columns:1.3fr .7fr;align-items:start">
-      <div class="card">
-        <div class="ch"><h3>${IC('share')} גיליון הזנה — ${targetQ}</h3><span class="tag b">טפסים רשמיים: A1/A2/A3/A4 · H1-H6 · W1-W3</span></div>
-        <div class="cb" id="inputSheet"></div>
-      </div>
-      <div class="card">
-        <div class="ch"><h3>${IC('check')} צ׳ק-ליסט לפני Submit</h3></div>
-        <div class="cb" id="checklist"></div>
-      </div>
-    </div>
+    <details class="sec" style="margin-bottom:14px"><summary>${IC('share')} גיליון ההזנה המלא — ${targetQ} (כל הטפסים והשדות)</summary>
+      <div class="secbody">
+        <div class="card" id="exportActions" style="margin-bottom:16px"></div>
+        <div id="inputSheet"></div>
+      </div></details>
     <details class="card" style="margin-top:18px">
       <summary style="cursor:pointer;padding:15px 18px;font-weight:800;display:flex;align-items:center;gap:8px">${IC('book')} מקרא טפסי ההחלטה של INTOPIA <span class="small muted" style="font-weight:400">— 19 הקודים והשדות (לחץ לפתיחה)</span></summary>
       <div class="cb" id="formsRef"></div>
@@ -7316,12 +7477,46 @@ window.saveDecision=()=>{
 };
 
 /* ----- GOALS / CONFIG (F2) ----- */
+/* The Q9 targets, taken from the team's own plan rather than typed twice. Every value here is
+   read out of PLAN_V6 — the grade schedule's closing row, the financial summary's last line, and
+   the two quarters whose floor the plan itemises — so if the plan changes these follow it. */
+function planV6Goals(){
+  const lastGrade=PLAN_V6.grades[PLAN_V6.grades.length-1];
+  // the closing grades are the highest the schedule reaches, not the last row's "—"
+  let tx=0, ty=0;
+  PLAN_V6.grades.forEach(g=>{ const mx=/X(\d)/.exec(g.grade), my=/Y(\d)/.exec(g.grade);
+    if(mx) tx=Math.max(tx,+mx[1]); if(my) ty=Math.max(ty,+my[1]); });
+  const fin=PLAN_V6.finance.filter(r=>/^Q\d$/.test(r.q));
+  const last=fin[fin.length-1];
+  const cumProfit=fin.reduce((a,r)=>a+(typeof r.consol==='number'?r.consol:0),0);
+  const floors={};
+  Object.entries(PLAN_V6.quarters).forEach(([q,blk])=>{ if(blk.floorTotal) floors[q]=blk.floorTotal; });
+  return { techXTarget:tx, techYTarget:ty, cumProfitTarget:cumProfit,
+    finalRETarget:last?last.cum:null, floors, noExternalLoans:true,
+    lastGrade:lastGrade?lastGrade.q:null };
+}
+window.applyPlanV6Goals=()=>{
+  const g=planV6Goals();
+  const G=S.config.goals;
+  G.techXTarget=g.techXTarget; G.techYTarget=g.techYTarget;
+  G.cumProfitTarget=g.cumProfitTarget;
+  if(g.finalRETarget!=null) G.finalRETarget=g.finalRETarget;
+  G.noExternalLoans=true;
+  G.floors={...(G.floors||{}), ...g.floors};
+  save();
+  toast(`יעדים עודכנו מהתוכנית (גרסה ${PLAN_V6_VERSION}): X${g.techXTarget}/Y${g.techYTarget} · רווח מצטבר ${fmt(g.cumProfitTarget)} SF · רצפות ${Object.keys(g.floors).join(', ')}`,'g');
+  go('decide');
+};
 function bodyGoals(c){
   c.innerHTML=`
-    <div class="pill-tabs" id="goalTabs" style="margin-bottom:18px">
-      <button class="active" data-t="floors">${IC('target')} יעדי Q9</button>
-      <button data-t="contracts">חוזים והתחייבויות</button>
-      <button data-t="params">פרמטרי מודל</button>
+    <div class="between" style="flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div class="pill-tabs" id="goalTabs">
+        <button class="active" data-t="floors">${IC('target')} יעדי Q9</button>
+        <button data-t="contracts">חוזים והתחייבויות</button>
+        <button data-t="params">פרמטרי מודל</button>
+      </div>
+      <button class="btn sm primary" onclick="applyPlanV6Goals()"
+        title="${(()=>{const g=planV6Goals();return `דרגות X${g.techXTarget}/Y${g.techYTarget} · רווח מצטבר ${fmt(g.cumProfitTarget)} SF · עודפים בסיום ${fmt(g.finalRETarget||0)} SF · רצפות ${Object.entries(g.floors).map(([q,v])=>q+' '+fmt(v)).join(' · ')}`;})()}">${IC('clipboard')} עדכן יעדים מהתוכנית (גרסה ${PLAN_V6_VERSION})</button>
     </div>
     <div id="goalBody"></div>`;
   const tabs=$$('#goalTabs button');

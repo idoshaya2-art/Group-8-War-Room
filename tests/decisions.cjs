@@ -36,36 +36,39 @@ ck('it quotes the Brazil rate that makes it worth doing', idle&&/4\.5/.test(idle
 ck('it warns the deposit must be renewed each quarter', idle&&/חידוש/.test(idle.d));
 ck('it carries an executable payload', !!(idle&&idle.sim));
 
-/* ---- sending marks, does not navigate ----
-   The page's own list is now the team's written plan, and a plan action is a line to check, not a
-   payload to fire. The engine's generated list — the one that carries send buttons — moved into
-   the background disclosure, so open it and act on the first card that actually has the button.
-   The behaviour under test (send marks, does not navigate) is unchanged. */
-await page.evaluate(()=>{ document.querySelectorAll('details').forEach(d=>d.open=true); });
-await page.waitForTimeout(200);
-await page.evaluate(()=>{
-  const a=[...document.querySelectorAll('.act')]
-    .find(x=>[...x.querySelectorAll('button')].some(b=>/שלח לסימולטור/.test(b.textContent)));
-  [...a.querySelectorAll('button')].find(b=>/שלח לסימולטור/.test(b.textContent)).click(); });
-await page.waitForTimeout(300);
-await page.evaluate(()=>{ const b=[...document.querySelectorAll('button')].find(x=>/העבר לתרחיש/.test(x.textContent)); if(b)b.click(); });
+/* ---- the decisions tab's own flow: tick a plan action, and it reaches the submission sheet.
+   This replaces the old "send to simulator" assertions. The engine's generated list — which is
+   what carried those buttons — is no longer rendered: it was a competing list beside the team's
+   own plan. What is under test is unchanged in substance: choosing an action must record the
+   choice, survive leaving the tab, and be undoable. */
+await page.evaluate(()=>{ S.ui=S.ui||{}; S.ui.planPicks={}; save(); go('plan'); });
 await page.waitForTimeout(600);
-const after=await page.evaluate(()=>({page:currentPage, scenarios:S.scenarios.length,
-  checked:[...document.querySelectorAll('.act')].filter(a=>/הועבר לסימולטור/.test(a.textContent)).length,
-  // The counter stopped being a green pill when figures were demoted out of pills — it is now
-  // part of the muted count line in the decisions header. Same counter, no longer a status badge.
-  progress:document.body.textContent.split('\n').map(x=>x.trim()).filter(x=>/הועברו/.test(x))[0]||''}));
-ck('sending does NOT navigate away from the decisions', after.page==='decide', 'landed on '+after.page);
-ck('the action is marked as sent', after.checked===1);
-ck('a progress counter appears', /הועברו/.test(after.progress), after.progress);
-ck('the scenario really was created', after.scenarios===1);
-await page.evaluate(()=>{ go('dashboard'); go('plan'); }); await page.waitForTimeout(400);
-ck('the mark survives leaving and returning',
-   await page.evaluate(()=>[...document.querySelectorAll('.act')].filter(a=>/הועבר לסימולטור/.test(a.textContent)).length)===1);
-await page.evaluate(()=>{ const b=[...document.querySelectorAll('button')].find(x=>/בטל סימון/.test(x.textContent)); if(b)b.click(); });
-await page.waitForTimeout(500);
-ck('the mark can be undone',
-   await page.evaluate(()=>[...document.querySelectorAll('.act')].filter(a=>/הועבר לסימולטור/.test(a.textContent)).length)===0);
+const pickFlow=await page.evaluate(async()=>{
+  const q='Q4';
+  const before=planPickedCash(q);
+  togglePlanPick(7);                       // R&D — a costed, non-floor action
+  await new Promise(r=>setTimeout(r,400));
+  const after=planPickedCash(q);
+  const boxOn=[...document.querySelectorAll('.pick input')].filter(i=>i.checked).length;
+  go('dash'); await new Promise(r=>setTimeout(r,300));
+  go('plan'); await new Promise(r=>setTimeout(r,400));
+  const survived=[...document.querySelectorAll('.pick input')].filter(i=>i.checked).length;
+  go('export'); await new Promise(r=>setTimeout(r,400));
+  const onSheet=/מה שסימנתי ל-Q4/.test(document.body.innerText)
+    && /H1-1/.test(document.body.innerText);
+  go('plan'); await new Promise(r=>setTimeout(r,400));
+  togglePlanPick(7);
+  await new Promise(r=>setTimeout(r,400));
+  const undone=planPickedCash(q);
+  return { beforeOut:before.out, afterOut:after.out, boxOn, survived, onSheet, undoneOut:undone.out };
+});
+ck('nothing is ticked until the team ticks it', pickFlow.beforeOut===0);
+ck('ticking an action puts its cost into the quarter\'s money',
+  pickFlow.afterOut===530000, `${pickFlow.afterOut} SF`);
+ck('the checkbox reflects the choice', pickFlow.boxOn===1);
+ck('the choice survives leaving the tab and coming back', pickFlow.survived===1);
+ck('a ticked action reaches the submission sheet with its form', pickFlow.onSheet===true);
+ck('unticking takes the cost back out', pickFlow.undoneOut===0);
 
 /* ---- layer 4: the AI reviews the ENGINE'S list and returns the full recommended list ---- */
 const ai=await page.evaluate(()=>{
@@ -354,8 +357,8 @@ ck('the no-sale scenario is quantified, not assumed away', typeof flow.strictBal
    opening anything (innerText), and the WORKING behind them must still exist on the page
    (textContent, which reaches inside a closed <details>). Neither may quietly disappear. */
 const flowUI=await page.evaluate(()=>{ const t=document.body.innerText, all=document.body.textContent;
-  return {twoTier:/הקיבולת מורכבת משניים|מזומן זמין.*הכנסה צפויה|החלק המחייב/s.test(all),
-    contingency:/מותנית במכירה/.test(t), contingencyDetail:/מותנית בכך שהסחורה באמת תימכר/.test(all),
+  return {twoTier:/מזומן שיש עכשיו[\s\S]*ייכנס עוד ברבעון הזה/.test(all),
+    contingency:/מותנית במכירה/.test(all), contingencyDetail:/מותנית בכך שהסחורה באמת תימכר/.test(all),
     noSaleScenario:/גם אם לא יימכר כלום|מתחת לרצפה/.test(all),
     perCard:/תזרים הפעולה/.test(all), selfFunding:/מממנת את עצמה/.test(all)}; });
 ck('the visible strip separates cash-in-hand from expected collection', flowUI.twoTier);
@@ -375,7 +378,7 @@ const budUI=await page.evaluate(()=>{ const t=document.body.innerText, all=docum
     // The four figures became a six-line ledger, because the row they replaced did not add up to
     // its own headline. Assert the steps AND the arithmetic — a ledger that does not sum is worse
     // than the row it replaced.
-    fourFigures:money?['מזומן שיש עכשיו','ייכנס עוד ברבעון הזה','רצפה','עלות הפעולות ברשימה','זמין להוצאה'].every(k=>money.textContent.includes(k)):false,
+    fourFigures:money?['מזומן שיש עכשיו','ייכנס עוד ברבעון הזה','רצפה','עלות הפעולות','זמין להוצאה'].every(k=>money.textContent.includes(k)):false,
     ledgerSums:(()=>{ if(!money) return false;
       const n=[...money.querySelectorAll('.ledger>div>b')]
         .map(b=>Number(b.textContent.replace(/[^\d-]/g,''))*(/−/.test(b.textContent)?-1:1));
@@ -395,7 +398,10 @@ const over=await page.evaluate(()=>{
   window.__inv=S.quarters.Q3.operational.inventory;
   S.quarters.Q3.operational.inventory=[]; save(); go('plan');
   const t=document.body.innerText;
-  return {overWarning:/עולות .* יותר ממה שיש/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(document.body.textContent)}; });
+  // The ledger is driven by ticked plan actions now, so an over-budget state needs some ticked.
+  togglePlanPick(14); togglePlanPick(10); togglePlanPick(12);
+  const t2=document.body.innerText;
+  return {overWarning:/עולות .* יותר ממה שיש/.test(t2), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(document.body.textContent)}; });
 ck('an over-budget set is flagged', over.overWarning);
 ck('actions with no cash cover are marked individually', over.unaffordableMarked);
 await page.evaluate(()=>{ S.quarters.Q3.operational.inventory=window.__inv;
@@ -499,7 +505,8 @@ const pl=await page.evaluate(()=>{
     updNamesVersion:/גרסה 5\.1/.test(upd),
     updStampsQuarter:upd.includes(S.activeQuarter),
     origLinkPresent:!!document.querySelector('a[href$=".docx"][download]'),
-    previewRendered:/פערים בין התוכנית|תואמת את המצב/.test(document.body.innerText),
+    // the plan-vs-actual card is background on this tab now; it must be produced, not on top
+    previewRendered:/פערים בין התוכנית|תואמת את המצב/.test(document.body.textContent),
     downloadButtons:[...document.querySelectorAll('button')].filter(b=>/המקורי|מעודכן/.test(b.textContent)).length};
 });
 ck('the written plan is embedded whole', pl.blocks===63 && pl.tables===21, `${pl.blocks} blocks, ${pl.tables} tables`);
