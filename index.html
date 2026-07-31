@@ -550,7 +550,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.7 · מו״פ: רבעון ומצטבר, כל אחד בשמו';
+const APP_VERSION = 'v12.8 · רצפה מלאה, מפעלים, ומטבע בכל סכום';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1632,6 +1632,37 @@ function budgetAllocation(items){
    So the floor = the legal minimum + the outflows of the next quarter that cannot
    be deferred, and it deliberately does NOT count on incoming sales.
    ========================================================================== */
+/* The team's own cash cushion at HQ, above Data Log 10's legal 20,000 SF minimum. A quarter that
+   lands exactly on the legal floor has no room for a mis-forecast, so the floor reserves this too. */
+const DEFAULT_HQ_BUFFER_SF = 100000;
+/* A constant-payment (Spitzer) loan leaves a fingerprint in three consecutive balances: the ratio
+   of successive drops IS (1+r). From b0,b1,b2:
+       (1+r) = (b2-b1)/(b1-b0)        P = b0*(1+r) - b1
+   On the team's own balances 883,490 → 764,650 → 643,433 that gives 1.02 → 2% a quarter and a
+   payment of 136,510 — which is how the written plan derived it by hand. Deriving it rather than
+   asking for it means the repayment lands in the floor without anyone having to remember to type
+   it, and the source is three figures already on file. Returns null when the series does not look
+   like a constant-payment loan, and the floor then falls back to interest only and says so. */
+function loanAmortisation(){
+  const qs=enteredQuarters().filter(q=>{ const v=S.quarters[q].financial.loans; return v!=null && v>0; });
+  if(qs.length<3) return null;
+  const b=qs.slice(-3).map(q=>S.quarters[q].financial.loans||0);
+  const d1=b[1]-b[0], d2=b[2]-b[1];
+  if(!(d1<0) || !(d2<0)) return null;                 // must be paying down, not borrowing
+  const growth=d2/d1;                                  // = 1+r
+  const rate=growth-1;
+  if(!(rate>0) || rate>0.25) return null;              // 0-25% a quarter is the believable band
+  const payment=Math.round(b[0]*growth-b[1]);
+  if(!(payment>0)) return null;
+  // the same payment must also explain the second step, or this is a coincidence not a schedule
+  const check=Math.round(b[1]*growth-b[2]);
+  if(Math.abs(check-payment)>Math.max(50, payment*0.01)) return null;
+  const last=S.quarters[qs[qs.length-1]].financial.loans||0;
+  const interest=Math.round(last*rate);
+  return { rate, payment, interest, principal:payment-interest, balance:last,
+    quarters:qs.slice(-3), balances:b,
+    src:`נגזר ממאזני ${qs.slice(-3).join(' → ')} (${b.map(x=>fmt(x)).join(' → ')}): יחס ${growth.toFixed(3)} → ${(rate*100).toFixed(1)}% לרבעון` };
+}
 function floorComponents(forQuarter){
   const base=S.activeQuarter, p=S.config.params, op=S.quarters[base].operational, f=S.quarters[base].financial;
   const sc=S.scenarios[0];
@@ -1644,6 +1675,11 @@ function floorComponents(forQuarter){
   const items=[]; const add=(label,sf,src,disc)=>{ if(sf>0) items.push({label,sf:Math.round(sf),src,disc:!!disc}); };
 
   add('מינימום חוקי במטה', DATALOG.minHOCashSF, 'Data Log 10 — נדרש בכל עת');
+  // The legal minimum is 20,000 SF and it is not a working buffer: a quarter that lands exactly
+  // on it has no room for a mis-forecast. This is the team's own cushion above it, and it is a
+  // configured policy rather than a rule, so it says so.
+  const buf=(S.config.goals.hqBufferSF!=null)?S.config.goals.hqBufferSF:DEFAULT_HQ_BUFFER_SF;
+  add('כרית ביטחון במטה', buf, 'מדיניות הצוות — מעל המינימום החוקי, כדי ששגיאת חיזוי לא תשבור את הרצפה');
 
   // Fixed plant cost — paid directly out of cash, never deferred (Data Log 09)
   let plantFixed=0;
@@ -1674,7 +1710,30 @@ function floorComponents(forQuarter){
   const taxRow=projNow.find(x=>x.q===forQuarter);
   add('מס שנצבר וישולם ברבעון הבא', (taxRow&&taxRow.tax)||0, 'Data Log 09 — מסים נזקפים ל-A/P1');
 
-  add('ריבית על חוב קיים', ((f.loans||0)*((p.interest.bank||0)/100)/4), 'Data Log 07');
+  /* Debt service, not just its interest. The floor used to carry the interest line alone, so a
+     loan being repaid on a schedule looked cheaper each quarter than it is — the principal is
+     just as unavoidable. */
+  const amort=loanAmortisation();
+  if(amort) add('החזר הלוואה (קרן + ריבית)', amort.payment,
+    `${amort.src} · קרן ${fmt(amort.principal)} + ריבית ${fmt(amort.interest)} SF`);
+  else add('ריבית על חוב קיים', ((f.loans||0)*((p.interest.bank||0)/100)/4),
+    'Data Log 07 — ריבית בלבד; לא נמצאה סדרת מאזנים שממנה ניתן לגזור לוח סילוקין');
+
+  /* Penalty exposure on a commitment whose production deadline has ALREADY passed. Before the
+     deadline the cost of meeting it is the production line above and adding a penalty too would
+     charge the same obligation twice; after it, production can no longer close the gap and the
+     penalty is what is actually owed (clause 4: purchase price + the contract's penalty %). */
+  let penalty=0; const penaltyOf=[];
+  try{
+    contractPlan().forEach(c=>{
+      if(!(c.bindingGap>0) || c.quartersLeft>=0) return;
+      const share=c.need>0?(c.bindingGap/c.need):0;
+      const owed=Math.round((c.penaltySF||0)*share);
+      if(owed>0){ penalty+=owed; penaltyOf.push(`${c.prod}${c.grade} ל-${c.deliveryQuarter} (חסר ${fmt(c.bindingGap)})`); }
+    });
+  }catch(e){}
+  add('חשיפת קנס על התחייבות שמועד הייצור שלה עבר', penalty,
+    penaltyOf.length?`${penaltyOf.join(' · ')} — מחיר הרכישה + אחוז הקנס שבחוזה (סעיף 4)`:'');
 
   // Brazil deposit is only live for construction started in Q1–Q3
   if(qIndex(forQuarter)<=qIndex('Q3') && plantsBy && (plantsBy.brazil||0)>0)
@@ -2942,7 +3001,10 @@ PAGE_RENDER.dash = (c)=>{
       ${comps.length?`<details class="sec ref" style="margin-top:12px"><summary>${IC('landmark')} טבלת המתחרים המלאה — MR74</summary><div class="secbody" style="padding:0">${renderCompetitors(comps,v=>fmt(Math.round(v)))}</div></details>
         <details class="sec ref"><summary>${IC('lineChart')} נתחי שוק ביחידות — MR17&28</summary><div class="secbody" style="padding:0">${renderMarketShare(mi)}</div></details>`:''}
     </div></details>`);
-  slot(c, (d)=>{ d.innerHTML=renderDemandEngine(); });
+  c.insertAdjacentHTML('beforeend',
+    `<details class="sec"><summary>${IC('trendUp')} מנוע הביקוש והגמישות — מה נלמד מהתצפיות</summary>
+      <div class="secbody" id="demandPane"></div></details>`);
+  const dp=$('#demandPane'); if(dp) dp.innerHTML=renderDemandEngine();
 };
 
 /* 2 · Results in, financials out. Ingest and the statements live together because one
@@ -3162,7 +3224,7 @@ function bodyDashboard(c){
     <div class="card pad" style="margin-bottom:18px;border-color:${fg.anyUnpriced?'var(--red)':'var(--green)'};background:linear-gradient(90deg,${fg.anyUnpriced?'var(--redbg)':'var(--greenbg)'},var(--panel))">
       <div class="between" style="flex-wrap:wrap;gap:10px">
         <div><div style="font-size:13px;color:var(--muted);font-weight:700">${IC('landmark')} מלאי מוגמר — הנכס שיש להמיר למזומן</div>
-          <div style="font-size:26px;font-weight:800;font-family:'Rubik';margin-top:2px">${fmt(fg.pcUnits)} מחשבים מוכנים <span style="font-size:14px;color:var(--muted2)">· שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)}</span></div>
+          <div style="font-size:26px;font-weight:800;font-family:'Rubik';margin-top:2px">${fmt(fg.pcUnits)} מחשבים מוכנים <span style="font-size:14px;color:var(--muted2)">· שווי פוטנציאלי ≈${fmt(fg.potentialRevenue)} SF</span></div>
           <div class="small" style="margin-top:4px;color:${fg.anyUnpriced?'var(--red)':'var(--green)'}">${fg.anyUnpriced?IC('warn')+' חלק/כל המלאי ללא מחיר — "אין מחיר = אין מכירה". זו הפעולה הדחופה ביותר.':IC('check')+' מתומחר — ודא שהמכירה בפועל מנקה את המלאי'}</div></div>
         <button class="btn primary" onclick="go('plan')">${IC('zap')} לתוכנית המכירה</button>
       </div>
@@ -3174,14 +3236,33 @@ function bodyDashboard(c){
     </div>
     <h3 style="margin:6px 0 12px">מדדי-על</h3>
     <div class="kpis" style="margin-bottom:22px;grid-template-columns:repeat(4,minmax(0,1fr))">
-      ${kpi('מזומן מאוחד',fmt(cashNow),deltaTag(cashNow,cashPrev))}
-      ${kpi('רווח נקי',fmt(fin.netProfit),'')}
-      ${kpi('מחזור',fmt(fin.revenue),'')}
-      ${kpi('רווחים צבורים',fmt(fin.retainedEarnings),'')}
-      ${kpi('חוב',fmt(fin.loans),'')}
+      ${kpi('מזומן מאוחד (SF)',fmt(cashNow),deltaTag(cashNow,cashPrev))}
+      ${kpi('רווח נקי (SF)',fmt(fin.netProfit),'')}
+      ${kpi('מחזור (SF)',fmt(fin.revenue),'')}
+      ${kpi('רווחים צבורים (SF)',fmt(fin.retainedEarnings),'')}
+      ${kpi('חוב (SF)',fmt(fin.loans),'')}
       ${kpi('רמות Chip / Computer',`${op.techX} / ${op.techY}`,'')}
       ${kpi('ROE',fin.roe?fin.roe+'%':'—','')}
       ${kpi('ROS',fin.ros?fin.ros+'%':'—','')}
+    </div>
+    <div class="read" style="margin-bottom:22px">
+      <span class="rh">מפעלים וקיבולת ייצור</span>
+      <div style="margin-top:10px">${renderPlantOverview(q)}</div>
+    </div>
+    <div class="read" style="margin-bottom:22px">
+      <span class="rh">מזומן לפי אזור — לא ניתן להעברה חופשית</span>
+      <div class="small muted" style="margin-top:3px;line-height:1.7">יתרה עשירה באזור אחד אינה מכסה מחסור באחר: העברה דורשת A3-1, עם עמלה ועיכוב. כל שורה במטבע שלה, ולצידה השווי בפרנקים.</div>
+      <div style="overflow-x:auto;margin-top:10px"><table class="tbl compact">
+        <thead><tr><th>אזור</th><th>במטבע מקומי</th><th>שווי ב-SF</th><th>מס</th></tr></thead>
+        <tbody>${REGIONS.map(r=>{ const v=fin.cash[r.id]||0; return `<tr>
+          <td style="text-align:start"><b>${esc(r.name)}</b></td>
+          <td style="text-align:start"><b class="num" style="${v<0?'color:var(--sig-block)':''}">${fmt(v)}</b> ${esc(r.cur)}</td>
+          <td style="text-align:start"><span class="num muted">${fmt(Math.round(v*fxRate(r.cur)))}</span> SF</td>
+          <td class="num muted">${(DATALOG.tax[r.id]!=null)?DATALOG.tax[r.id]+'%':'—'}</td></tr>`; }).join('')}
+          <tr style="background:rgba(139,124,255,.08)"><td><b>מאוחד</b></td><td></td>
+            <td style="text-align:start"><b class="num">${fmt(Math.round(cashNow))}</b> SF</td><td></td></tr>
+        </tbody></table></div>
+      <div class="small muted" style="margin-top:8px">שערי המשחק: EUR = 1.5 SF · BRL = 0.5 SF · USD = 1 SF.</div>
     </div>
     <div class="grid" style="grid-template-columns:1.15fr .85fr;align-items:start">
       <div class="card">
@@ -3196,19 +3277,60 @@ function bodyDashboard(c){
   renderAlerts($('#alertsBox'),computeAlerts(q));
   drawTrend($('#trendChart'));
 };
+/* What the team keeps asking each other in the room: how many plants have we got, where, making
+   what, and how many units a quarter does that actually buy us. Every figure is either declared
+   (the X/Y split) or Data Log 03 capacity times the plant count — nothing is estimated, and where
+   the split has not been declared it says "not declared" rather than guessing a number. */
+function plantOverview(q){
+  const op=S.quarters[q].operational, by=op.plantsByRegion||null;
+  const regs=REGIONS.filter(r=>r.id!=='hq');
+  const rows=regs.map(r=>{
+    const total=by?(by[r.id]||0):null;
+    const nx=plantsForProduct(r.id,'X'), ny=plantsForProduct(r.id,'Y');
+    const capX=nx!=null?nx*((DATALOG.capacity.X||{})[r.id]||0):null;
+    const capY=ny!=null?ny*((DATALOG.capacity.Y||{})[r.id]||0):null;
+    return { r, total, nx, ny, capX, capY,
+      perX:(DATALOG.capacity.X||{})[r.id]||0, perY:(DATALOG.capacity.Y||{})[r.id]||0 };
+  });
+  const totX=rows.reduce((a,x)=>a+(x.capX||0),0), totY=rows.reduce((a,x)=>a+(x.capY||0),0);
+  const anyUndeclared=rows.some(x=>x.total>0 && (x.nx==null||x.ny==null));
+  const plants=rows.reduce((a,x)=>a+(x.total||0),0);
+  return { rows, totX, totY, anyUndeclared, plants };
+}
+function renderPlantOverview(q){
+  const o=plantOverview(q);
+  if(!o.plants) return `<div class="small muted">${IC('info')} לא דווחו מפעלים ברבעון ${esc(q)}.</div>`;
+  const cell=(v,per,n)=>v==null?'<span class="muted">לא הוצהר</span>'
+    :`<b class="num">${fmt(v)}</b> יח׳${n?` <span class="muted">(${n}×${fmt(per)})</span>`:''}`;
+  return `<div style="overflow-x:auto"><table class="tbl compact">
+      <thead><tr><th>אזור</th><th>מפעלים</th><th>שבבים (X)</th><th>קיבולת X לרבעון</th><th>מחשבים (Y)</th><th>קיבולת Y לרבעון</th></tr></thead>
+      <tbody>${o.rows.filter(x=>x.total).map(x=>`<tr>
+        <td style="text-align:start"><b>${esc(x.r.name)}</b></td>
+        <td class="num">${x.total}</td>
+        <td class="num">${x.nx==null?'<span class="muted">?</span>':x.nx}</td>
+        <td style="text-align:start">${cell(x.capX,x.perX,x.nx)}</td>
+        <td class="num">${x.ny==null?'<span class="muted">?</span>':x.ny}</td>
+        <td style="text-align:start">${cell(x.capY,x.perY,x.ny)}</td></tr>`).join('')}
+        <tr style="background:rgba(139,124,255,.08)"><td><b>סה״כ</b></td><td class="num"><b>${o.plants}</b></td><td></td>
+          <td style="text-align:start"><b class="num">${fmt(o.totX)}</b> יח׳/רבעון</td><td></td>
+          <td style="text-align:start"><b class="num">${fmt(o.totY)}</b> יח׳/רבעון</td></tr>
+      </tbody></table></div>
+    <div class="small muted" style="margin-top:8px;line-height:1.8">${IC('info')} הקיבולת היא <b>מקסימלית</b> לפי Data Log 03 (מפעלים × קיבולת לאזור), ו<b>לרבעון</b> — המשחק אינו מתנהל בחודשים. הקיבולת ה<b>אופטימלית</b> (זו שבה עלות היחידה מינימלית) אינה ב-Data Log כלל; <b>MR24</b> מודד אותה.
+    ${o.anyUndeclared?`<br><span style="color:var(--sig-warn)">${IC('warn')} באזור אחד או יותר לא הוצהר הפילוח X/Y — הדוח נותן סך מפעלים לאזור בלבד. הצהירו אותו כדי שהקיבולת תהיה מספר ולא סימן שאלה.</span>`:''}</div>`;
+}
 function autoBriefing(q){
   const Q=S.quarters[q], out=[]; const cash=unifiedCashOf(q);
   const prevQ=qIndex(q)>0?QUARTERS[qIndex(q)-1]:null;
-  out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> ${Q.financial.consolidated?'(מאוחד מהדוח, SF)':'(שווי-SF מוערך)'}.`);
+  out.push(`מזומן מאוחד עומד על <b class="num">${fmt(cash)}</b> SF ${Q.financial.consolidated?'(מאוחד מהדוח)':'(שווי-SF מוערך משערי המשחק)'}.`);
   if(prevQ&&S.quarters[prevQ].entered){ const d=cash-unifiedCashOf(prevQ);
-    out.push(`שינוי מול ${prevQ}: <b class="num">${d>=0?'+':''}${fmt(d)}</b> ${d>=0?IC('trendUp'):IC('trendDown')}.`); }
+    out.push(`שינוי מול ${prevQ}: <b class="num">${d>=0?'+':''}${fmt(d)}</b> SF ${d>=0?IC('trendUp'):IC('trendDown')}.`); }
   const fg=finishedGoods(q);
-  if(fg.hasFinished) out.push(`<span style="color:${fg.anyUnpriced?'var(--red)':'var(--green)'}">מלאי מוגמר:</span> <b class="num">${fmt(fg.pcUnits)}</b> מחשבים מוכנים למכירה${fg.anyUnpriced?' — <b style="color:var(--red)">עדיין ללא מחיר מוזן!</b> זו הפעולה הדחופה ביותר':''} (שווי פוטנציאלי ≈<b class="num">${fmt(fg.potentialRevenue)}</b>).`);
+  if(fg.hasFinished) out.push(`<span style="color:${fg.anyUnpriced?'var(--red)':'var(--green)'}">מלאי מוגמר:</span> <b class="num">${fmt(fg.pcUnits)}</b> מחשבים מוכנים למכירה${fg.anyUnpriced?' — <b style="color:var(--red)">עדיין ללא מחיר מוזן!</b> זו הפעולה הדחופה ביותר':''} (שווי פוטנציאלי ≈<b class="num">${fmt(fg.potentialRevenue)}</b> SF).`);
   // Progress vs Group 8's Q9 targets (Assignment 1)
   const g=S.config.goals;
   if(g.cumProfitTarget){ const cumProfit=enteredQuarters().reduce((a,x)=>a+(S.quarters[x].financial.netProfit||0),0);
     const pct=Math.round(cumProfit/g.cumProfitTarget*100);
-    out.push(`מול יעד Q9: רווח מצטבר <b class="num" style="color:${cumProfit<0?'var(--red)':'var(--green)'}">${fmt(Math.round(cumProfit))}</b> מתוך יעד <b class="num">${fmt(g.cumProfitTarget)}</b> (${pct}%)${g.noExternalLoans?' · קו אדום: ללא הלוואות חיצוניות':''}.`); }
+    out.push(`מול יעד Q9: רווח מצטבר <b class="num" style="color:${cumProfit<0?'var(--red)':'var(--green)'}">${fmt(Math.round(cumProfit))}</b> SF מתוך יעד <b class="num">${fmt(g.cumProfitTarget)}</b> SF (${pct}%)${g.noExternalLoans?' · קו אדום: ללא הלוואות חיצוניות':''}.`); }
   const reds=computeAlerts(q).filter(a=>a.level==='red');
   if(reds.length) out.push(`<span style="color:var(--red)">דחוף:</span> ${reds.length} נורות אדומות — ${reds[0].title}.`);
   else out.push(`אין נורות אדומות פעילות ברבעון זה. ${IC('check')}`);
@@ -3638,12 +3760,12 @@ function bodyDecisions(c){
            four numbers on screen did not add up to the number above them, which is exactly why
            it read as noise. Every line here is one operation, and they reach the total. -->
       <div class="ledger" style="margin-top:6px">
-        <div title="מזומן מאוחד בכל האזורים, בשווי פרנקים"><span>מזומן שיש עכשיו</span><b class="num">${fmt(alloc.available)}</b></div>
-        <div title="החלק מהמכירות שברשימה שנגבה כבר ברבעון הזה (Data Log 09). היתר מגיע ברבעונים הבאים."><span>ייכנס עוד ברבעון הזה</span><b class="num pos">+${fmt(alloc.inNow)}</b></div>
-        <div title="מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית"><span>רצפה — אסור לרדת מתחתיה</span><b class="num neg">−${fmt(alloc.floor)}</b></div>
-        <div class="sum"><span>זמין להוצאה</span><b class="num">${fmt(alloc.capacity)}</b></div>
-        <div><span>עלות הפעולות ברשימה</span><b class="num neg">−${fmt(alloc.totalOut)}</b></div>
-        <div class="tot"><span>${alloc.over>0?'חסר':'נשאר'}</span><b class="num ${alloc.over>0?'neg':'pos'}">${alloc.over>0?'−':''}${fmt(Math.abs(_left))}</b></div>
+        <div title="מזומן מאוחד בכל האזורים, בשווי פרנקים"><span>מזומן שיש עכשיו</span><b class="num">${fmt(alloc.available)} SF</b></div>
+        <div title="החלק מהמכירות שברשימה שנגבה כבר ברבעון הזה (Data Log 09). היתר מגיע ברבעונים הבאים."><span>ייכנס עוד ברבעון הזה</span><b class="num pos">+${fmt(alloc.inNow)} SF</b></div>
+        <div title="מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית"><span>רצפה — אסור לרדת מתחתיה</span><b class="num neg">−${fmt(alloc.floor)} SF</b></div>
+        <div class="sum"><span>זמין להוצאה</span><b class="num">${fmt(alloc.capacity)} SF</b></div>
+        <div><span>עלות הפעולות ברשימה</span><b class="num neg">−${fmt(alloc.totalOut)} SF</b></div>
+        <div class="tot"><span>${alloc.over>0?'חסר':'נשאר'}</span><b class="num ${alloc.over>0?'neg':'pos'}">${alloc.over>0?'−':''}${fmt(Math.abs(_left))} SF</b></div>
       </div>
       <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
         <i style="display:block;height:100%;width:${Math.min(100,alloc.capacity?alloc.totalOut/alloc.capacity*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
@@ -4940,10 +5062,10 @@ function intelInsights(comps,mi,q){
   const n=comps.length;
   // Retained earnings position (= 50% of final score)
   const reRank=rankOf(sorted('retainedEarnings')); const reLeader=sorted('retainedEarnings')[0];
-  out.push(`ברווחים צבורים אנחנו במקום <b>${reRank}/${n}</b> (המוביל: חברה ${reLeader.num} עם ${fmt(reLeader.retainedEarnings)}). זה 50% מהציון הסופי — ${reRank>n/2?'<span style="color:var(--amber)">פער לסגור: להאיץ מכירות ורווחיות</span>':'עמדה טובה, לשמר'}.`);
+  out.push(`ברווחים צבורים אנחנו במקום <b>${reRank}/${n}</b> (המוביל: חברה ${reLeader.num} עם ${fmt(reLeader.retainedEarnings)} אלפי CHF). זה 50% מהציון הסופי — ${reRank>n/2?'<span style="color:var(--amber)">פער לסגור: להאיץ מכירות ורווחיות</span>':'עמדה טובה, לשמר'}.`);
   // Cash war-chest
   const cashRank=rankOf(sorted('cash'));
-  out.push(`במזומן אנחנו במקום <b>${cashRank}/${n}</b> (${fmt(us.cash)}) — ${cashRank<=3?'יתרון להשקעה אגרסיבית בייצור/פרסום כשמתחילות המכירות':'לשמור על נזילות מול הרצפות'}.`);
+  out.push(`במזומן אנחנו במקום <b>${cashRank}/${n}</b> (${fmt(us.cash)} אלפי CHF) — ${cashRank<=3?'יתרון להשקעה אגרסיבית בייצור/פרסום כשמתחילות המכירות':'לשמור על נזילות מול הרצפות'}.`);
   // R&D pressure by product
   const rdChipLeaders=sorted('rdChip').filter(c=>c.num!==OUR_CO && c.rdChip>0).slice(0,2);
   const rdPcLeaders=sorted('rdPc').filter(c=>c.num!==OUR_CO && c.rdPc>0).slice(0,2);
@@ -4977,7 +5099,7 @@ function intelInsights(comps,mi,q){
   if(mrLeaders.length) out.push(`חברות ${mrLeaders.map(c=>c.num).join(', ')} רוכשות הכי הרבה מחקרי שוק — הן אוספות עלינו מודיעין; שמור על גמישות ואל תשדר כוונות.`);
   // Debt exposure of rivals (opportunity)
   const highDebt=sorted('bankLoans').filter(c=>c.num!==OUR_CO).slice(0,1)[0];
-  if(highDebt&&highDebt.bankLoans>us.bankLoans*1.5) out.push(`חברה ${highDebt.num} ממונפת מאוד (הלוואות ${fmt(highDebt.bankLoans)}) — פגיעה לתחרות מחירים אם נלחץ.`);
+  if(highDebt&&highDebt.bankLoans>us.bankLoans*1.5) out.push(`חברה ${highDebt.num} ממונפת מאוד (הלוואות ${fmt(highDebt.bankLoans)} אלפי CHF) — פגיעה לתחרות מחירים אם נלחץ.`);
   // Market share (if sales exist)
   if((mi.sales||[]).length){ const byCo={}; mi.sales.forEach(s=>byCo[s.company]=(byCo[s.company]||0)+s.units);
     const total=Object.values(byCo).reduce((a,b)=>a+b,0)||1; const ourShare=(byCo[OUR_CO]||0)/total*100;
@@ -5223,7 +5345,7 @@ function renderSimIntel(){
   const byRE=comps.filter(c=>c.retainedEarnings!=null).sort((a,b)=>b.retainedEarnings-a.retainedEarnings);
   const pos=byRE.findIndex(c=>c.num===OUR_CO)+1; if(pos) bits.push(`דירוג רווחים צבורים שלנו: <b>${pos}/${byRE.length}</b>`);
   const total=sales.reduce((a,s)=>a+s.units,0), our=sales.filter(s=>s.company===OUR_CO).reduce((a,s)=>a+s.units,0);
-  if(total) bits.push(`נתח יחידות שלנו: <b>${((our/total)*100).toFixed(1)}%</b> (${fmt(our)}/${fmt(total)})`);
+  if(total) bits.push(`נתח יחידות שלנו: <b>${((our/total)*100).toFixed(1)}%</b> (${fmt(our)}/${fmt(total)} יח׳)`);
   const rdAvg=marketRdAvgSF(comps);   // MR74 is in 000 CHF; this is scaled to units like the rest
   if(rdAvg) bits.push(`מו״פ ממוצע בשוק: <b class="num">${fmt(rdAvg)}</b> SF`);
   const leader=[...sales].sort((a,b)=>b.units-a.units)[0];

@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **608 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **630 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **634**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **656**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -139,6 +139,21 @@ The app chrome eats most of a phone screen, so a change nowhere near this tab �
 `APP_VERSION` wrapping a line in the sidebar was enough — can fail the outcome assertion and send
 the next reader to the wrong file. The pair localises the blame.
 
+## The dashboard answers the standing questions
+
+`plantOverview()` / `renderPlantOverview()`: how many plants, where, making what, and the units a
+quarter that buys — plant count × Data Log 03, never an estimate. An undeclared X/Y split reports
+no capacity and flags itself instead of guessing. Beside it, cash per region in its own currency
+with the SF equivalent and the region's tax rate, because a rich balance in one region does not
+cover a shortfall in another.
+
+Capacity here is **maximal and per quarter** — the game has no months, and the *optimal* figure is
+not in the Data Log at all (MR24 measures it).
+
+**Every money figure names its currency.** MR74 cells are labelled "אלפי CHF", regional cash carries
+its own code, everything consolidated says SF. The mixed-scale bugs in this file all began with an
+unlabelled number.
+
 ## The ask bubble owns the chat
 
 `#askBubble` / `#askPanel` sit outside `.content`, so a free-text question is one click away from
@@ -176,6 +191,24 @@ The manual verification form is **collapsed, not deleted**. It is the confirmati
 import and the only in-app way to fix a figure the parser misread (three capacity figures came from
 an OCR reconstruction), so every path that tells you to use it — a parse error, SheetJS missing —
 opens it.
+
+## The floor is everything you cannot choose not to pay
+
+`floorComponents()` reserves, beyond the legal minimum: the **whole loan payment**, an **expected
+penalty** on a commitment that can no longer be met, and a **100,000 SF cushion at HQ** on top of
+Data Log 10's 20,000 legal minimum (`DEFAULT_HQ_BUFFER_SF`, overridable via
+`S.config.goals.hqBufferSF` — it is team policy, not a rule, and the line says so).
+
+`loanAmortisation()` derives the payment instead of asking for it. A constant-payment loan leaves
+a fingerprint in three consecutive balances: `(1+r) = (b2-b1)/(b1-b0)`, then `P = b0(1+r) - b1`.
+On the team's own 883,490 → 764,650 → 643,433 that gives 2.0%/quarter and 136,511 — the figure the
+written plan derived by hand. It returns null on a rising balance, a series with no implied
+interest, or an erratic one, and the floor then falls back to interest only **and says that is all
+it is**. All four rejections are asserted.
+
+The penalty is charged **only after the production deadline has passed**. Before it, the cost of
+meeting the obligation is the production line already in the floor, and adding a penalty too would
+bill the same commitment twice.
 
 ## R&D has two numbers, and both must name themselves
 
