@@ -355,7 +355,7 @@ ck('the no-sale scenario is quantified, not assumed away', typeof flow.strictBal
    (textContent, which reaches inside a closed <details>). Neither may quietly disappear. */
 const flowUI=await page.evaluate(()=>{ const t=document.body.innerText, all=document.body.textContent;
   return {twoTier:/הקיבולת מורכבת משניים|מזומן זמין.*הכנסה צפויה|החלק המחייב/s.test(all),
-    contingency:/מותנים במכירה/.test(t), contingencyDetail:/מותנה בכך שהסחורה תימכר/.test(all),
+    contingency:/מותנית במכירה/.test(t), contingencyDetail:/מותנית בכך שהסחורה באמת תימכר/.test(all),
     noSaleScenario:/גם אם לא יימכר כלום|מתחת לרצפה/.test(all),
     perCard:/תזרים הפעולה/.test(all), selfFunding:/מממנת את עצמה/.test(all)}; });
 ck('the visible strip separates cash-in-hand from expected collection', flowUI.twoTier);
@@ -372,12 +372,20 @@ const budUI=await page.evaluate(()=>{ const t=document.body.innerText, all=docum
   const money=[...document.querySelectorAll('.focus')].find(x=>/הכסף של Q/.test(x.textContent));
   return {strip:!!money,
     // the four figures the tab exists to show, all above the decision list
-    fourFigures:money?['מזומן זמין','הכנסה צפויה','רצפה מחייבת','עלות הפעולות'].every(k=>money.textContent.includes(k)):false,
-    showsSpendable:/נשאר לפעולות|חסר/.test(t),
+    // The four figures became a six-line ledger, because the row they replaced did not add up to
+    // its own headline. Assert the steps AND the arithmetic — a ledger that does not sum is worse
+    // than the row it replaced.
+    fourFigures:money?['מזומן שיש עכשיו','ייכנס עוד ברבעון הזה','רצפה','עלות הפעולות ברשימה','זמין להוצאה'].every(k=>money.textContent.includes(k)):false,
+    ledgerSums:(()=>{ if(!money) return false;
+      const n=[...money.querySelectorAll('.ledger>div>b')]
+        .map(b=>Number(b.textContent.replace(/[^\d-]/g,''))*(/−/.test(b.textContent)?-1:1));
+      return n.length===6 && n[0]+n[1]+n[2]===n[3] && n[3]+n[4]===n[5]; })(),
+    showsSpendable:/נשאר|חסר/.test(t),
     explainsWhyRevenueExcluded:/Data Log 09|נגבים מיד/.test(all),
     perCardCost:[...document.querySelectorAll('.act')].filter(a=>/SF/.test(a.textContent)).length}; });
 ck('a cash budget block leads the tab', budUI.strip);
-ck('it shows all four figures the tab is for', budUI.fourFigures);
+ck('it shows every step of the sum, not four figures that do not reach it', budUI.fourFigures);
+ck('and the ledger actually adds up to the total it prints', budUI.ledgerSums);
 ck('it states what is left to spend', budUI.showsSpendable);
 ck('it still shows the collection schedule behind the inflow', budUI.explainsWhyRevenueExcluded);
 ck('cards display their cash cost', budUI.perCardCost>0, budUI.perCardCost+' cards');
@@ -387,7 +395,7 @@ const over=await page.evaluate(()=>{
   window.__inv=S.quarters.Q3.operational.inventory;
   S.quarters.Q3.operational.inventory=[]; save(); go('plan');
   const t=document.body.innerText;
-  return {overWarning:/חורגים ב-/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(document.body.textContent)}; });
+  return {overWarning:/עולות .* יותר ממה שיש/.test(t), unaffordableMarked:/אין מזומן לזה ברבעון הזה/.test(document.body.textContent)}; });
 ck('an over-budget set is flagged', over.overWarning);
 ck('actions with no cash cover are marked individually', over.unaffordableMarked);
 await page.evaluate(()=>{ S.quarters.Q3.operational.inventory=window.__inv;

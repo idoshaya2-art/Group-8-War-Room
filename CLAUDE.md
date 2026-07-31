@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **580 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **598 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **606**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **624**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -92,17 +92,27 @@ not — this section is for obligations, not suggestions. Losing a contract dead
 not in the written plan is the one failure this arrangement must not allow, and `planv6.cjs`
 asserts each of those four cases.
 
-Plan actions carry no send-to-simulator button: a plan line is prose plus a form code, and
-manufacturing a lever payload from it would be inventing numbers. The simulator/export path still
-runs through the engine's list in the background section.
+Plan actions carry **"הוסף לגיליון הזנה"**, not "send to simulator". `planFormCodes()` pulls the
+INTOPIA form codes out of the action's `form` string (`W3`→`A3-3`, unknown codes dropped,
+"אוטומטי"/"—" are not forms) and `planAddToSheet()` adds them to the quarter's scenario, creating
+one if the team has none, then lands on the sheet. Twelve of the fifteen Q4 actions carry a form;
+the other three say so instead of pretending. No lever *values* are derived from the plan's prose —
+it states economic intent, not field values, and guessing them is the invention this tool refuses
+everywhere else.
 
 ## The decisions tab is four things, in this order
 
 It answers exactly what it was asked to answer, and nothing sits above the list that is not one
 of them:
 
-1. **`.focus` — the money.** Cash available · expected income · mandatory floor · what the chosen
-   actions cost · what is left. One level-1 surface, ~170px, followed by the allocation bar.
+1. **`.focus` — the money, as a ledger.** Six lines that add up: cash now · what still arrives
+   this quarter · minus the floor · = spendable · minus what the list costs · = what is left.
+   It replaced a one-line row of four figures which **did not produce its own headline** — the
+   row showed total expected income while the total only ever used the part collected this
+   quarter, so the numbers on screen could not be reconciled with the number above them. Both
+   `wave5.cjs` and `decisions.cjs` now assert the arithmetic, not the labels: read the six `<b>`
+   values and check `[0]+[1]+[2]===[3]` and `[3]+[4]===[5]`. A ledger that does not sum is worse
+   than the row it replaced.
 2. **The list** — the plan's actions — under a single compact header carrying the AI button.
 3. The simulator/export footer.
 4. **One `<details>`, closed** — everything that explains rather than decides: how the list is
@@ -128,6 +138,17 @@ wave5 also measures the tab's **own** height above the first card (≤320px), no
 The app chrome eats most of a phone screen, so a change nowhere near this tab — a longer
 `APP_VERSION` wrapping a line in the sidebar was enough — can fail the outcome assertion and send
 the next reader to the wrong file. The pair localises the blame.
+
+## The ask bubble owns the chat
+
+`#askBubble` / `#askPanel` sit outside `.content`, so a free-text question is one click away from
+every tab — the question usually occurs to you while looking at a number somewhere else, and
+having to navigate to an AI page is how it gets lost. `bodyAI` **lost its chat card** when this
+landed: two elements with `id="chatLog"` on one page would have broken both. It keeps the
+strategist and the council and links to the bubble.
+
+`renderAskSub()` states what the answer is grounded in, and says plainly when no API key is set
+rather than letting a send fail.
 
 ## A report is loaded into a quarter you chose, not the one you happen to be viewing
 

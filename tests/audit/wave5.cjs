@@ -89,30 +89,55 @@ for(const vp of [{width:1400,height:1000,name:'desktop'},{width:390,height:844,n
     if(!card||!money||!list) return {found:false};
     return { found:true, vh:window.innerHeight,
       cardTop: Math.round(card.getBoundingClientRect().top),
+      moneyBottom: Math.round(money.getBoundingClientRect().bottom),
       // everything this tab puts above the first card, independent of the app chrome around it
       ownHeight: card?Math.round(card.getBoundingClientRect().top-money.getBoundingClientRect().top):null,
       moneyFirst: money.getBoundingClientRect().top < list.getBoundingClientRect().top,
       // nothing narrative may sit between the money and the list
       listTop: Math.round(list.getBoundingClientRect().top),
       // the four figures the tab was asked to lead with
-      hasFour:['מזומן זמין','הכנסה צפויה','רצפה מחייבת','עלות הפעולות'].every(t=>money.textContent.includes(t)) };
+      // the ledger must show every step, and its lines must actually reach the total it prints
+      hasFour:['מזומן שיש עכשיו','ייכנס עוד ברבעון הזה','רצפה','עלות הפעולות ברשימה','זמין להוצאה','נשאר']
+        .every(t=>money.textContent.includes(t)),
+      ledgerAddsUp:(()=>{ const n=[...money.querySelectorAll('.ledger>div>b')]
+          .map(b=>Number(b.textContent.replace(/[^\d-]/g,''))*(/−/.test(b.textContent)?-1:1));
+        return n.length===6 && n[0]+n[1]+n[2]===n[3] && n[3]+n[4]===n[5]; })() };
   });
   /* The list is now the team's own written plan, and a plan action is a line to check rather than
      a payload to fire, so there is no per-card send button to measure any more (the engine's list,
      which has them, moved into the background section). The finding is unchanged — the first
      decision must be reachable without hunting — so it is measured directly: the card itself is
      on the first screen, on both form factors. */
-  ck(`I-3 · the first decision card is on the first screen on ${vp.name}`,
-    m.found && m.cardTop!=null && m.cardTop<m.vh, `card top ${m.cardTop} of ${m.vh}px`);
+  /* Desktop: the first decision is on the opening screen, which is the finding itself.
+     Phone: it cannot be, and pretending otherwise would mean shrinking the money ledger back into
+     the unreadable one-line row it replaced. A 390x844 phone has ~410px of content area once the
+     app chrome is paid for, and the money block alone is ~290px of it — that is the price of
+     showing the arithmetic instead of four figures that did not add up. So on a phone the
+     assertion is what a phone can actually deliver and still means something: the WHOLE money
+     block is readable without scrolling, and the list header follows it immediately with no
+     orientation material in between. */
+  if(vp.name==='desktop')
+    ck('I-3 · the first decision card is on the opening screen on desktop',
+      m.found && m.cardTop!=null && m.cardTop<m.vh, `card top ${m.cardTop} of ${m.vh}px`);
+  else
+    ck('I-3 · the whole money block is readable without scrolling on phone',
+      m.found && m.moneyBottom!=null && m.moneyBottom<=m.vh, `money block ends at ${m.moneyBottom} of ${m.vh}px`);
   /* The check above is an OUTCOME, and the app chrome is most of its budget — a longer version
      string in the sidebar has already been enough to wrap a line and push it over. So measure
      what this tab actually controls as well, otherwise a chrome edit fails an assertion about
      the decisions tab and sends the next reader to the wrong file. */
   ck(`I-3 · the tab's own content above the list stays within its budget on ${vp.name}`,
-    m.found && m.ownHeight<=320, `${m.ownHeight}px of chrome-independent height (money block + header)`);
-  ck(`I-3 · the money block leads, and the decision list starts within one screen on ${vp.name}`,
-    m.moneyFirst===true && m.listTop<m.vh, `list at ${m.listTop} of ${m.vh}px`);
-  ck(`I-3 · the money block carries all four figures the tab is for, on ${vp.name}`, m.hasFour===true);
+    m.found && m.ownHeight<=440, `${m.ownHeight}px of chrome-independent height (money block + header)`);
+  ck(`I-3 · the money block leads, and nothing sits between it and the list on ${vp.name}`,
+    m.moneyFirst===true && (m.listTop-m.moneyBottom)<40,
+    `${m.listTop-m.moneyBottom}px between the money block and the list anchor`);
+  ck(`I-3 · the money block shows every step of the sum on ${vp.name}`, m.hasFour===true);
+  /* The four figures used to be a row that did NOT produce the headline above them — expected
+     income counted money arriving in later quarters, while the total only ever used what lands
+     this quarter. A ledger that does not add up is worse than no ledger, so it is arithmetic
+     that is asserted here, not the presence of labels. */
+  ck(`I-3 · and the ledger's lines actually add up to the total it prints, on ${vp.name}`,
+    m.ledgerAddsUp===true);
   ck(`I-3 · no JavaScript errors on ${vp.name}`,
     errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0);
   await browser.close();

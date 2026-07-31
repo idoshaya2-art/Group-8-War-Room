@@ -196,6 +196,39 @@ details.sec.ref .secbody{padding:2px 2px 12px;color:var(--muted)}
    A pill is for a status that CHANGES and that you might act on — mandatory,
    recommended, blocked, sent, already missed. Everything else gets one of these.
    ========================================================================== */
+/* A running sum you can read top to bottom: label on the start edge, number on the end edge,
+   a rule before each result line. The point is that the arithmetic is visible — a figure that
+   does not participate in the total does not belong here. */
+.ledger{display:flex;flex-direction:column}
+.ledger>div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:2px 0}
+.ledger>div>span{font-size:12.5px;color:var(--muted);line-height:1.45}
+.ledger>div>b{font-variant-numeric:tabular-nums;font-size:14px;white-space:nowrap}
+.ledger>div.sum{border-top:1px solid var(--line2);margin-top:2px;padding-top:5px}
+.ledger>div.sum>span,.ledger>div.tot>span{color:var(--txt);font-weight:600}
+.ledger>div.tot{border-top:2px solid var(--line2);margin-top:2px;padding-top:5px}
+.ledger>div.tot>b{font-size:19px;font-weight:800}
+.ledger .pos{color:var(--sig-ok)} .ledger .neg{color:var(--sig-block)}
+/* The ask bubble. Fixed, above everything, and the panel is a sibling rather than a child so
+   closing it never disturbs the page underneath. */
+.askbubble{position:fixed;inset-inline-end:18px;bottom:18px;z-index:60;display:flex;align-items:center;gap:8px;
+  padding:12px 16px;border-radius:26px;border:1px solid var(--line2);font-weight:800;font-size:14px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer}
+.askbubble:hover{filter:brightness(1.08)}
+.askbubble.on{background:var(--panel2);color:var(--txt)}
+.askpanel{position:fixed;inset-inline-end:18px;bottom:78px;z-index:60;width:min(430px,calc(100vw - 36px));
+  max-height:min(70vh,620px);display:flex;flex-direction:column;background:var(--panel);
+  border:1px solid var(--line2);border-radius:14px;box-shadow:0 14px 44px rgba(0,0,0,.55);overflow:hidden}
+.askpanel[hidden]{display:none}
+.askhead{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.asksub{padding:7px 14px 0;line-height:1.6}
+.asklog{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:90px}
+.askrow{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+.askrow .f{flex:1}
+.askquick{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 12px}
+@media(max-width:860px){
+  .askbubble{inset-inline-end:12px;bottom:12px;padding:11px 14px}
+  .askpanel{inset-inline-end:8px;inset-inline-start:8px;width:auto;bottom:68px;max-height:66vh}
+}
 .figure{font-variant-numeric:tabular-nums;font-weight:700;font-size:13.5px;color:var(--muted)}
 .figure.pos{color:var(--sig-ok)}
 .figure.neg{color:var(--sig-block)}
@@ -476,6 +509,35 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
 <div id="toast"></div>
 <div id="modalRoot"></div>
 
+<!-- Free-text questions against everything the platform holds. It lives outside .content on
+     purpose: the question you want to ask usually occurs to you while looking at a number on some
+     other tab, and having to navigate to an AI page to ask it is how the question gets lost. -->
+<button id="askBubble" class="askbubble" onclick="toggleAsk()" title="שאל שאלה חופשית על הנתונים">
+  <svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+  <span class="lbl">שאל</span>
+</button>
+<div id="askPanel" class="askpanel" hidden>
+  <div class="askhead">
+    <b>שאלה חופשית על הנתונים</b>
+    <span class="row" style="gap:6px;margin-inline-start:auto">
+      <button class="btn sm ghost" onclick="openAISettings()" title="הגדרות AI">⚙</button>
+      <button class="btn sm ghost" onclick="clearChat()" title="נקה שיחה">נקה</button>
+      <button class="btn sm ghost" onclick="toggleAsk()" title="סגור">✕</button>
+    </span>
+  </div>
+  <div class="asksub small muted" id="askSub"></div>
+  <div id="chatLog" class="asklog"></div>
+  <div class="askrow">
+    <input class="f" id="chatInput" placeholder="למשל: האם יש לנו מזומן לשינוע לברזיל ב-Q4?" onkeydown="if(event.key==='Enter')sendChat()">
+    <button class="btn primary" id="chatSend" onclick="sendChat()">שלח</button>
+  </div>
+  <div class="askquick">
+    <button class="btn sm ghost" onclick="quickAsk('סכם את המצב הפיננסי הנוכחי ואת שלוש הפעולות הדחופות ביותר')">תדריך מצב</button>
+    <button class="btn sm ghost" onclick="quickAsk('מה הסיכון התזרימי הגדול ביותר עד Q9 וכיצד למנוע אותו?')">סיכון תזרים</button>
+    <button class="btn sm ghost" onclick="quickAsk('מה החוקים והמחקרים אומרים על התוכנית שלי לרבעון הקרוב?')">התוכנית מול החוקים</button>
+  </div>
+</div>
+
 <script>
 /* =========================================================================
    INTOPIA War Room — client-side decision-support app (MVP)
@@ -488,7 +550,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v12.4 · הרשימה שלי, נבדקת';
+const APP_VERSION = 'v12.5 · מאזן ברור, גיליון, ובועת שאלות';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3566,22 +3628,29 @@ function bodyDecisions(c){
       <!-- The conclusion on the headline, its four components as one flowing line beneath.
            Stacking label-over-value in a grid put the block at 245px on a 390px phone and pushed
            the first decision off the screen; this says the same four numbers in ~90px. -->
-      <div class="between" style="flex-wrap:wrap;gap:8px;align-items:baseline">
-        <div class="eyebrow" style="margin:0;color:${alloc.over>0?'var(--sig-block)':'var(--sig-act)'}">${IC('dollar')} הכסף של ${targetQ}</div>
-        <div><span class="meta">${alloc.over>0?'חסר':'נשאר לפעולות'}</span> <b class="figure${alloc.over>0?' neg':' pos'}" style="font-size:19px">${fmt(Math.abs(_left))} SF</b></div>
+      <!-- The conclusion is the ledger's last line, so the headline no longer repeats it: the same
+           number twice in one block is what made this hard to read in the first place. -->
+      <div class="eyebrow" style="margin:0;color:${alloc.over>0?'var(--sig-block)':'var(--sig-act)'}">${IC('dollar')} הכסף של ${targetQ}</div>
+      <!-- A LEDGER, not a row of figures. The row showed cash · expected income · floor · cost,
+           but the headline is computed from the income that arrives THIS quarter only — so the
+           four numbers on screen did not add up to the number above them, which is exactly why
+           it read as noise. Every line here is one operation, and they reach the total. -->
+      <div class="ledger" style="margin-top:6px">
+        <div title="מזומן מאוחד בכל האזורים, בשווי פרנקים"><span>מזומן שיש עכשיו</span><b class="num">${fmt(alloc.available)}</b></div>
+        <div title="החלק מהמכירות שברשימה שנגבה כבר ברבעון הזה (Data Log 09). היתר מגיע ברבעונים הבאים."><span>ייכנס עוד ברבעון הזה</span><b class="num pos">+${fmt(alloc.inNow)}</b></div>
+        <div title="מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית"><span>רצפה — אסור לרדת מתחתיה</span><b class="num neg">−${fmt(alloc.floor)}</b></div>
+        <div class="sum"><span>זמין להוצאה</span><b class="num">${fmt(alloc.capacity)}</b></div>
+        <div><span>עלות הפעולות ברשימה</span><b class="num neg">−${fmt(alloc.totalOut)}</b></div>
+        <div class="tot"><span>${alloc.over>0?'חסר':'נשאר'}</span><b class="num ${alloc.over>0?'neg':'pos'}">${alloc.over>0?'−':''}${fmt(Math.abs(_left))}</b></div>
       </div>
-      <div class="small" style="margin-top:3px;line-height:1.75;color:var(--muted)">
-        <span class="meta">מזומן זמין</span> <b class="figure">${fmt(alloc.available)}</b>
-        <span style="opacity:.4">·</span> <span class="meta">הכנסה צפויה</span> <b class="figure${_income>0?' pos':''}">${_income>0?'+':''}${fmt(_income)}</b>
-        <span style="opacity:.4">·</span> <span class="meta">רצפה מחייבת</span> <b class="figure neg">−${fmt(alloc.floor)}</b>
-        <span style="opacity:.4">·</span> <span class="meta">עלות הפעולות</span> <b class="figure${alloc.over>0?' neg':''}">−${fmt(alloc.totalOut)}</b>
-      </div>
-      <div style="margin-top:8px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
+      <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
         <i style="display:block;height:100%;width:${Math.min(100,alloc.capacity?alloc.totalOut/alloc.capacity*100:0).toFixed(0)}%;background:${alloc.over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
-      <div class="small" style="margin-top:6px;line-height:1.6;color:var(--muted)">
+      <div class="small" style="margin-top:7px;line-height:1.6;color:var(--muted)">
         ${alloc.over>0
-          ? `<b style="color:var(--sig-block)">חורגים ב-${fmt(alloc.over)} SF</b> — הפעולות ללא כיסוי מסומנות באדום למטה.`
-          : `הכל נכנס בתקציב.`}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}${alloc.inNow>0?` <span style="color:var(--sig-warn)">${fmt(alloc.inNow)} SF מותנים במכירה.</span>`:''}
+          ? `<b style="color:var(--sig-block)">הפעולות עולות ${fmt(alloc.over)} SF יותר ממה שיש.</b>`
+          : `הכל נכנס בתקציב.`}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">בהמשך הדרך התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}
+        ${alloc.inNow>0?`<details class="fverd" style="margin-top:5px"><summary>שורה 2 מותנית במכירה — מה קורה אם לא יימכר ⌄</summary>
+          <div class="small muted" style="line-height:1.75;margin-top:6px">המכירות שברשימה מכניסות <b>${fmt(_income)} SF</b> בסך הכול, אבל לפי Data Log 09 רק <b>${fmt(alloc.inNow)}</b> נגבים כבר ברבעון הזה (ארה״ב 40% · אירופה 50% · ברזיל 30%); היתר, ${fmt(alloc.inLater)} SF, מגיע ברבעונים הבאים. לכן שורה 2 מותנית בכך שהסחורה באמת תימכר במחיר שהוזן. אם לא יימכר כלום — ${alloc.strictBalance<0?`<b style="color:var(--sig-warn)">תרד ${fmt(-alloc.strictBalance)} SF מתחת לרצפה</b>. זה הסיכון.`:`עדיין תישאר מעל הרצפה, עם ${fmt(alloc.strictBalance)} SF מרווח.`}</div></details>`:''}
       </div>
     </div>
 
@@ -6010,6 +6079,44 @@ function planGaps(engineItems, blk){
     return !(m && planForms.has(m[1]));
   });
 }
+/* A plan action names its INTOPIA decision form ("A1-2", "H6 / A4", "A3-1 + A3-3"). That code is
+   the one thing about it that is machine-usable, so it is what the sheet button carries: the form
+   is added to the quarter's scenario and you type the numbers into it. No lever payload is
+   fabricated from the plan's prose — the plan states economic intent, not field values, and
+   guessing them would be exactly the invention this tool refuses everywhere else.
+   `W3` is how the guide labels currency conversion; the simulator's own code for it is `A3-3`. */
+const PLAN_FORM_ALIAS={ W3:'A3-3' };
+function planFormCodes(action){
+  const raw=String((action&&action.form)||'');
+  const out=[];
+  (raw.match(/[A-Z]\d(?:-\d)?/g)||[]).forEach(code=>{
+    const f=PLAN_FORM_ALIAS[code]||code;
+    if(simForm(f) && !out.includes(f)) out.push(f);
+  });
+  return out;
+}
+/* Adds the action's forms to the scenario for the target quarter, creating the scenario if the
+   team has not built one yet, and lands on the sheet so the numbers can be typed straight in. */
+window.planAddToSheet=(idx)=>{
+  const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q;
+  const blk=planV6For(targetQ); if(!blk) return;
+  const a=blk.actions[idx]; if(!a) return;
+  const codes=planFormCodes(a);
+  if(!codes.length){ toast('לפעולה הזו אין טופס הזנה — היא מתבצעת מחוץ לגיליון','a'); return; }
+  if(!S.scenarios.length){
+    S.scenarios.unshift({id:Math.random().toString(36).slice(2,8), name:'התוכנית שלי — '+targetQ,
+      base:q, levers:{}});
+  }
+  const sc=S.scenarios[0];
+  ensureLevRegions(sc,targetQ);
+  const before=((sc.levers[targetQ]||{}).actions||[]).length;
+  codes.forEach(f=>addSimAction(sc.id,targetQ,f));
+  const added=((sc.levers[targetQ]||{}).actions||[]).length-before;
+  save();
+  toast(added?`${codes.join(' + ')} נוספו לגיליון ההזנה של ${targetQ} — מלא שם את המספרים`
+             :`${codes.join(' + ')} כבר קיימים בגיליון`, added?'g':'a');
+  go('export');
+};
 /* The plan as the page's decision list. Same card shape as the engine list it replaces, so the
    density and collapse rules the surfaces suite polices still apply. */
 function renderPlanActions(base, targetQ, engineItems){
@@ -6025,6 +6132,7 @@ function renderPlanActions(base, targetQ, engineItems){
     const worst = (ev.state==='block'||(av&&av.verdict==='blocked')) ? 'red'
                 : (ev.state==='warn'||(av&&(av.verdict==='risk'||av.verdict==='fix'))) ? 'amber' : 'info';
     const as=av?PLAN_AI_STATES[av.verdict]:null;
+    const _codes=planFormCodes(a);
     return `<div class="act ${worst}">
       <div class="an">${n}</div>
       <div class="at">
@@ -6037,6 +6145,10 @@ function renderPlanActions(base, targetQ, engineItems){
         ${a.value?`<div class="small muted" style="margin-top:5px;line-height:1.7">${esc(a.value)}</div>`:''}
         ${av?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.75;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">
           ${IC('cpu')} <b>ה-AI:</b> ${av.why}${av.fix?`<br><b style="color:var(--sig-warn)">מה לשנות:</b> ${av.fix}`:''}</div>`:''}
+        <div class="row" style="gap:8px;margin-top:9px;flex-wrap:wrap;align-items:center">
+          ${_codes.length?`<button class="btn sm" onclick="planAddToSheet(${i})" title="מוסיף את ${_codes.join(' + ')} לגיליון ההזנה של ${targetQ}. את המספרים תמלא שם — התוכנית אומרת מה לעשות, לא באילו שדות.">${IC('share')} הוסף לגיליון הזנה</button>`
+            :`<span class="small muted">${IC('info')} אין טופס הזנה לפעולה הזו</span>`}
+        </div>
         <details class="fverd" style="margin-top:8px"><summary>${planV6Mark(ev.state)} — מה המנוע מודד ⌄</summary>
           <div class="small muted" style="line-height:1.75;margin-top:6px">${ev.txt}</div></details>
       </div></div>`;
@@ -7939,19 +8051,9 @@ function bodyAI(c){
     </div>`:''}
     <div class="grid" style="grid-template-columns:1fr;gap:16px">
       <div class="card">
-        <div class="ch"><h3>${IC('message')} צ׳אט אנליטי</h3><span class="small muted">${AI_PROVIDERS[prov].short} · ${esc(aiModel())}</span></div>
-        <div class="cb"><div id="chatLog" style="max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px"></div>
-          <div class="row" style="gap:8px;margin-top:14px">
-            <input class="f" id="chatInput" placeholder="למשל: למה הרווח באירופה ירד? מה עלות ההון של H4?" style="flex:1" onkeydown="if(event.key==='Enter')sendChat()">
-            <button class="btn primary" id="chatSend" onclick="sendChat()">שלח</button>
-          </div>
-          <div class="row" style="gap:6px;margin-top:10px">
-            <span class="small muted">מהיר:</span>
-            <button class="btn sm ghost" onclick="quickAsk('סכם את המצב הפיננסי הנוכחי ואת שלוש הפעולות הדחופות ביותר')">תדריך מצב</button>
-            <button class="btn sm ghost" onclick="quickAsk('מה הסיכון התזרימי הגדול ביותר עד Q9 וכיצד למנוע אותו?')">סיכון תזרים</button>
-            <button class="btn sm ghost" onclick="quickAsk('בהינתן הנורות הפעילות, מה הייתה החלטת הרבעון שאתה ממליץ עליה?')">המלצת רבעון</button>
-          </div>
-        </div>
+        <div class="ch"><h3>${IC('message')} שאלות חופשיות</h3><span class="small muted">${AI_PROVIDERS[prov].short} · ${esc(aiModel())}</span></div>
+        <div class="cb"><div class="small muted" style="line-height:1.8">הצ׳אט עבר לבועה הצפה בפינת המסך — היא זמינה מכל לשונית, כי השאלה בדרך כלל עולה מול מספר בלשונית אחרת.
+          <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary" onclick="toggleAsk()">${IC('message')} פתח את בועת השאלות</button></div></div></div>
       </div>
       <div class="card" style="border-color:var(--purple)">
         <div class="ch"><h3>${IC('trendUp')} אסטרטג תוכנית-על — ${planHorizon(S.activeQuarter)[0]||'Q9'}→Q9</h3>
@@ -8051,7 +8153,26 @@ window.retryChat=(i)=>{
   save(); renderChatLog();
   const el=$('#chatInput'); if(el){ el.value=q; sendChat(); }
 };
-window.quickAsk=(q)=>{ const el=$('#chatInput'); if(el){ el.value=q; sendChat(); } };
+window.quickAsk=(q)=>{ const p=$('#askPanel'); if(p&&p.hasAttribute('hidden')) toggleAsk();
+  const el=$('#chatInput'); if(el){ el.value=q; sendChat(); } };
+/* The bubble is the chat. bodyAI keeps the strategist and the council, but its chat card was
+   removed when this landed — two elements with id="chatLog" on one page would have broken both. */
+window.toggleAsk=()=>{
+  const p=$('#askPanel'), b=$('#askBubble'); if(!p) return;
+  const opening=p.hasAttribute('hidden');
+  if(opening){ p.removeAttribute('hidden'); b.classList.add('on');
+    if(dropStalePending()) save();
+    renderAskSub(); renderChatLog();
+    setTimeout(()=>{ const i=$('#chatInput'); if(i) i.focus(); },40);
+  } else { p.setAttribute('hidden',''); b.classList.remove('on'); }
+};
+function renderAskSub(){
+  const el=$('#askSub'); if(!el) return;
+  const hasKey=!!getApiKey();
+  el.innerHTML = hasKey
+    ? `התשובות מעוגנות בנתוני רבעון <b>${esc(S.activeQuarter)}</b>: החוקים, ה-Data Log, מחקרי השוק שנקלטו, הכספים והתחזיות. המספרים מחושבים במנוע — ה-AI מפרש ומצטט אותם.`
+    : `<span style="color:var(--sig-warn)">אין מפתח API. לחצו ⚙ כדי לחבר Anthropic או OpenAI — המפתח נשמר מקומית בדפדפן בלבד.</span>`;
+}
 const CHAT_PENDING='מנתח…';
 const CHAT_HISTORY_TURNS=10; // cap what we resend so the payload can't grow unbounded
 let _chatBusy=false;

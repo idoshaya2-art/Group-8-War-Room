@@ -276,6 +276,85 @@ ck('a blocked verdict colours the card red', /red/.test(rendered.first), rendere
 ck('an approved one does not', !/red/.test(rendered.second), rendered.second);
 ck('the AI\'s summary line is shown above the list', rendered.rationaleShown===true);
 
+/* ---------------- the sheet button.
+   A plan action states economic intent, not field values, so nothing is fabricated from its prose.
+   What it does carry is an INTOPIA form code, and that is what the button moves into the scenario:
+   the form appears in the input sheet and the numbers are typed there. */
+const sheet=await page.evaluate(()=>{
+  const blk=planV6For('Q4');
+  const codes=blk.actions.map(a=>planFormCodes(a));
+  return { perAction:codes.map(c=>c.join('+')||'—'),
+    // "W3" is the guide's name for currency conversion; the simulator calls it A3-3
+    aliasResolved:planFormCodes({form:'W3'}).join(','),
+    // a form that does not exist in the simulator is dropped rather than added blind
+    unknownDropped:planFormCodes({form:'Z9-9 (invented)'}).length,
+    // "אוטומטי" and "—" are not forms
+    autoIsNotAForm:planFormCodes({form:'אוטומטי'}).length + planFormCodes({form:'—'}).length,
+    withForms:codes.filter(c=>c.length).length };
+});
+ck('a plan action resolves to the simulator form codes it names',
+  sheet.perAction[0]==='A3-1+A3-3' && sheet.perAction[13]==='A2-3+A2-4',
+  sheet.perAction.slice(0,3).join(' | '));
+ck('W3 resolves to the simulator\'s own code for currency conversion', sheet.aliasResolved==='A3-3');
+ck('a form the simulator does not have is dropped, not passed through', sheet.unknownDropped===0);
+ck('"automatic" and "—" are not treated as forms', sheet.autoIsNotAForm===0);
+ck('most of the plan is actionable into the sheet, and the rest says so instead of pretending',
+  sheet.withForms===12, `${sheet.withForms} of 15 carry a form`);
+
+const added=await page.evaluate(()=>{
+  S.scenarios=[]; save();
+  planAddToSheet(0);                       // action 1 → A3-1 + A3-3
+  const sc=S.scenarios[0];
+  const acts=((sc.levers.Q4||{}).actions||[]).map(a=>a.form);
+  planAddToSheet(0);                       // again — must not duplicate
+  const after=((S.scenarios[0].levers.Q4||{}).actions||[]).map(a=>a.form);
+  return { created:!!sc, name:sc.name, forms:acts, afterRepeat:after.length, landedOn:currentPage };
+});
+ck('adding creates the scenario when the team has not built one', added.created===true && /התוכנית שלי/.test(added.name));
+ck('both of the action\'s forms reach the sheet',
+  added.forms.join(',')==='A3-1,A3-3', added.forms.join(','));
+ck('adding the same action twice does not duplicate the forms', added.afterRepeat===2);
+ck('it lands you on the sheet, where the numbers are typed', added.landedOn==='submit', added.landedOn);
+
+// ---------------- the ask bubble
+await page.evaluate(()=>go('plan')); await page.waitForTimeout(600);
+const ask=await page.evaluate(()=>{
+  const b=document.getElementById('askBubble'), p=document.getElementById('askPanel');
+  const shutAtStart=p.hasAttribute('hidden');
+  b.click(); const openNow=!p.hasAttribute('hidden');
+  const sub=document.getElementById('askSub').innerText;
+  b.click(); const shutAgain=p.hasAttribute('hidden');
+  return { shutAtStart, openNow, shutAgain, sub,
+    // one chat, one input — two of either would break both
+    logs:document.querySelectorAll('#chatLog').length,
+    inputs:document.querySelectorAll('#chatInput').length,
+    outsideContent:!document.getElementById('askPanel').closest('.content') };
+});
+ck('the ask bubble starts collapsed and toggles on click',
+  ask.shutAtStart===true && ask.openNow===true && ask.shutAgain===true);
+ck('it lives outside the page content, so it is reachable from every tab', ask.outsideContent===true);
+ck('exactly one chat log and one input exist on the page',
+  ask.logs===1 && ask.inputs===1, `${ask.logs} logs, ${ask.inputs} inputs`);
+ck('with no API key it says so plainly instead of failing on send',
+  /אין מפתח API/.test(ask.sub), ask.sub.slice(0,40));
+
+const onOtherTab=await page.evaluate(async()=>{
+  go('dash'); await new Promise(r=>setTimeout(r,400));
+  return { bubble:!!document.getElementById('askBubble'), panel:!!document.getElementById('askPanel') };
+});
+ck('the bubble survives a tab change', onOtherTab.bubble===true && onOtherTab.panel===true);
+
+// ---------------- the engine's list stays folded
+await page.evaluate(()=>go('plan')); await page.waitForTimeout(600);
+const folded=await page.evaluate(()=>{
+  const d=[...document.querySelectorAll('.content details')]
+    .find(x=>/מה המנוע היה מציע מעצמו/.test((x.querySelector('summary')||{}).textContent||''));
+  return { exists:!!d, open:d?d.open:null,
+    parentShut:d?!!d.closest('details:not([open])'):null };
+});
+ck('the engine\'s second-opinion list exists and is folded shut',
+  folded.exists===true && folded.open===false);
+
 ck('no JavaScript errors',
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.slice(0,2).join(' | '));
