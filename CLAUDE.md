@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **690 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **696 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **716**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **722**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -195,9 +195,13 @@ not in the Data Log at all (MR24 measures it).
 
 Both tables (`standingFactsHTML`) sit **below** the headline figures and the alerts, by request.
 They answer questions that do not change within a quarter, so they are reference beneath the
-headline rather than competition for it. `tests/audit/checklist.cjs` pins the order — headline →
-alerts → plants → regional cash — because "move it down" is the kind of change a later layout edit
-silently undoes.
+headline rather than competition for it.
+
+**There are two dashboards.** `bodyDashboard` draws a single quarter; `renderCumulativeDashboard`
+draws "מצטבר", and it called `standingFactsHTML` too — prepended, at the very top. Moving the
+tables in one renderer and not the other looked, correctly, like nothing had happened. Both are
+now ordered the same way and `tests/audit/checklist.cjs` measures **both**, because "move it down"
+is the kind of change a later layout edit silently undoes.
 
 **Every money figure names its currency.** MR74 cells are labelled "אלפי CHF", regional cash carries
 its own code, everything consolidated says SF. The mixed-scale bugs in this file all began with an
@@ -236,10 +240,20 @@ Two orderings matter and are commented at their call sites:
 a CDN and the sandbox has no network — so the `handleFile` ordering is the one part held by comment
 rather than assertion; the suite says so out loud instead of implying coverage it does not have.
 
-The manual verification form is **collapsed, not deleted**. It is the confirmation step of an
-import and the only in-app way to fix a figure the parser misread (three capacity figures came from
-an OCR reconstruction), so every path that tells you to use it — a parse error, SheetJS missing —
-opens it.
+The manual verification form is **built on demand, not standing on the tab**, and the data-QA
+findings panel is gone — both by request. Neither capability went with its panel:
+
+- `confirmQuarter()` used to sit at the **bottom of the correction wall**. It is what runs
+  `updateLearning`/`updateMasterPlan` and re-derives the goals and floors, so removing that section
+  would have taken the whole ingest loop with it. The button is on the ingest panel now.
+- `openVerifyPanel()` builds the correction form into `#verifyHost` when something needs fixing — a
+  parse error, SheetJS missing, or the "משהו נקרא לא נכון?" button. It is still the only in-app way
+  to correct a figure the parser misread (three capacity figures came from an OCR reconstruction).
+  It is idempotent: a second call re-renders rather than stacking a copy.
+- `runDataQA()` still runs. It is the only thing that notices consolidated cash disagreeing with the
+  regions at the game's own FX, a balance sheet that does not balance, or retained earnings that
+  skip a quarter — so it reports into `buildAIContext` instead of a panel, and the model is told
+  which figures are shaky before it reasons on them. Only `qaSectionHTML`/`bodyQA` were deleted.
 
 ## Ticking an action is what moves the money
 

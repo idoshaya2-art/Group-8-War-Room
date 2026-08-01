@@ -105,21 +105,35 @@ const perForm=await page.evaluate(()=>{
 ck('a second action stays unchecked even though another form in the same quarter IS filled',
   perForm.s!=='ok', `#5 is ${perForm.s} while A3-3 holds ${perForm.otherFilled}`);
 
-// ---------- the dashboard reading order
-await page.evaluate(()=>go('dash')); await page.waitForTimeout(900);
-const dash=await page.evaluate(()=>{
+/* ---------- the dashboard reading order, on BOTH dashboards.
+   There are two renderers — `bodyDashboard` for a single quarter and `renderCumulativeDashboard`
+   for "מצטבר" — and the standing tables were moved in only one of them the first time. Anyone
+   looking at the cumulative view saw the old order and reported, correctly, that nothing had
+   changed. So the assertion runs against both, by the same measurement. */
+const measure=async()=>{ await page.waitForTimeout(900); return page.evaluate(()=>{
   const c=document.querySelector('.content');
   const top=el=>el?Math.round(el.getBoundingClientRect().top+window.scrollY):null;
   const find=re=>[...c.querySelectorAll('.read, .kpis, .grid, .card')].find(x=>re.test(x.innerText));
   return { kpis:top(c.querySelector('.kpis')), alerts:top(find(/נורות אזהרה/)),
-    plants:top(find(/מפעלים וקיבולת ייצור/)), cash:top(find(/מזומן לפי אזור/)) };
-});
+    plants:top(find(/מפעלים וקיבולת ייצור/)), cash:top(find(/מזומן לפי אזור/)) }; }); };
+
+await page.evaluate(()=>{ S.cumulative=false; go('dash'); });
+const dash=await measure();
 ck('the dashboard still carries both standing tables', dash.plants!=null && dash.cash!=null,
   `plants ${dash.plants} · cash ${dash.cash}`);
 ck('the headline figures come first', dash.kpis<dash.alerts, `kpis ${dash.kpis} · alerts ${dash.alerts}`);
 ck('plants and regional cash sit BELOW the general figures, as asked',
   dash.alerts<dash.plants && dash.plants<dash.cash,
   `alerts ${dash.alerts} → plants ${dash.plants} → cash ${dash.cash}`);
+
+await page.evaluate(()=>{ S.cumulative=true; go('dash'); });
+const cum=await measure();
+ck('the CUMULATIVE dashboard carries them too', cum.plants!=null && cum.cash!=null,
+  `plants ${cum.plants} · cash ${cum.cash}`);
+ck('...and in the same order — this is the view that made the first move look like no change',
+  cum.kpis<cum.plants && cum.plants<cum.cash,
+  `kpis ${cum.kpis} → plants ${cum.plants} → cash ${cum.cash}`);
+await page.evaluate(()=>{ S.cumulative=false; save(); });
 
 ck('no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).slice(0,2).join(' | '));

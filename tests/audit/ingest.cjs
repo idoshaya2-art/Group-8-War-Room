@@ -83,13 +83,15 @@ await page.evaluate(()=>go('data')); await page.waitForTimeout(900);
 const ui=await page.evaluate(()=>{
   const panel=[...document.querySelectorAll('.card')].find(x=>/קליטת דוח תוצאות/.test(x.textContent));
   const sel=panel?panel.querySelector('select'):null;
-  const verify=document.getElementById('verifyWrap');
   return { titled:panel?/קליטת דוח תוצאות — Q4/.test(panel.innerText):false,
     saysViewing:panel?/הבורר למעלה מציג את/.test(panel.innerText):false,
     listsLoaded:panel?/Q1 · Q2 · Q3/.test(panel.innerText):false,
     selectValue:sel?sel.value:null, selectOptions:sel?sel.options.length:0,
-    verifyExists:!!verify, verifyClosed:verify?!verify.open:null,
-    verifyHasFields:verify?verify.querySelectorAll('input').length:0 };
+    // the correction wall is not on the tab at all now, and the QA findings panel is gone
+    verifyOnTab:!!document.getElementById('verifyForm'),
+    qaOnTab:/ממצאי בקרת נתונים/.test(document.querySelector('.content').innerText),
+    confirmOnPanel:!!document.querySelector('button[onclick="confirmQuarter()"]'),
+    manualBtn:!!document.querySelector('button[onclick="openVerifyPanel()"]') };
 });
 ck('the panel is titled with the quarter it will write into', ui.titled===true);
 ck('...says plainly that the selector above controls the view, not the write', ui.saysViewing===true);
@@ -97,18 +99,33 @@ ck('...and lists which reports are already loaded', ui.listsLoaded===true);
 ck('the target is changeable from the panel, across all nine quarters',
   ui.selectValue==='Q4' && ui.selectOptions===9, `${ui.selectValue} of ${ui.selectOptions}`);
 
-/* The manual form was asked to be gone from view, not gone. It is the confirmation step of an
-   import and the only in-app way to fix a figure the parser misread, so it is collapsed. */
-ck('the manual entry form still exists', ui.verifyExists===true && ui.verifyHasFields>10,
-  `${ui.verifyHasFields} fields`);
-ck('...but starts closed instead of filling the tab with number inputs', ui.verifyClosed===true);
+/* Both sections came off the tab by request ("ממצאי בקרת נתונים ואימות ותיקון נתונים" — ניתן
+   להסיר). Neither capability was deleted with its panel, and that split is what is asserted:
+   the correction form is built on demand, and the QA checks now report into the fact pack. */
+ck('the data-QA findings panel is gone from the tab', ui.qaOnTab===false);
+ck('the correction wall is not a standing section of the tab any more', ui.verifyOnTab===false);
+/* Confirming is what runs updateLearning/updateMasterPlan and re-derives the goals and floors.
+   It used to sit at the BOTTOM of the correction wall, so removing that section would have taken
+   the ingest loop with it — hence the button lives on the panel now. */
+ck('confirming the quarter no longer depends on that form — the button is on the panel',
+  ui.confirmOnPanel===true);
+ck('...and a misread figure is still fixable, one click away', ui.manualBtn===true);
 
 const opened=await page.evaluate(()=>{
-  const v=document.getElementById('verifyWrap'); v.open=true;
-  return { fields:v.querySelectorAll('input').length,
-    confirmBtn:[...v.querySelectorAll('button')].some(b=>/אשר|נקלט/.test(b.textContent)) };
+  openVerifyPanel();
+  const v=document.getElementById('verifyWrap');
+  return { built:!!v, open:v?v.open:null, fields:v?v.querySelectorAll('input').length:0,
+    // idempotent — a second click must re-render, not stack a second copy
+    twice:(openVerifyPanel(), document.querySelectorAll('#verifyHost details').length) };
 });
-ck('opening it gives back the full editable form', opened.fields>10, `${opened.fields} fields`);
+ck('the correction form is built on demand, with the full editable set',
+  opened.built===true && opened.open===true && opened.fields>10, `${opened.fields} fields`);
+ck('...and opening it twice does not stack two copies', opened.twice===1, `${opened.twice} copies`);
+/* The QA checks are still run — they just report to the model instead of to a panel. */
+ck('the consistency checks survived the cut and reach the AI fact pack',
+  await page.evaluate(()=>{ const r=runDataQA();
+    return r.quarters>0 && Array.isArray(r.findings) &&
+      (!r.findings.some(f=>f.level!=='ok') || /## בקרת נתונים/.test(buildAIContext(S.activeQuarter))); }));
 
 ck('no JavaScript errors',
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,

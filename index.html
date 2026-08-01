@@ -561,7 +561,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v13.3 · צ׳ק-ליסט שקשור לפעולות שסימנת';
+const APP_VERSION = 'v13.4 · דשבורד מסודר, פיננסים נקי';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3433,7 +3433,12 @@ function renderCumulativeDashboard(c){
   const lastFin=S.quarters[last].financial, lastOp=S.quarters[last].operational;
   const totalRD=ent.reduce((a,q)=>a+(S.quarters[q].operational.rd||0),0);
   const avgMargin=totalRevenue>0?(totalProfit/totalRevenue*100):null;
-  c.innerHTML=_standing+`
+  /* The standing tables go BELOW the general figures here too. This is the view the quarter
+     selector lands on when "מצטבר" is chosen, and moving them only in the per-quarter dashboard
+     left the old order on screen for anyone looking at the cumulative one — which is why the
+     first attempt "did not change the order". `_standing` is appended at the end now, not
+     prepended; `tests/audit/checklist.cjs` measures BOTH views. */
+  c.innerHTML=`
     <div class="card pad" style="margin-bottom:18px">
       <div class="between"><h3>${IC('lineChart')} תמונה מצטברת — ${ent[0]}–${last}</h3><span class="tag b">${ent.length} רבעונים</span></div>
       <ul style="margin:10px 0 0;padding-inline-start:20px;line-height:1.9">
@@ -3479,7 +3484,8 @@ function renderCumulativeDashboard(c){
           </tbody>
         </table>
       </div>
-    </div>`;
+    </div>
+    <div style="margin-top:22px">${_standing}</div>`;
   drawTrend($('#trendChart'));
 }
 function kpi(label,val,delta){ return `<div class="kpi"><div class="l">${label}</div><div class="v num">${val}</div>${delta}</div>`; }
@@ -3561,36 +3567,13 @@ function lineChart(cv,{labels,series}){
 function shortNum(v){ const a=Math.abs(v); if(a>=1e6)return (v/1e6).toFixed(1)+'M'; if(a>=1e3)return (v/1e3).toFixed(0)+'K'; return fmt(v); }
 
 /* ----- FINANCIAL POSITION (full picture: P&L + Balance + Ratios) ----- */
-function qaSectionHTML(){ // embedded in step 1 (ingest) — the check belongs right where data enters
-  const r=runDataQA();
-  if(!r.quarters) return `<div class="card pad" style="margin-top:18px"><b>${IC('check')} בקרת נתונים</b><div class="small muted" style="margin-top:6px">תופעל אוטומטית אחרי קליטת הרבעון הראשון — עקביות בין דוחות, רבעונים ושדות.</div></div>`;
-  const c={innerHTML:''}; bodyQA(c,true); return c.innerHTML;
-}
-function bodyQA(c,embed){
-  const r=runDataQA();
-  if(!r.quarters){ c.innerHTML=quartersStrip()+emptyBlock(IC('check'),'אין רבעונים לבדיקה','קלוט לפחות רבעון אחד כדי להריץ בקרת עקביות.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
-  const lvl={red:{t:'קריטי',c:'r'},amber:{t:'אי-עקביות',c:'a'},info:{t:'לבדיקה',c:'b'}};
-  const ord={red:0,amber:1,info:2};
-  const passed=r.findings.filter(x=>x.level==='ok').length;
-  const sorted=[...r.findings].filter(x=>x.level!=='ok').sort((a,b)=>ord[a.level]-ord[b.level]||qIndex(a.q)-qIndex(b.q));
-  c.innerHTML=(embed?'<div style="margin-top:18px"></div>':quartersStrip())+`
-    <div class="kpis" style="margin-bottom:16px">
-      ${kpi('מדד עקביות',r.score+'/100',r.score>=85?'נתונים אמינים':'דרוש טיפול')}
-      ${kpi('רבעונים נבדקו',r.quarters,'')}
-      ${kpi('ממצאים קריטיים',r.reds,r.reds?'תקן לפני קבלת החלטות':'')}
-      ${kpi('אי-עקביות',r.ambers,'')}
-    </div>
-    <div class="card">
-      <div class="ch"><h3>${IC('check')} ממצאי בקרת נתונים</h3><span class="small muted">${sorted.length?`${sorted.length} ממצאים לטיפול`:'לא נמצאו בעיות'}${passed?` · ${passed} בדיקות עברו ✓`:''}</span></div>
-      <div class="cb">${sorted.length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>רבעון</th><th>סטטוס</th><th>בדיקה</th><th>פירוט</th></tr></thead>
-        <tbody>${sorted.map(x=>`<tr><td><span class="chip">${x.q}</span></td><td><span class="tag ${lvl[x.level].c}">${lvl[x.level].t}</span></td><td><b>${esc(x.title)}</b></td><td class="small" style="line-height:1.6">${x.detail}</td></tr>`).join('')}</tbody></table></div>`
-        :`<div class="ok-clean" style="display:flex;align-items:center;gap:10px;padding:6px 2px"><span class="tag g">תקין ✓</span><span class="small muted">${passed?`כל ${passed} בדיקות העקביות עברו — `:''}לא נמצאו אי-עקביות בנתונים. אמינים לקבלת החלטות.</span></div>`}</div>
-    </div>
-    <div class="card pad" style="margin-top:16px"><b>מה נבדק</b><div class="small muted" style="margin-top:6px;line-height:1.9">
-      בתוך כל רבעון: מזומן מאוחד מול סכום האזורים בשערי המרה · זהות מאזנית (נכסים = הון+התחייבויות) · מלאי ללא מחיר · MR74 (השורה שלנו) מול הספרים · מחזור מול יחידות שנמכרו · ROS מחושב מול מדווח.<br>
-      בין רבעונים: רציפות רווחים צבורים (RE + רווח נקי) · דרגה טכנולוגית לא יורדת · הון מניות קבוע · קפיצות מזומן ללא הסבר · פערים ברצף הקליטה.</div></div>`;
-};
-
+/* The data-QA PANEL is gone from the financials tab at the team's request ("ממצאי בקרת נתונים …
+   ניתן להסיר"). `runDataQA` itself is not: it is the only thing that notices consolidated cash
+   disagreeing with the regions at the game's own FX, a balance sheet that does not balance, or
+   retained earnings that skip a quarter — and a wrong number nobody flagged is worse than a panel
+   nobody read. It reports into `buildAIContext` now, so the model is told which figures are shaky
+   before it reasons on them, exactly like the timing engine. Removing a panel is not permission to
+   remove its arithmetic. */
 function bodyFinancials(c){
   const q = (S.cumulative?latestEntered():S.activeQuarter) || S.activeQuarter;
   if(!q || !S.quarters[q].entered){
@@ -4562,17 +4545,35 @@ function bodyIngest(c){
           <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none">
         </div>
         <div id="sheetInfo" style="margin-top:14px"></div>
+        <!-- Confirming the quarter is NOT part of the manual form, and must not be: it is what runs
+             updateLearning / updateMasterPlan and re-derives the goals and floors. It used to sit at
+             the bottom of the correction wall, so taking that section off the tab would have taken
+             the whole ingest loop with it. It lives on the panel now. -->
+        <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
+          <button class="btn primary" onclick="confirmQuarter()">✓ אשר קליטת רבעון ${viewing}</button>
+          <button class="btn ghost sm" onclick="openVerifyPanel()">${IC('edit')} משהו נקרא לא נכון? תיקון ידני</button>
+        </div>
+        <!-- The correction form is rendered ON DEMAND, not as a standing section of the tab
+             ("אימות ותיקון נתונים … ניתן להסיר"). It is still the only in-app way to fix a figure
+             the parser misread — three capacity figures came from an OCR reconstruction — so the
+             paths that need it (a parse error, SheetJS missing, the button above) open it here
+             instead of it occupying the tab for everyone who just drops a clean file. -->
+        <div id="verifyHost"></div>
       </div>
-      <!-- Level 3. This is the confirmation step of an import and the only way to fix a figure the
-           parser misread, so it stays — but it is a wall of number fields nobody needs open while
-           simply dropping a file, so it starts closed and opens itself once a file has been read. -->
-      <details class="sec ref" id="verifyWrap">
-        <summary>${IC('edit')} אימות ותיקון נתונים — ${q} <span class="small muted" style="font-weight:400">— נפתח מעצמו אחרי קליטת קובץ</span></summary>
-        <div class="secbody" id="verifyForm"></div>
-      </details>
     </div>`;
-  c.insertAdjacentHTML('beforeend', qaSectionHTML());
-  setupDrop(); renderVerifyForm($('#verifyForm'));
+  setupDrop();
+};
+/* Build the correction form where the tab no longer keeps one standing. Idempotent: a second call
+   re-renders the fields rather than stacking a second copy. */
+window.openVerifyPanel=()=>{
+  const host=$('#verifyHost'); if(!host) return;
+  if(!host.querySelector('#verifyForm'))
+    host.innerHTML=`<details class="sec ref" id="verifyWrap" open style="margin-top:14px">
+      <summary>${IC('edit')} תיקון ידני — ${S.activeQuarter}</summary>
+      <div class="secbody" id="verifyForm"></div></details>`;
+  const w=$('#verifyWrap'); if(w) w.open=true;
+  renderVerifyForm($('#verifyForm'));
+  if(w) w.scrollIntoView({behavior:'smooth',block:'nearest'});
 };
 function setupDrop(){
   const drop=$('#drop'), input=$('#fileInput');
@@ -4585,8 +4586,9 @@ function setupDrop(){
 function xlsxReady(){ return typeof XLSX!=='undefined' && XLSX && XLSX.read; }
 function handleFile(file){
   const info=$('#sheetInfo');
-  // The verify form is collapsed by default, so any path that tells you to use it must open it.
-  const openVerify=()=>{ const v=$('#verifyWrap'); if(v){ v.open=true; renderVerifyForm($('#verifyForm')); } };
+  // The verify form is no longer a standing section of the tab, so any path that tells you to use
+  // it must BUILD it — not merely open a disclosure that is not there.
+  const openVerify=()=>openVerifyPanel();
   if(!xlsxReady()){ info.innerHTML=`<div class="tag r">ספריית קריאת האקסל לא נטענה (אין חיבור אינטרנט?). הזינו את נתוני הרבעון ידנית בטופס שנפתח למטה.</div>`; openVerify(); return; }
   info.innerHTML=`<div class="chip">${IC('clock')} מנתח ${esc(file.name)}…</div>`;
   const reader=new FileReader();
@@ -4605,10 +4607,10 @@ function handleFile(file){
       info.innerHTML=`
         <div class="tag g" style="margin-bottom:8px">✓ נקלט: ${esc(file.name)}</div>
         <div class="small muted">גיליונות: ${wb.SheetNames.map(n=>`<span class="chip" style="margin:2px">${esc(n)} ${matchSheet(n)?IC('check'):''}</span>`).join('')}</div>
-        <div class="small" style="margin-top:8px">חולצו: ${parsed.summary}. אמת/תקן למטה ואשר. <b>MR שנקלטו: ${parsed.mrCount}</b></div>`;
-      renderVerifyForm($('#verifyForm'));
-      const vw=$('#verifyWrap'); if(vw){ vw.open=true; vw.scrollIntoView({behavior:'smooth',block:'nearest'}); }
-      toast('קובץ נותח — אמת את הערכים','g');
+        <div class="small" style="margin-top:8px">חולצו: ${parsed.summary}. בדקו את המספרים ואשרו. <b>MR שנקלטו: ${parsed.mrCount}</b></div>`;
+      // A clean parse no longer throws the correction wall open — that was the tab's main
+      // complaint. The button beside "אשר" opens it for the case where a figure came out wrong.
+      toast('קובץ נותח — אשר את הרבעון, או תקן ידנית אם משהו נקרא לא נכון','g');
     }catch(err){ info.innerHTML=`<div class="tag r">שגיאת ניתוח: ${esc(err.message)}</div><div class="small muted" style="margin-top:6px">הטופס למטה נפתח — אפשר להזין ידנית.</div>`; openVerify(); }
   };
   reader.readAsArrayBuffer(file);
@@ -7774,6 +7776,17 @@ function buildAIContext(){
     if(rp && rp.length){
       L.push(`## הנתיב המתגלגל עד Q9 [מחושב במנוע] — מה חייב להיות נכון בכל רבעון`);
       rp.forEach(r=> L.push(`- ${r.q}: מזומן צפוי ${fmt(Math.round(r.cash||0))} SF · דרגות X${r.techX}/Y${r.techY}${r.needs&&r.needs.length?` · דורש: ${r.needs.map(n=>String(n).replace(/<[^>]+>/g,'')).join(' ; ')}`:''}`));
+    }
+  }catch(e){}
+  /* Which of the figures below are shaky. The model reasons on this data as if every number were
+     solid; where the books disagree with themselves it should say so rather than build on it. */
+  try{
+    const dq=runDataQA();
+    const bad=(dq.findings||[]).filter(x=>x.level==='red'||x.level==='amber');
+    if(dq.quarters && bad.length){
+      L.push(`## בקרת נתונים [מחושב במנוע] — ${bad.length} אי-עקביות בספרים (מדד ${dq.score}/100)`);
+      bad.slice(0,12).forEach(x=> L.push(`- [${x.level==='red'?'קריטי':'אי-עקביות'}] ${x.q} · ${x.title}: ${String(x.detail||'').replace(/<[^>]+>/g,'')}`));
+      L.push(`- אל תסתמך על נתון שמופיע כאן בלי לציין שהוא מוטל בספק.`);
     }
   }catch(e){}
   /* An investment that matures after Q9 is a cost with no return, and the model cannot see the
