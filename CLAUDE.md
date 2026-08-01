@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **670 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **690 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **696**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **716**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -193,6 +193,12 @@ cover a shortfall in another.
 Capacity here is **maximal and per quarter** — the game has no months, and the *optimal* figure is
 not in the Data Log at all (MR24 measures it).
 
+Both tables (`standingFactsHTML`) sit **below** the headline figures and the alerts, by request.
+They answer questions that do not change within a quarter, so they are reference beneath the
+headline rather than competition for it. `tests/audit/checklist.cjs` pins the order — headline →
+alerts → plants → regional cash — because "move it down" is the kind of change a later layout edit
+silently undoes.
+
 **Every money figure names its currency.** MR74 cells are labelled "אלפי CHF", regional cash carries
 its own code, everything consolidated says SF. The mixed-scale bugs in this file all began with an
 unlabelled number.
@@ -253,6 +259,40 @@ real information and shows as the negative it is.
 
 The submission tab leads with exactly the ticked set and their form codes, and keeps the pre-submit
 checklist on the surface; everything else there is behind a disclosure.
+
+### The checklist has three states, and it is tied to the ticked actions
+
+It read as a row of green ticks with no visible connection to anything chosen, and that reading was
+correct. Most of its checks read `sc.levers[targetQ]`, while `planAddToSheet` puts **form codes**
+into the sheet with **no numbers in them** — and an empty lever set oversells nothing, overdraws
+nothing and exceeds no capacity. Every check passed. A tick meaning *"there was nothing to check"*
+was drawn identically to a tick meaning *"checked, and fine"*: the same fault as reading `na` as
+approval, and fixed the same way.
+
+```
+ok    ✓   checked, and it holds
+open  ✗   checked, and it fails  — says what it means and what is missing
+na    —   NOT checked            — says what would make it checkable
+```
+
+Section A is one row per **ticked action**, which is the sync that was missing. A ticked action
+walks `open → na → ok` as it is actually carried through: open while its form is absent from the
+sheet (naming the code, with a one-click fix beside it), `na` once the form is there but its fields
+are blank, `ok` only when the fields are filled. A sale with no confirmed price is `open`, and says
+so. An action with no form is `na` — "outside the sheet", not a pass.
+
+`simActionFilled(lv,act)` is what makes that per-form rather than per-quarter, and the distinction
+matters: a quarter-wide "are there any numbers?" test turns a currency exchange green because a
+production figure was typed somewhere else. It uses the same form→field mapping as
+`clearActionFields`, and the two must not drift apart.
+
+Section B keeps the legality checks, each carrying its own "מה זה אומר / מה חסר" instead of a bare
+label — a passing row stays quiet, so the prose is only where something is wrong.
+
+**"מוכן להגשה" may only be said when nothing is open AND nothing went unchecked.** Anything else
+would claim a clean bill of health for checks that never ran. `tests/audit/checklist.cjs` asserts
+the distinction rather than the wording, including that the three states are drawn differently — an
+empty box for "failed" and an empty box for "never ran" is the ambiguity being removed.
 
 ### Ticking a sale asks for the price, because the plan deliberately does not fix it
 

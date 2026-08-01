@@ -431,8 +431,12 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
 .pill-tabs button.active{background:var(--accent);color:#fff}
 .checklist{padding:0;margin:0;list-style:none}
 .checklist li{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line)}
-.check{width:20px;height:20px;border-radius:6px;border:2px solid var(--line2);flex-shrink:0;display:grid;place-items:center;margin-top:1px}
+.check{width:20px;height:20px;border-radius:6px;border:2px solid var(--line2);flex-shrink:0;display:grid;place-items:center;margin-top:1px;font-size:12px;font-weight:800;line-height:1}
 .check.done{background:var(--green);border-color:var(--green);color:#04120c}
+/* An empty box means "checked and failed"; a dash means "not checked at all". They must not look
+   alike — the whole point of the third state is that it is visible without reading the text. */
+.check:not(.done):not(.na){border-color:var(--red);color:var(--red)}
+.check.na{border-style:dashed;color:var(--muted2)}
 @media(max-width:860px){
   /* The nav strip scrolls horizontally; without containment its scrolled content still
      extended the page and let the whole layout slide sideways (44-60px depending on which
@@ -557,7 +561,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v13.2 · מחיר מכירה נשאל, יעדים מתעדכנים';
+const APP_VERSION = 'v13.3 · צ׳ק-ליסט שקשור לפעולות שסימנת';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3334,7 +3338,6 @@ function bodyDashboard(c){
       ${kpi('ROE',fin.roe?fin.roe+'%':'—','')}
       ${kpi('ROS',fin.ros?fin.ros+'%':'—','')}
     </div>
-    ${standingFactsHTML(q)}
     <div class="grid" style="grid-template-columns:1.15fr .85fr;align-items:start">
       <div class="card">
         <div class="ch"><h3>${IC('bell')} נורות אזהרה</h3><span class="tag ${activeAlerts().some(a=>a.level==='red')?'r':'g'}">${activeAlerts().filter(a=>a.level!=='ok').length||'0'} פעילות</span></div>
@@ -3344,7 +3347,11 @@ function bodyDashboard(c){
         <div class="ch"><h3>${IC('trendUp')} מגמת מזומן מאוחד</h3></div>
         <div class="cb"><canvas id="trendChart" height="220"></canvas></div>
       </div>
-    </div>`;
+    </div>
+    <!-- The standing facts sit BELOW the general figures, by request. They answer questions that
+         do not change within a quarter (how many plants, where, what capacity, how much cash sits
+         in which currency), so they are reference beneath the headline rather than above it. -->
+    <div style="margin-top:22px">${standingFactsHTML(q)}</div>`;
   renderAlerts($('#alertsBox'),computeAlerts(q));
   drawTrend($('#trendChart'));
 };
@@ -5404,6 +5411,28 @@ function syncActionsToLevers(lv){ lv.actions=lv.actions||[]; const g=()=>Math.ra
     if((rl.invest||0)>0) add('A3-2',r.id);
   });
 }
+/* Has this sheet entry actually been filled in, or is it a form code with empty fields?
+   The submission checklist needs to tell those apart PER FORM: a quarter-wide "any numbers?" test
+   turns a currency-exchange row green because a production figure was typed somewhere else, which
+   is precisely the false tick the checklist was rebuilt to stop giving. The field each form owns
+   is the same mapping clearActionFields uses to zero it — the two must not drift apart.
+   A `note` form (A3-3, H6, W1…) has no lever field at all; it is filled when the team wrote the
+   amount or the note onto the action itself. */
+function simActionFilled(lv,act){
+  const sf=simForm(act.form); if(!sf||!lv) return false;
+  if(sf.kind==='rd') return (lv.rd||0)>0;
+  if(sf.kind==='note') return (act.amount||0)>0 || !!String(act.note||'').trim();
+  const rl=((lv.regions||{})[act.region])||{};
+  switch(sf.kind){
+    case 'produce':  return (rl.production||0)>0;
+    case 'price':    return (rl.price||0)>0||(rl.sales||0)>0||(rl.qtySold||0)>0;
+    case 'factory':  return (rl.newFac||0)>0;
+    case 'offices':  return (rl.offices||0)>0;
+    case 'transfer': return (rl.transferIn||0)>0;
+    case 'invest':   return (rl.invest||0)>0;
+    default:         return false;
+  }
+}
 // Zero out the engine fields an action controls, so the projection always matches the visible action list.
 function clearActionFields(lv,act){ const sf=simForm(act.form); if(!sf)return;
   if(sf.kind==='rd'){ lv.rd=0; return; }
@@ -7155,25 +7184,131 @@ function renderChecklist(box,targetQ,sc){
       const planned=activeLines(lev,r.id).filter(l=>l.product===p).reduce((a,l)=>a+(l.production||0),0);
       const u=utilisationPosition(p,r.id,planned); if(u) out.push({...u, name:`${r.name} · ${p}`, planned});
     })); return out; })();
+  /* THE CHECKLIST IS ABOUT THE ACTIONS THAT WERE TICKED, NOT ABOUT AN EMPTY SCENARIO.
+
+     It used to be a flat list of green ticks with no visible connection to anything chosen, and
+     that impression was correct: most of these checks read `sc.levers[targetQ]`, and
+     `planAddToSheet` puts FORM CODES into the sheet without any numbers. An empty lever set
+     oversells nothing, overdraws nothing and exceeds no capacity, so every one of them passed —
+     a tick that means "there was nothing to check" looked exactly like a tick that means "checked
+     and fine". That is the same fault as reading `na` as approval, and it is fixed the same way:
+     three states, never two.
+
+       ok   ✓  checked, and it holds
+       open ✗  checked, and it fails — say what it means and what is missing
+       na   —  NOT checked, and say what would make it checkable
+
+     Section A is one row per ticked action, which is the sync that was missing. Section B keeps
+     the legality checks, each carrying its own explanation instead of a bare label. */
+  const _blk=planV6For(targetQ), _picks=planPicks(targetQ);
+  const _chosen=_blk?_blk.actions.map((a,i)=>({a,i,n:(a.n!=null?a.n:i+1)})).filter(x=>_picks[x.n]):[];
+  // which form codes actually reached the quarter's sheet
+  const _lev=sc&&sc.levers[targetQ];
+  const _sheetActs=(_lev&&_lev.actions)||[];
+  const _sheet=_sheetActs.map(a=>a.form);
+  // does the sheet carry any real NUMBERS, or only form codes with empty fields? The section-B
+  // checks all read the lever object as a whole, so this one stays quarter-wide on purpose.
+  const _hasNumbers=_sheetActs.some(a=>simActionFilled(_lev,a));
+  /* Three different reasons the numbers can be missing, and they need three different answers —
+     "fill in the fields" is useless advice when the form is not in the sheet to begin with. */
+  const _levNA=_hasNumbers?null:{state:'na',
+    what:'הבדיקה קוראת את המספרים בגיליון ההזנה של הרבעון.',
+    need:!_chosen.length ? 'סמנו פעולות בלשונית ההחלטות והוסיפו אותן לגיליון, ואז מלאו את השדות.'
+      : !_sheet.length ? `סימנתם ${_chosen.length} פעולות אך אף טופס לא נוסף עדיין לגיליון — הוסיפו אותן, ואז מלאו את השדות.`
+      : 'הטפסים בגיליון אך השדות בתוכם ריקים — מלאו כמויות/מחירים והבדיקה תרוץ.'};
+
+  // ---- A · one row per ticked action
+  const actionItems=_chosen.map(x=>{
+    const codes=planFormCodes(x.a);
+    const sale=planSaleInfo(x.a), pick=sale?planSalePick(targetQ,x.n):null;
+    if(sale && !(pick&&pick.price>0)) return {t:`#${x.n} · ${x.a.what}`, state:'open',
+      what:'פעולת מכירה — המחיר הוא השדה היחיד שהתוכנית משאירה לרבעון, והוא עדיין לא נקבע.',
+      need:`חזרו ללשונית ההחלטות, סמנו מחדש את הפעולה והזינו מחיר ליחידה${sale.rec?` (ההמלצה: ${fmt(sale.rec)} ${esc(sale.reg.cur)} — ${esc(sale.src)})`:''}.`};
+    if(!codes.length) return {t:`#${x.n} · ${x.a.what}`, state:'na',
+      what:'הפעולה הזו אינה מתבצעת דרך טופס הזנה — היא מגעים/מעקב מחוץ לגיליון.',
+      need:'אין מה להזין בסימולטור; היא כאן כדי שלא תישכח.'};
+    const missing=codes.filter(f=>!_sheet.includes(f));
+    if(missing.length) return {t:`#${x.n} · ${x.a.what}`, state:'open',
+      what:`סימנתם את הפעולה, אך ${missing.length===codes.length?'הטופס שלה לא נוסף':'חלק מהטפסים שלה לא נוספו'} לגיליון ההזנה של ${targetQ}.`,
+      need:`חסר בגיליון: ${missing.join(' · ')}.`,
+      fix:`<button class="btn sm primary" onclick="planAddToSheet(${x.i})">הוסף לגיליון</button>`};
+    // present — but is anything actually typed into THIS form's fields?
+    const blank=codes.filter(f=>!_sheetActs.filter(z=>z.form===f).some(z=>simActionFilled(_lev,z)));
+    return {t:`#${x.n} · ${x.a.what}`, state:blank.length?'na':'ok',
+      what:`הטפסים ${codes.join(' · ')} נמצאים בגיליון ההזנה.`,
+      need:blank.length?`${blank.join(' · ')} עדיין ריק — מלאו את השדות שלו לפני Submit.`:''};
+  });
+
   const items=[
-    {t:'מחיר מוזן לכל פריט מלאי',ok:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)},
-    {t:`מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)${phantoms.length?` · ${phantoms[0].product}: מוכרים ${fmt(phantoms[0].sold)} אך יש ${fmt(phantoms[0].supply)}`:''}`,ok:phantoms.length===0},
-    {t:`העברות מגובות במקור (מטה)${ptrans?` · מעביר ${fmt(ptrans.totalIn)} אך במטה ${fmt(ptrans.hqCash)}`:''}`,ok:!ptrans},
-    {t:`דרגות תואמות: X${cg.gx}→Y${cg.gy}${cg.pcPlanned?(cg.compatible?` דורש ${cg.ratio} שבבים/מחשב`:' — לא תואם!'):''}`,ok:cg.compatible},
-    {t:`מחשבים ≤ שבבים זמינים באותו אזור${cg.pcPlanned?` · דרושים ${fmt(cg.chipsNeeded)} מול ${fmt(cg.chipInv)} במלאי${cg.reserved?` (מתוכם ${fmt(cg.reserved)} שמורים לחוזה)`:''}`:''}`,ok:cg.compatible&&cg.gap===0},
-    {t:`ייצור בגבול הקיבולת (Data Log)${caps.length?` · ${caps[0].name} ${fmt(caps[0].prod)} > ${fmt(caps[0].cap)}/מפעל`:''}`,ok:caps.length===0},
-    {t:'לכל ייצור מתוכנן יש עלות יח׳',ok:val.hasCost},
-    {t:'אין ערכים שליליים בתרחיש',ok:val.noNeg},
-    {t:'אין גירעון מטבע פתוח באף אזור',ok:REGIONS.every(r=>(Q.financial.cash[r.id]||0)>=0)},
-    {t:'מו״פ מוזן (עקביות)',ok:(Q.operational.rd||0)>0||(sc&&sc.levers[targetQ]&&sc.levers[targetQ].rd>0)},
-    {t:'הרצפה נשמרת בהקרנה',ok:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)},
-    {t:`עד 2 דרגות למוצר באזור (§4.9)${gl.length?` · ${gl[0].regionName}/${gl[0].product} כבר ב-${gl[0].count}`:''}`,ok:!gl.some(g=>g.over)},
-    {t:`הרכב משרדי מכירות חוקי (Data Log 04)${ol.length?` · ${ol[0].region} ${ol[0].n}`:''}`,ok:ol.length===0},
-    {t:`נפח המכירות אינו נשען על משרדים שנפתחים רק עכשיו (§4.6)${otg.length?` · ${otg[0].region} ${otg[0].from}→${otg[0].to}`:''}`,ok:otg.length===0},
-    {t:`הייצור אינו מעל הקיבולת המקסימלית באף אזור (§4.7)${util.filter(u=>u.zone==='over-max')[0]?` · ${util.filter(u=>u.zone==='over-max')[0].name}`:''}`,ok:!util.some(u=>u.zone==='over-max')},
-    {t:`אין המלצה שחורגת מהביקוש הנצפה${dov.length?` · ${fmt(dov[0].qty)} מול תקרה ${fmt(dov[0].ceiling)}`:''}`,ok:dov.length===0},
+    {t:'מחיר מוזן לכל פריט מלאי', state:Q.operational.inventory.every(i=>!(i.qty>0)||i.price>0)?'ok':'open',
+     what:'מלאי בלי מחיר לא נמכר — הוא נשאר במחסן וצובר עלות אחזקה. זו התקלה הטכנית הנפוצה ביותר במשחק.',
+     need:'הזינו מחיר לכל פריט מלאי בטופס A1-1 (שבבים) / A1-2 (מחשבים).'},
+    {t:'מכירות בגבול ההיצע (מלאי+ייצור, כולל יצוא)', ...(_levNA||{state:phantoms.length?'open':'ok'}),
+     ...(phantoms.length?{what:`מתוכננת מכירה של ${fmt(phantoms[0].sold)} יח׳ ${phantoms[0].product} מול היצע ${fmt(phantoms[0].supply)}.`,
+       need:`הורידו את הכמות הנמכרת ב-${fmt(phantoms[0].gap)} יח׳, או ייצרו/רכשו את ההפרש.`}:{})},
+    {t:'העברות מגובות במקור (מטה)', ...(_levNA||{state:ptrans?'open':'ok'}),
+     ...(ptrans?{what:`מתוכננת העברה של ${fmt(ptrans.totalIn)} SF אך במטה יש ${fmt(ptrans.hqCash)}.`,
+       need:`הקטינו את ההעברה ב-${fmt(ptrans.gap)} SF — A3-1 ממומן מהמטה בלבד.`}:{})},
+    {t:`דרגות תואמות: X${cg.gx}→Y${cg.gy}`, state:cg.compatible?'ok':'open',
+     what:cg.compatible?`טבלת ההמרה נותנת ${cg.ratio} שבבים למחשב.`
+       :`דרגת שבב X${cg.gx} אינה יכולה לייצר מחשב Y${cg.gy} — 0 בטבלת ההמרה. ההגשה חסומה.`,
+     need:cg.compatible?'':'נדרש מו״פ (H1-1) עד להתאמת הדרגות, או שינוי דרגת המחשב המתוכנן.'},
+    {t:'מחשבים ≤ שבבים זמינים באותו אזור', state:(cg.compatible&&cg.gap===0)?'ok':'open',
+     what:cg.pcPlanned?`דרושים ${fmt(cg.chipsNeeded)} שבבים מול ${fmt(cg.chipInv)} במלאי${cg.reserved?` (מתוכם ${fmt(cg.reserved)} שמורים לחוזה)`:''}.`
+       :'אין ייצור מחשבים מתוכנן, ולכן אין צריכת שבבים.',
+     need:cg.gap>0?`חסרים ${fmt(cg.gap)} שבבים${cg.worst?` ב${cg.worst.name}`:''} — שבב באזור אחר אינו זמין כאן ללא שינוע (רבעון).`:''},
+    {t:'ייצור בגבול הקיבולת (Data Log 03)', ...(_levNA||{state:caps.length?'open':'ok'}),
+     ...(caps.length?{what:`${caps[0].name}: ${fmt(caps[0].prod)} יח׳ מול ${fmt(caps[0].cap)} למפעל.`,
+       need:`נדרשים ${caps[0].plants} מפעלים לכמות הזו — הקטינו את הייצור או בנו מפעל (A2-1, נכנס לתוקף רבעון אחרי).`}:{})},
+    {t:'לכל ייצור מתוכנן יש עלות יח׳', ...(_levNA||{state:val.hasCost?'ok':'open'}),
+     ...(val.hasCost?{}:{what:'שורת ייצור בלי עלות יחידה — התזרים והרווח שלה יחושבו כאפס.',
+       need:'מלאו את שדה עלות היחידה בשורת הייצור בגיליון.'})},
+    {t:'אין ערכים שליליים בגיליון', ...(_levNA||{state:val.noNeg?'ok':'open'}),
+     ...(val.noNeg?{}:{what:'ערך שלילי בשדה כמות/מחיר הוא כמעט תמיד טעות הקלדה.',
+       need:'אתרו את השדה השלילי בגיליון ההזנה ותקנו אותו.'})},
+    {t:'אין גירעון מטבע פתוח באף אזור',
+     state:REGIONS.every(r=>(Q.financial.cash[r.id]||0)>=0)?'ok':'open',
+     what:`יתרה שלילית באזור נושאת ריבית של ${DATALOG.interest&&DATALOG.interest.negative!=null?DATALOG.interest.negative+'%':'משיכת יתר'} לרבעון, ואינה מכוסה ביתרה של אזור אחר.`,
+     need:REGIONS.filter(r=>(Q.financial.cash[r.id]||0)<0).map(r=>`${r.name}: ${fmt(Q.financial.cash[r.id])} ${r.cur} — כסו בהעברה (A3-1) מהמטה`).join(' · ')},
+    {t:'מו״פ מוזן (עקביות)', state:((Q.operational.rd||0)>0||(_lev&&_lev.rd>0))?'ok':'open',
+     what:`§4.3 — ההסתברות לפטנט מתאפסת אחרי כל פטנט וברבעון לא-ממומן, כך שרצף נקטע עולה יותר מאשר רצף רציף.`,
+     need:`הזינו מו״פ ב-H1-1. המינימום החוקי: ${fmt(DATALOG.rdMinPerQuarter.X)} לשבב · ${fmt(DATALOG.rdMinPerQuarter.Y)} למחשב.`},
+    {t:'הרצפה נשמרת בהקרנה',
+     state:!projectCashflow(S.activeQuarter,sc?sc.levers:null).some(p=>p.breach)?'ok':'open',
+     what:'ההקרנה עד Q9 יורדת מתחת לרצפת המזומן באחד הרבעונים.',
+     need:(()=>{ const b=projectCashflow(S.activeQuarter,sc?sc.levers:null).filter(p=>p.breach)[0];
+       return b?`השבירה הראשונה ב-${b.q}: מזומן ${fmt(b.unified)} מול רצפה ${fmt(b.floor)} (פער ${fmt(Math.abs(b.distance))}). דחו הוצאה או הקדימו גבייה.`:''; })()},
+    {t:'עד 2 דרגות למוצר באזור (§4.9)', state:gl.some(g=>g.over)?'open':'ok',
+     what:gl.length?`${gl[0].regionName}/${gl[0].product==='Y'?'מחשב':'שבב'} מחזיק ${gl[0].count} דרגות (${gl[0].grades.join(', ')}).`
+       :'אף אזור אינו מחזיק יותר משתי דרגות לאותו מוצר.',
+     need:gl.some(g=>g.over)?`דרגה שלישית תוריד אוטומטית את האמצעית לנמוכה — מחיקת שווי. מסלולי יציאה: ${RULES.grades.exits.join(' · ')}.`:''},
+    {t:'הרכב משרדי מכירות חוקי (Data Log 04)', ...(_levNA||{state:ol.length?'open':'ok'}),
+     ...(ol.length?{what:`${ol[0].region}: ${ol[0].n} — ${ol[0].why}`, need:'תקנו את מספר המשרדים ב-A1-3.'}:{})},
+    {t:'נפח המכירות אינו נשען על משרדים שנפתחים רק עכשיו (§4.6)', ...(_levNA||{state:otg.length?'open':'ok'}),
+     ...(otg.length?{what:`${otg[0].region} ${otg[0].from}→${otg[0].to} — המשרד נכנס לתוקף רק בסוף הרבעון.`,
+       need:`אל תתקצבו את תוספת הנפח לפני ${nextQuarters(targetQ)[0]||'הרבעון הבא'}.`}:{})},
+    {t:'הייצור אינו מעל הקיבולת המקסימלית באף אזור (§4.7)', ...(_levNA||{state:util.some(u=>u.zone==='over-max')?'open':'ok'}),
+     ...(util.some(u=>u.zone==='over-max')?{what:`${util.filter(u=>u.zone==='over-max')[0].name} מעל המקסימום.`,
+       need:'מעל המקסימום פשוט לא ייוצר. הקטינו את הכמות או הוסיפו מפעל.'}:{})},
+    {t:'אין המלצה שחורגת מהביקוש הנצפה', state:dov.length?'open':'ok',
+     what:dov.length?`${fmt(dov[0].qty)} יח׳ מול תקרה ${fmt(dov[0].ceiling)} (${dov[0].src}).`
+       :'שום כמות מתוכננת אינה מעל הביקוש שנמדד.',
+     need:dov.length?'כמות מעבר לתקרה לא תימכר — היא תישאר במלאי ותצבור עלות אחזקה.':''},
   ];
-  box.innerHTML=`<ul class="checklist">${items.map(it=>`<li><span class="check ${it.ok?'done':''}">${it.ok?'✓':''}</span><span>${esc(it.t)}</span></li>`).join('')}</ul>
+  const MARK={ok:{cls:'done', g:'✓'}, open:{cls:'', g:'✗'}, na:{cls:'na', g:'—'}};
+  const row=it=>{ const m=MARK[it.state]||MARK.open;
+    const detail=(it.state!=='ok'&&(it.what||it.need))
+      ? `<div class="small muted" style="margin-top:3px;line-height:1.7;white-space:normal">${it.what?`<b>מה זה אומר:</b> ${it.what}`:''}${it.what&&it.need?'<br>':''}${it.need?`<b>מה חסר:</b> ${it.need}`:''}</div>` : '';
+    return `<li><span class="check ${m.cls}">${m.g}</span><span style="flex:1">${esc(it.t)}${detail}</span>${it.fix||''}</li>`; };
+  const open=[...actionItems,...items].filter(i=>i.state==='open').length;
+  const na=[...actionItems,...items].filter(i=>i.state==='na').length;
+  box.innerHTML=`
+    ${_blk?`<div class="small" style="margin-bottom:8px;line-height:1.8">
+      <b>${IC('check')} הפעולות שסימנתי — ${_chosen.length}</b>
+      ${_chosen.length?'':` <span style="color:var(--sig-warn)">לא סומנה אף פעולה, ולכן אין מה להגיש. סמנו אותן בלשונית ההחלטות.</span>`}</div>
+      ${_chosen.length?`<ul class="checklist" style="margin-bottom:14px">${actionItems.map(row).join('')}</ul>`:''}
+      <div class="small" style="margin-bottom:8px"><b>${IC('scale')} בדיקות חוקיות ועקביות</b></div>`:''}
+    <ul class="checklist">${items.map(row).join('')}</ul>
     ${phantoms.length?`<div class="tag a" style="margin-top:10px;display:block;line-height:1.7;white-space:normal">${IC('warn')} <b>מכירת-יתר:</b> ${phantoms.map(p=>`<b>${p.product==='Y'?'מחשבים':'שבבים'}</b> — מתוכננת מכירה של <b>${fmt(p.sold)}</b> יח׳ מול היצע <b>${fmt(p.supply)}</b>${p.committed>0?` (אחרי ${fmt(p.committed)} שמחויבים לחוזה)`:''}, פער ${fmt(p.gap)}`).join(' · ')}. אפשר למכור בשוק ללא מפעל (שילוח), אך לא מעבר לכמות שיוצרה/קיימת — ולא למכור שבבים שכבר הובטחו בחוזה.</div>`:''}
     ${ptrans?`<div class="tag a" style="margin-top:8px">${IC('warn')} העברת-פנטום: מעביר לאזורים ${fmt(ptrans.totalIn)} אך במטה יש רק ${fmt(ptrans.hqCash)} (חוסר ${fmt(ptrans.gap)}). העברה (A3-1) ממומנת מהמטה — אי-אפשר להעביר יותר ממה שיש בו.</div>`:''}
     ${!cg.compatible?`<div class="tag r" style="margin-top:10px">${IC('warn')} דרגת שבב X${cg.gx} אינה תואמת לייצור מחשב Y${cg.gy} (0 בטבלת ההמרה) — נדרש מו״פ להתאמת דרגות. <b>ההגשה חסומה.</b></div>`:
@@ -7186,7 +7321,13 @@ function renderChecklist(box,targetQ,sc){
       ${util.map(u=>`<b>${esc(u.name)}</b> — ${fmt(u.planned)} יח׳: <span class="tag ${u.zone==='over-max'?'r':(u.zone==='optimal'?'g':'a')}">${u.zone==='optimal'?'באופטימום':(u.zone==='over-max'?'מעל המקסימום':(u.zone==='above-optimal'?'מעל האופטימום':'מתחת לאופטימום'))}</span> ${u.note}${u.known?'':` <span class="small" style="color:var(--amber)">(הקיבולת האופטימלית טרם נמדדה — ${u.src.replace(/<[^>]+>/g,'')})</span>`}`).join('<br>')}
       </div></div>`:''}
     ${caps.length?`<div class="tag a" style="margin-top:8px">${IC('warn')} חריגת קיבולת: ${caps.map(c=>`${c.name} ${c.product} ${fmt(c.prod)} יח׳ > ${fmt(c.cap)}/מפעל → נדרשים ${c.plants} מפעלים`).join(' · ')}.</div>`:''}
-    <div class="small muted" style="margin-top:12px">${items.every(i=>i.ok)?'<span style="color:var(--green)">'+IC('check')+' מוכן להגשה</span>':IC('warn')+' יש פריטים פתוחים לפני Submit'}</div>`;
+    <!-- Three states in the summary too. "Ready" may only be said when nothing is open AND
+         nothing went unchecked — otherwise the line would claim a clean bill of health for checks
+         that never ran, which is the exact impression this rewrite exists to remove. -->
+    <div class="small muted" style="margin-top:12px;line-height:1.8">${
+      open? `${IC('warn')} <b>${open} פריטים פתוחים</b> לפני Submit${na?` · ועוד ${na} שלא נבדקו`:''}.`
+      : na ? `${IC('info')} אין פריטים פתוחים, אבל <b>${na} בדיקות לא רצו</b> — אין עדיין מספרים בגיליון להריץ אותן עליהם. זה אינו אישור.`
+      : `<span style="color:var(--green)">${IC('check')} הכול נבדק ועבר — מוכן להגשה</span>`}</div>`;
 }
 window.downloadInputSheet=(targetQ)=>{
   if(!xlsxReady()){ toast('ספריית האקסל לא נטענה — נסה שוב עם חיבור אינטרנט','r'); return; }
