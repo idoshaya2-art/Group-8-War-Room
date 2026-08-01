@@ -124,9 +124,16 @@ ck('and the rejection is reported, not hidden', ai.badModifyReported);
 ck('malformed model output throws rather than corrupting the list', ai.garbage);
 ck('an out-of-range action reference is neutralised', ai.outOfRangeRef);
 
-/* ---- the reviewed list is what the page renders ---- */
+/* ---- the reviewed list is what the page renders ----
+   The engine's generated list — and therefore its AI review — is the FALLBACK: it renders for a
+   quarter the written plan does not cover. For Q4 the plan is the list, so this block moves to a
+   quarter without one, which is where that path actually lives now. */
+await page.evaluate(()=>{ S.activeQuarter='Q1'; save(); go('plan'); });
+await page.waitForTimeout(600);
 await page.evaluate(()=>{
-  const q=S.activeQuarter,t=nextQuarters(q)[0]; const eng=buildActionPlan(q,t)||[];
+  const t=nextQuarters('Q1')[0];
+  const eng=buildActionPlan('Q1',t)||[];
+  // drop an AMBER action — a mandatory one cannot be dropped, which is a different assertion
   const amberIdx=eng.findIndex(x=>x.level==='amber'&&x.sim);
   const parsed=parseReviewJSON(JSON.stringify({rationale:'מזומן לפני הכל',plan:[
     {ref:amberIdx+1,verdict:'drop',why:'כובל מזומן'},
@@ -135,18 +142,13 @@ await page.evaluate(()=>{
   S.ai.review={q:t,at:Date.now(),rationale:parsed.rationale,...applyReview(eng,parsed,t)};
   save(); go('plan');
 });
-await page.waitForTimeout(600);
-/* From here down, several claims live on the ENGINE's generated list, which is now a second
-   opinion inside the decisions tab's background disclosure rather than the page's main list.
-   They must still be produced and correct, so they are read from textContent (which reaches
-   inside a closed <details>) instead of innerText. What changed is where they sit, not whether
-   the engine still computes them. */
+await page.waitForTimeout(700);
 const ui=await page.evaluate(()=>({
   // The provenance stopped being a row of four pills and became one muted line; the wording
   // moved from "4 · AI · נבחן" to "נבחנו ע״י AI". Same claim, current phrasing.
-  banner:/נבחנו ע״י AI/.test(document.body.textContent),
-  rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.textContent),
-  droppedSection:/המליץ לוותר עליהן/.test(document.body.textContent),
+  banner:/נבחנו ע״י AI/.test(document.body.innerText),
+  rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.innerText),
+  droppedSection:/המליץ לוותר עליהן/.test(document.body.innerText),
   aiTagOnCard:[...document.querySelectorAll('.act')].some(a=>/\bAI\b/.test(a.textContent)),
   revertBtn:!![...document.querySelectorAll('button')].find(b=>/חזור לרשימת המנוע/.test(b.textContent)),
   addedVisible:[...document.querySelectorAll('.act')].some(a=>/ברזיל/.test(a.textContent))
@@ -159,6 +161,8 @@ ck('the AI addition appears as a real actionable card', ui.addedVisible);
 ck('you can revert to the engine list', ui.revertBtn);
 await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
 ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
+await page.evaluate(()=>{ S.activeQuarter='Q3'; save(); go('plan'); });   // back to the planned quarter
+await page.waitForTimeout(500);
 
 /* ---- CONTRACT ROUTES: producing it ourselves is one option, not the question ---- */
 const rt=await page.evaluate(()=>{

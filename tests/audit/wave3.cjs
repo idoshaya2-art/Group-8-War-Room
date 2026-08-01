@@ -109,29 +109,33 @@ ck('I-4 · errors are signed, so over- and under-forecasting are distinguishable
 ck('I-4 · one measurement is never reported as a consistent bias',
   fc.bias.every(b=>b.n>1 || b.consistent===false), JSON.stringify(fc.bias.map(b=>[b.n,b.consistent])));
 
-// ---------- it reaches the screen
+// ---------- it reaches a reader
+/* This block used to open every disclosure on the decisions tab and read the critical-path and
+   rolling-plan panels out of the page. Those panels are gone: the team asked for the background
+   section removed outright, and it was — but the calculations behind it were NOT deleted with it.
+   They now reach the model instead of the page, through buildAIContext, which is a stronger claim
+   than "the table rendered": the AI is the thing that acts on them. So the same four facts are
+   asserted against the fact pack the model is actually given. */
 await page.evaluate(()=>{ S.quarters.Q3.operational.techX=0; S.quarters.Q4.entered=false; save(); });
 await page.evaluate(()=>go('plan')); await page.waitForTimeout(900);
 const ui=await page.evaluate(()=>{
-  // The decisions tab now leads with the money and the list, and everything that explains rather
-  // than decides sits in one closed disclosure at the foot of the page — including this. So open
-  // every disclosure before reading: what is asserted here is that the material is correct and
-  // present, not that it competes with the decisions for the top of the screen.
-  document.querySelectorAll('details').forEach(x=>x.open=true);
-  // match on the SUMMARY, not on textContent — the outer background disclosure contains this one,
-  // and matching its text swept in every other table on the page (77 rows instead of 6).
-  const d=[...document.querySelectorAll('details')]
-    .find(x=>/הנתיב המתגלגל/.test((x.querySelector('summary')||{}).textContent||''));
-  const t=document.body.innerText;
-  return { card:/הנתיב הקריטי/.test(t), missed:/כבר איחרנו/.test(t), now:/חייבות להתחיל/.test(t),
-    section:!!d, rows:d?d.querySelectorAll('tbody tr').length:0, q9:/Q9/.test(d?d.innerText:''),
-    x3:/דרגת X3/.test(t) };
+  const ctx=buildAIContext(S.activeQuarter)||'';
+  const sec=h=>{ const i=ctx.indexOf(h); if(i<0) return ''; const j=ctx.indexOf('\n## ',i+1);
+    return ctx.slice(i, j<0?ctx.length:j); };
+  const roll=sec('## הנתיב המתגלגל');
+  return { onPage:/רקע — למה זו הרשימה/.test(document.body.innerText),
+    card:/## נתיב קריטי/.test(ctx), missed:/\[איחרנו\]/.test(ctx), now:/\[להתחיל /.test(ctx),
+    rows:(roll.match(/^- Q\d:/gm)||[]).length, q9:/^- Q9:/m.test(roll),
+    x3:/דרגת X3/.test(ctx) };
 });
-ck('D-02 · the critical path is on the decisions page, in the background section', ui.card===true);
-ck('D-02 · missed start dates and start-now items are both shown', ui.missed && ui.now);
-ck('D-02 · the rolling table has one row per remaining quarter and reaches Q9',
-  ui.rows===6 && ui.q9===true, `${ui.rows} rows`);
-ck('D-02 · the X3 grade requirement is named on screen', ui.x3===true);
+ck('D-02 · the background panel really is gone from the tab, as the team asked',
+  ui.onPage===false);
+ck('D-02 · ...but the critical path still reaches the model as fact, not as prose it re-derives',
+  ui.card===true);
+ck('D-02 · missed start dates and start-now items are both handed over', ui.missed && ui.now);
+ck('D-02 · the rolling path carries one line per remaining quarter and reaches Q9',
+  ui.rows===6 && ui.q9===true, `${ui.rows} quarters`);
+ck('D-02 · the X3 grade requirement is named in what the model is told', ui.x3===true);
 
 ck('no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0,
   errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).slice(0,2).join(' | '));

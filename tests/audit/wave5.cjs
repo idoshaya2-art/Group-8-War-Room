@@ -151,13 +151,35 @@ await page.evaluate(()=>go('plan')); await page.waitForTimeout(800);
    simulator, so "is the full list rendered" is counted in cards, not in send buttons. */
 const a=await page.evaluate(()=>({ anchor:!!document.getElementById('decisionsTop'),
   decisionsStillListed:document.querySelectorAll('.content .act').length,
-  // the background material was moved, not deleted — a closed disclosure at the end holds it
-  background:[...document.querySelectorAll('details.sec')].some(d=>/רקע — למה זו הרשימה/.test(d.textContent) && !d.open) }));
+  /* The background disclosure is GONE — the team asked for it removed outright, not collapsed
+     ("רקע ... ניתן להסיר לגמרי"). What it used to draw was never the point of those
+     calculations, so they were kept and re-pointed at the model instead of at a panel. */
+  background:[...document.querySelectorAll('details.sec')].some(d=>/רקע — למה זו הרשימה/.test(d.textContent)),
+  // ...and this is where that engine work went: the fact pack the AI is grounded in.
+  ctx:(()=>{ try{ return buildAIContext(S.activeQuarter)||''; }catch(e){ return 'ERR '+e.message; } })() }));
 ck('I-3 · the in-page anchor still exists', a.anchor===true);
 ck('I-3 · the full decision list is rendered, not a summary of it',
   a.decisionsStillListed>=15, `${a.decisionsStillListed} action cards on the page`);
-ck('I-3 · the orientation material still exists, in one disclosure that starts closed',
-  a.background===true);
+ck('I-3 · the orientation disclosure is gone from the tab, as asked',
+  a.background===false);
+/* Removing the panel must not remove the arithmetic behind it. Each of these sections is one of
+   the engine functions that used to have a renderer here and now has none — if a later cut
+   deletes the function along with its display, this is what notices. */
+[['critical path','נתיב קריטי'],['rolling plan','הנתיב המתגלגל'],
+ ['maturation vs Q9','הבשלה מול סוף המשחק']]
+  .forEach(([name,heading])=>
+    ck(`I-3 · the ${name} survived the cut — it feeds the AI instead of a panel`,
+      a.ctx.includes(heading), a.ctx.slice(0,60)));
+/* forecastAccuracy is the fourth, but its section is data-dependent: it compares each quarter's
+   forecast against what actually arrived, and the seed records no forecasts, so printing nothing
+   is the correct answer here rather than a regression. Its SHAPE is what the caller got wrong —
+   it was read as {n, mape, bias:number} and is {list, bias:[{metric,n,meanErr,consistent}]}, so
+   `fa.n>0` was undefined>0 and the section could never appear at all. That is what is pinned. */
+const fa=await page.evaluate(()=>{ try{ const f=forecastAccuracy();
+  return {ok:Array.isArray(f.list)&&Array.isArray(f.bias), keys:Object.keys(f).join(',')};
+}catch(e){ return {ok:false, keys:'threw: '+e.message}; } });
+ck('I-3 · forecast accuracy survived too, and returns the shape its caller reads',
+  fa.ok===true, fa.keys);
 await browser.close();
 }
 process.exit(report('WAVE 5 — what breaks first (I-2) and the action above the fold (I-3)')?1:0);

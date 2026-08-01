@@ -153,39 +153,34 @@ ck('the PC grade row follows v6 in deferring Y2 to Q6',
 ck('Brazil absorption is now one of the tracked anchors',
   del.some(r=>/ברזיל/.test(r.topic) && /14,000/.test(r.planned)));
 
-/* ---------------- where it renders.
-   The plan is a baseline to check decisions against, not a decision itself, so it lives in the
-   decisions tab's background disclosure — below the money block and below the engine's own list,
-   and closed until asked for. That ordering is the assertion: the plan must never push the
-   decisions down the page, and it must never replace them. */
+/* ---------------- where the plan renders, and where the engine's list does.
+   For a quarter the written plan covers, the plan IS the tab's list. For one it does not (Q1-Q3,
+   or past Q9) the engine's generated list is the fallback — better a sourced list than an empty
+   tab. The orientation disclosure that used to hold the plan document was removed outright. */
 await page.evaluate(()=>go('decide')); await page.waitForTimeout(900);
-const ui=await page.evaluate(()=>{
-  const c=document.querySelector('.content');
-  const plan=[...c.querySelectorAll('.read')].find(b=>/התוכנית הכתובה/.test(b.textContent));
-  if(!plan) return {found:false};
-  const bg=plan.closest('details.sec');
-  return {found:true,
-    marks:plan.querySelectorAll('.pv6').length,
-    // nested disclosures inside the plan block start shut
-    openTables:[...plan.querySelectorAll('details[open]')].length,
-    insideBackground: !!bg && !bg.open,
-    listAbove: document.getElementById('decisionsTop').getBoundingClientRect().top
-             < plan.getBoundingClientRect().top,
-    decisionCards: c.querySelectorAll('.act').length,
-    // the verdict marker must not be a pill — that is what the surfaces suite polices
-    pillsInside:plan.querySelectorAll('.tag').length,
-    naPresent:plan.querySelectorAll('.pv6.na').length};
+const where=await page.evaluate(async()=>{
+  const c=()=>document.querySelector('.content');
+  const planned={ cards:c().querySelectorAll('.act').length,
+    header:(document.getElementById('decisions')||{}).textContent||'',
+    isPlan:/התוכנית שלי/.test((document.getElementById('decisions')||{}).textContent||''),
+    background:[...c().querySelectorAll('details')].some(d=>/רקע — למה זו הרשימה/.test(d.textContent)) };
+  S.activeQuarter='Q1'; save(); go('plan');
+  await new Promise(r=>setTimeout(r,600));
+  const fallback={ cards:c().querySelectorAll('.act').length,
+    isPlan:/התוכנית שלי/.test((document.getElementById('decisions')||{}).textContent||''),
+    hasAiButton:!!document.getElementById('enrichBtn') };
+  S.activeQuarter='Q3'; save(); go('plan');
+  await new Promise(r=>setTimeout(r,600));
+  return {planned, fallback};
 });
-ck('the plan renders on the decisions tab', ui.found===true);
-ck('every action shows a verdict marker', ui.found && ui.marks>=15, `${ui.marks} markers`);
-ck('it sits inside the background disclosure, which starts closed', ui.insideBackground===true);
-ck('the engine\'s own decision list stays above it and is not replaced by it',
-  ui.listAbove===true && ui.decisionCards>=5, `${ui.decisionCards} decision cards above the plan`);
-ck('the tables inside the plan start collapsed — the actions are the point',
-  ui.openTables===0, `${ui.openTables} open`);
-ck('verdicts are markers, not pills, so the pill budget still means something',
-  ui.pillsInside<=3, `${ui.pillsInside} pills inside the plan block`);
-ck('"not checked" appears rather than being hidden', ui.naPresent>0, `${ui.naPresent}`);
+ck('for a quarter the plan covers, the plan is the list',
+  where.planned.isPlan===true && where.planned.cards>=15, `${where.planned.cards} cards`);
+ck('for a quarter it does not cover, the engine\'s list is the fallback rather than an empty tab',
+  where.fallback.isPlan===false && where.fallback.cards>0 && where.fallback.hasAiButton===true,
+  `${where.fallback.cards} engine cards`);
+ck('the orientation disclosure was removed outright, not just collapsed',
+  where.planned.background===false);
+
 /* ---------------- the plan IS the list.
    The tab used to lead with buildActionPlan()'s output — a well-sourced list, but not the one the
    team wrote. Being handed someone else's fifteen items while holding your own is the complication
@@ -210,13 +205,11 @@ const asList=await page.evaluate(()=>{
 ck('the page\'s decision list is the written plan, not the engine\'s list',
   asList.visible===15 && asList.allFromPlan===true, `${asList.visible} visible cards`);
 ck('...and says so in its header', /התוכנית שלי/.test(asList.header), asList.header.slice(0,50));
-/* The engine's generated list is not the page's list any more — it is one collapsed section at the
-   foot of the background disclosure. It is kept rather than deleted for two reasons: planGaps
-   depends on buildActionPlan to promote obligations the plan does not cover, and it is the render
-   path a model-authored action actually travels, which is what the D-01 escaping guards. */
-ck('the engine\'s list is kept as a folded second opinion, never as the page\'s list',
-  asList.engineHidden===true && asList.engineCards>0,
-  `${asList.engineCards} engine cards, collapsed`);
+/* The engine's list is not on this tab at all when the plan covers the quarter — see the
+   fallback assertion above for where it does render. buildActionPlan still RUNS regardless, since
+   planGaps depends on it to promote obligations the plan does not cover. */
+ck('the engine renders no competing list beside the plan', asList.engineCards===0,
+  `${asList.engineCards} engine cards`);
 ck('one button checks the plan with the AI', asList.aiButton===true);
 
 // mandatory engine findings the plan does not cover must be promoted back to the surface
@@ -357,8 +350,7 @@ const folded=await page.evaluate(()=>{
   return { exists:!!d, open:d?d.open:null,
     parentShut:d?!!d.closest('details:not([open])'):null };
 });
-ck('the engine\'s second-opinion list is folded shut',
-  folded.exists===true && folded.open===false);
+ck('no second-opinion disclosure survives on the tab', folded.exists===false);
 
 /* ---------------- our own R&D is read from our own report, in our own units.
    The competitor read-out printed "our R&D 0 vs a market average of 419" while the team's report

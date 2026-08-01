@@ -51,14 +51,17 @@ ck('mandatory actions are executable (payload, button, or stated blocker)',
    musts.every(m=>m.hasSim||m.blocked||m.hasAction),
    musts.filter(m=>!m.hasSim&&!m.blocked&&!m.hasAction).map(m=>m.title).join(' | ')||'all executable');
 
+/* The middle step of this journey used to be the simulator page, where the player tuned levers by
+   hand before exporting. That page is gone — the team asked for manual tuning removed, and `sim`
+   now resolves to the decisions tab. The journey it replaced is shorter, not broken: tick the
+   plan's actions, and the sheet shows exactly those. So the continuity claim is unchanged — the
+   same numbers must reach the export step — but it is carried by the scenario the plan seeds
+   rather than by a screen of sliders. */
 await page.evaluate(()=>{ S.scenarios=[]; save(); });
-await at('sim');
-const simEmpty=await snap();
-ck('simulator does NOT open as a dead end after decisions exist',
-   !/אין עדיין תרחיש/.test(await page.evaluate(()=>document.body.innerText)) || simEmpty.actionable>0);
+await at('plan');
+ck('the decisions tab does not hand the player off to a page that no longer exists',
+   await page.evaluate(()=>!document.querySelector('.content button[onclick="go(\'sim\')"]')));
 const seeded=await page.evaluate(()=>{
-  const btn=document.querySelector('button[onclick="seedScenarioFromMusts()"]');
-  if(!btn) return {built:false};
   seedScenarioFromMusts();
   const sc=S.scenarios[0]; const q=Object.keys(sc.levers)[0];
   const regionsWithValues=REGIONS.filter(r=>{const g=sc.levers[q].regions[r.id]||{};return g.production>0||g.sales>0||g.price>0;});
@@ -66,7 +69,7 @@ const seeded=await page.evaluate(()=>{
     regions:regionsWithValues.map(r=>r.id), actions:(sc.levers[q].actions||[]).length,
     score:scoreProxy(sc.levers).value};
 });
-ck('simulator can build the plan straight from the recommendations', seeded.built);
+ck('the plan can still be built straight from the recommendations, with nothing retyped', seeded.built);
 ck('the plan spans the full horizon to Q9', seeded.quarters===seeded.horizon, `${seeded.quarters}/${seeded.horizon}`);
 ck('the plan carries real lever values, not an empty shell', (seeded.regions||[]).length>0, (seeded.regions||[]).join(','));
 ck('the plan carries editable action cards', seeded.actions>0, seeded.actions+' cards');

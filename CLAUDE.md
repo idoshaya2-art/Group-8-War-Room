@@ -40,16 +40,25 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **642 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **670 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **668**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **696**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
+
+The "green line without exit 0" warning above is not hypothetical. Four suites once reported
+`FAIL 0` and still exited 1, because they threw *after* printing their summary — `editScenario`
+wrote into a `#editorArea` that no longer renders anywhere. Every per-suite line said zero
+failures and the run said `SOME SUITES FAILED`. When the two disagree, find the thrower:
+
+```
+for t in <every suite in run.sh>; do node "$t.cjs" >/dev/null 2>&1; echo "$? $t"; done | grep -v "^0 "
+```
 
 ## The shell is six tabs
 
@@ -73,9 +82,15 @@ reopen a closed finding.
 ## The list is the team's plan, not a list the engine invented
 
 `renderPlanActions()` renders `PLAN_V6`'s actions for the target quarter as the tab's decision
-list. `buildActionPlan()` still runs and still renders — as a **second opinion inside the
-background disclosure**, because being handed someone else's fifteen items while holding your own
-is the complication this tab exists to remove.
+list. `buildActionPlan()` is the **fallback**, not a second opinion: it renders only for a quarter
+the written plan does not cover (Q1–Q3, or past Q9), because better a sourced generated list than
+an empty tab — but being handed someone else's fifteen items while holding your own is the
+complication this tab exists to remove, so where the plan exists, the plan is the list. It briefly
+rendered alongside, inside the background disclosure; that disclosure is gone.
+
+This is also where a model-authored action can reach the DOM, so `tests/audit/rt_xss.cjs` injects
+into a quarter the plan does **not** cover. Reviewing Q4 and rendering Q1→Q2 put the payload on a
+page it was never going to appear on, and the escaping assertion passed for the wrong reason.
 
 Two checkers sit beside the plan, never in front of it:
 
@@ -100,7 +115,7 @@ the other three say so instead of pretending. No lever *values* are derived from
 it states economic intent, not field values, and guessing them is the invention this tool refuses
 everywhere else.
 
-## The decisions tab is four things, in this order
+## The decisions tab is three things, in this order
 
 It answers exactly what it was asked to answer, and nothing sits above the list that is not one
 of them:
@@ -114,14 +129,11 @@ of them:
    values and check `[0]+[1]+[2]===[3]` and `[3]+[4]===[5]`. A ledger that does not sum is worse
    than the row it replaced.
 2. **The list** — the plan's actions — under a single compact header carrying the AI button.
-3. The simulator/export footer.
-4. **One `<details>`, closed** — everything that explains rather than decides: how the list is
-   built, how the budget is derived (Data Log 09 collection, the two-tier capacity, the no-sale
-   scenario), the written plan v6, what-breaks-first, the critical path, the rolling plan, the
-   roadmap and the advisor.
+3. A footer with **one** way out, to the submission sheet.
 
-The tab used to stack thirteen sections above the first decision. Nothing was deleted in the cut —
-it moved into (4). Two rules keep it that way, and both are asserted:
+The tab used to stack thirteen sections above the first decision. The cut moved them into one
+closed `<details>`; the team then asked for that disclosure gone outright ("רקע … ניתן להסיר
+לגמרי"), and it is. Two rules keep the tab that way, and both are asserted:
 
 - `tests/audit/wave5.cjs` measures **the first decision card's top against the viewport** on both
   form factors. It used to measure that card's send button; plan actions have none, and on a
@@ -133,6 +145,37 @@ it moved into (4). Two rules keep it that way, and both are asserted:
 
 The old `renderNextAction` strip was deleted, not disabled — with the list one screen from the
 top it duplicated the first card. The dead-code suite is what forces that choice.
+
+### Removing a panel is not permission to remove its arithmetic
+
+`criticalPath`, `rollingPlan`, `plantPipeline`, `maturationAdvice`, `forecastAccuracy`,
+`quartersToEnd` and `startQuarterFor` lost their renderers with that disclosure. An automated
+dead-code pass then deleted the **functions** along with the panels, and wave3 crashed on
+`ReferenceError: rollingPlan is not defined`. They are verified engine work; only the drawing was
+unwanted. They now feed `buildAIContext`, which is a better home anyway — the model was
+re-deriving lead times from prose and getting them wrong, and can now only argue about what to do,
+not about when. `wave3.cjs` and `wave5.cjs` assert each section by name **in the fact pack**, so
+the next cut that takes a function with its panel fails immediately.
+
+`forecastAccuracy` is the cautionary one: its caller read `{n, mape, bias:number}` and the function
+returns `{list, bias:[…]}`, so `fa.n>0` was `undefined>0` and the section could never print at all.
+It now returns two arrays always — "nothing measured yet" is an empty list, not a third shape.
+
+### There is no simulator page
+
+`sim` is a `PAGE_ALIAS` onto `decide`, and the decisions tab does not host the scenario editor —
+so `#scenarioArea` and `#editorArea` render **nowhere**. The scenario itself is still real:
+`planAddToSheet` writes into it and the submission sheet reads it. Only the editing surface is
+gone. Consequences, each of which cost a suite:
+
+- `editScenario` bails on a missing `#editorArea` instead of throwing on a null node. It is
+  reachable from `newScenario`/`cloneScenario`, which the plan can still call.
+- The footer's "המשך לסימולטור" button pointed at `go('sim')` — it reloaded the tab you were
+  already on. Deleted; `player-path.cjs` and `plant-split-pipeline.cjs` now assert that no button
+  in `.content` links there.
+- `seedScenarioFromMusts` still builds a scenario from the engine's mandatory actions, and both
+  suites still check that those actions arrive without being retyped — the claim was always about
+  continuity, never about the sliders.
 
 wave5 also measures the tab's **own** height above the first card (≤320px), not just the outcome.
 The app chrome eats most of a phone screen, so a change nowhere near this tab — a longer
@@ -210,6 +253,35 @@ real information and shows as the negative it is.
 
 The submission tab leads with exactly the ticked set and their form codes, and keeps the pre-submit
 checklist on the surface; everything else there is behind a disclosure.
+
+### Ticking a sale asks for the price, because the plan deliberately does not fix it
+
+Every other figure in an action is the plan's own. The **selling price** is the one that depends on
+what the market did last quarter rather than on the plan, so `togglePlanPick` routes a sale through
+`openSalePrompt` instead of ticking it, and the action is **not** ticked until `confirmSalePick`
+runs — the price is part of the decision, not an afterthought to it.
+
+`planSaleInfo(a)` supplies the dialog. It reads the plan's own price and volume out of the action's
+`cash.note`, and recommends in a fixed order of descending authority, **naming the source every
+time**: the learned demand anchor (with how many quarters taught it) → the competitors' median from
+MR17&28 (with n and range) → the Data Log opening price, explicitly marked *not calibrated*. With
+none of the three it says there is no basis for a price rather than printing one — an unsourced
+number here would be exactly the invention this tool refuses everywhere else. It also offers the
+quarter's market absorption (`marketCapUnits`) and Brazil's Y0–Y3 legal price ceiling.
+
+A confirmed price **replaces** the plan's stated revenue: `planPickedCash` recomputes gross as
+`price × units × fxRate`, converted once, and then splits it by Data Log 09 like any other income.
+`tests/audit/sale-goals.cjs` pins the fallback order, the "not yet ticked while the dialog is open"
+rule, and the arithmetic on both sides of the conversion.
+
+### The targets re-derive themselves, because there is no longer a form to fix them by hand
+
+The manual goals editor came off the tab at the team's request, which makes staleness silent: a
+cash floor computed against a three-quarter-old balance sheet is not a floor. So `confirmQuarter()`
+re-runs `planV6Goals()` and `recommendFloors()` on **every** ingest. The merge order is the whole
+point and is asserted: `{...G.floors, ...derived, ...g.floors}` — the engine's derived floor fills
+every quarter, and for a quarter the written plan itemises, the plan's own figure wins, because
+that one is the team's commitment rather than an estimate.
 
 ## The floor is everything you cannot choose not to pay
 
@@ -290,8 +362,9 @@ of **18 SF** is below Data Log 04's selling cost of **40 EUR** (Y-only) or **33 
 **31 SF a unit**, ~690,000 SF a quarter at 22,000 units. It does not overturn the plan's Brazil
 conclusion — it widens the Brazil↔Europe gap — but Europe's 45.4 SF contribution is overstated.
 
-It renders inside the decisions tab's background disclosure — below the money and below the list,
-closed until asked for. `PLAN_DOC` (v5) is still the *document* the submission tab hands back; v6 is deliberately **not**
+Each verdict renders **beside the action it judges**, in that card's own closed `<details class="fverd">`
+("מה המנוע מודד") — not in a panel of its own, so the arithmetic is one click from the line it is
+about. `PLAN_DOC` (v5) is still the *document* the submission tab hands back; v6 is deliberately **not**
 committed as a file. `planDeltas()` compares against v6's anchors.
 
 ## What is settled, and what the app still does not claim to know

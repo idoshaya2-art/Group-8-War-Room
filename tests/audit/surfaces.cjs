@@ -37,12 +37,15 @@ ck('a box is rare — at most three level-1 surfaces outside the decision list',
   m.focus<=3 && m.focus>=1, `${m.focus}: ${m.focusText.join(' | ')}`);
 ck('the page chrome carries no cards of its own any more',
   m.chromeCards===0, m.chromeCardText.join(' | ') || 'none');
-ck('level 2 exists and is genuinely unboxed — a rule on top, no side borders, no panel fill',
-  m.read>=3 && m.readIsUnboxed===true, `${m.read} read sections`);
+/* The decisions tab was cut to the money, the list and a footer — one level-2 section, by design.
+   The three-level claim is about the app, so the count is checked where the levels actually all
+   appear (the dashboard) and only the SHAPE of a level-2 surface is checked here. */
+ck('level 2 is genuinely unboxed — a rule on top, no side borders, no panel fill',
+  m.read>=1 && m.readIsUnboxed===true, `${m.read} read sections`);
 ck('reference material is collapsed to level 3', m.ref>=1, `${m.ref} ref sections`);
 ck('the decision cards are untouched by the restyle', m.decisionCards>=5, `${m.decisionCards} decisions`);
 ck('every level-1 surface says what it is before it says what it holds',
-  m.eyebrows>=2, `${m.eyebrows} eyebrows`);
+  m.eyebrows>=1 && m.eyebrows>=m.focus, `${m.eyebrows} eyebrows for ${m.focus} boxes`);
 ck('all five semantic colour variables are defined', m.sigVars===5, `${m.sigVars}/5`);
 
 /* The score is the number the whole page hangs on. It appeared twice — once in the north-star bar
@@ -66,7 +69,16 @@ const ph=await page.evaluate(()=>({
   read:document.querySelectorAll('.content .read').length,
   overflowX:document.documentElement.scrollWidth-document.documentElement.clientWidth
 }));
-ck('the levels hold on a phone', ph.focus>=1 && ph.read>=3, `focus ${ph.focus} · read ${ph.read}`);
+ck('the levels hold on a phone', ph.focus>=1 && ph.read>=1, `focus ${ph.focus} · read ${ph.read}`);
+/* ...and all three still coexist somewhere: the dashboard is now the page that carries them. */
+await page.evaluate(()=>go('dash')); await page.waitForTimeout(700);
+const dashLevels=await page.evaluate(()=>({ focus:document.querySelectorAll('.content .focus').length,
+  read:document.querySelectorAll('.content .read').length,
+  ref:document.querySelectorAll('.content details').length }));
+ck('all three surface levels still coexist on the dashboard',
+  dashLevels.read>=2 && dashLevels.ref>=1,
+  `focus ${dashLevels.focus} · read ${dashLevels.read} · details ${dashLevels.ref}`);
+await page.evaluate(()=>go('plan')); await page.waitForTimeout(600);
 ck('no horizontal overflow on a phone', ph.overflowX===0, `${ph.overflowX}px`);
 
 /* C · a pill is for a status that changes. Most of the forty-four were figures and table values.

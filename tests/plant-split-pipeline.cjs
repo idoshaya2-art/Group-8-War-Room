@@ -39,12 +39,23 @@ const R=await p.evaluate(()=>{
       magicOptimize(sc.id); const prod=Object.values(sc.levers)[0].regions.europe.production;
       return prod<=1*DATALOG.capacity.Y.europe; })(), 'production capped by 1 declared Y plant');
 
-  // ---- #2 pipeline continuity ----
+  /* ---- #2 pipeline continuity ----
+     The finding was that step 4 opened blank: the engine named the mandatory actions and then
+     asked for a scenario built from nothing. It used to be checked on the simulator page, which
+     no longer exists — `sim` aliases to the decisions tab and the manual tuning panel came off it
+     at the team's request. What was actually being asserted is that the mandatory actions carry
+     THROUGH into the scenario rather than having to be retyped, and that survives the page: the
+     seed still runs, and the sheet the plan feeds is where the scenario is consumed now. */
   S.scenarios=[]; save();
-  go('sim');
-  const area=document.getElementById('scenarioArea');
-  ck('sim no longer opens blank — it offers the mandatory actions', area && /פעולות חובה/.test(area.textContent), (area&&area.textContent.slice(0,60))||'(empty)');
-  ck('and exposes a one-click build button', !!document.querySelector('button[onclick="seedScenarioFromMusts()"]'));
+  go('plan');
+  ck('the simulator page is gone, and nothing pretends to link to it',
+     !document.getElementById('scenarioArea') &&
+     !document.querySelector('.content button[onclick="go(\'sim\')"]'),
+     'no scenario editor, no button pointing at one');
+  const tq=nextQuarters('Q3')[0];
+  const musts=(buildActionPlan('Q3',tq)||[]).filter(it=>(it.level||it.sev)==='red' && it.sim && !it.blocked);
+  ck('the engine still names the mandatory actions the seed is built from',
+     musts.length>0, `${musts.length} mandatory actions for ${tq}`);
   seedScenarioFromMusts();
   ck('a scenario now exists', S.scenarios.length===1);
   ck('it spans the whole horizon to Q9', Object.keys(S.scenarios[0].levers).length===planHorizon('Q3').length);

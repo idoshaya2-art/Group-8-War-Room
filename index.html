@@ -557,7 +557,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v13.0 · מסמנים פעולות, והכסף מתעדכן';
+const APP_VERSION = 'v13.2 · מחיר מכירה נשאל, יעדים מתעדכנים';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -986,17 +986,6 @@ function load(){
 /* "How it works" legend that teaches once and then gets out of the way: open for the first few
    visits, collapsed (but reopenable) afterwards. Stops the same 5 lines re-reading every quarter. */
 const LEGEND_OPEN_TIMES=3;
-function howTo(key,title,bodyHtml){
-  S.ui=S.ui||{seen:{}}; S.ui.seen=S.ui.seen||{};
-  const n=S.ui.seen[key]||0; const open=n<LEGEND_OPEN_TIMES;
-  S.ui.seen[key]=n+1; save(true);
-  // Level 3. This is read once and then never again, so after LEGEND_OPEN_TIMES it stops being a
-  // box and becomes a muted line you can reopen — it should not hold a card's worth of weight on
-  // the page forever.
-  return `<details class="sec ref" style="margin-bottom:14px" ${open?'open':''}>
-    <summary>${title}</summary>
-    <div class="secbody small" style="line-height:2">${bodyHtml}</div></details>`;
-}
 function migrateIntel(){ // coerce legacy array marketIntel into the structured object shape
   QUARTERS.forEach(q=>{ const Q=S.quarters[q]; if(!Q)return;
     const mi=Q.marketIntel;
@@ -1133,11 +1122,6 @@ function intersectRanges(ranges){
 }
 /* Does a capacity total lean on any figure the printed page does not carry? If it does, the
    total inherits the doubt — a derived number is only as sourced as its inputs. */
-function anyCapUnverifiedInUse(plantsByRegion){
-  if(!plantsByRegion) return false;
-  return Object.entries(plantsByRegion).some(([rid,byProd])=>
-    ['X','Y'].some(p=>((byProd||{})[p]||0)>0 && capUnverified(p,rid)));
-}
 function capacityFigure(product,rid){
   const v=(DATALOG.capacity[product]||{})[rid]||0, why=capUnverified(product,rid);
   return why?unver(fmt(v),why):fmt(v);
@@ -1541,6 +1525,152 @@ window.setPlantSplit=(rid,product,val)=>{
   S.config.plantSplit[rid][product]=n; save();
   if(document.getElementById('goalBody')) goalTab('params');
 };
+
+/* ==========================================================================
+   THE PATH TO Q9 — derived, and consumed by the AI rather than drawn on a page.
+
+   These were built across waves 3 and 4 and are covered by tests: the rolling requirement per
+   quarter, the critical path (what must START this quarter for a later one to work, and what is
+   already lost), plant lead times, R&D maturation, and forecast accuracy measured against what
+   actually landed. Their RENDERERS were removed when the decisions tab was cut back to the money
+   and the list — that was the ask. The calculations were not: they now feed buildAIContext, so the
+   model reasons with them instead of re-deriving timing blind. Deleting them with their panels
+   would have thrown away verified engine work to satisfy a layout change.
+   ========================================================================== */
+// WS-5: confidence tags — every recommendation says where it comes from (data / game rule / estimate).
+// WS-5: maturation countdown — will an investment still pay off by Q9?
+function quartersToEnd(q){ return (QUARTERS.length-1)-qIndex(q); }
+/* Which quarter must the work start in, for a milestone that has to be true in `atQ`? */
+function startQuarterFor(atQ, leadQuarters){
+  const i=qIndex(atQ)-Math.max(0,leadQuarters);
+  return i>=0?QUARTERS[i]:null;
+}
+function plantPipeline(base, levers){
+  const out={}; const split=plantSplit();
+  const cur={}; REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+    cur[r.id]={ X:(split[r.id]&&split[r.id].X)||0, Y:(split[r.id]&&split[r.id].Y)||0 }; });
+  let running=JSON.parse(JSON.stringify(cur));
+  nextQuarters(base).forEach((q,i)=>{
+    out[q]=JSON.parse(JSON.stringify(running));
+    // whatever this quarter builds joins the NEXT quarter's on-stream count
+    const lev=(levers&&levers[q])||{};
+    REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
+      const rl=(lev.regions&&lev.regions[r.id])||{};
+      const built=Math.max(0,Math.round(rl.newFac||0));
+      if(built>0){ const p=(rl.product==='X')?'X':'Y'; running[r.id][p]+=built; }
+    });
+  });
+  return out;
+}
+function maturationAdvice(q){
+  const n=quartersToEnd(q), out=[];
+  out.push({ok:n>=1, t:'מו״פ (H1-1)', d:n>=1?`מבשיל +1 רבעון — נותרו ${n}, עדיין משתלם`:'ב-Q9 לא יבשיל בזמן — אל תשקיע במו״פ חדש'});
+  out.push({ok:n>=3, t:'מפעל חדש (A2-1)', d:n>=3?'בנייה→ייצור→מכירה→גבייה עדיין נסגר עד Q9':'מאוחר מדי — לא יחזיר את ההשקעה עד Q9'});
+  out.push({ok:n>=2, t:'משרד מכירות (A1-3)', d:n>=2?'עלות קבועה שמחזירה עם צמיחת נפח':'ההחזר לא יתממש עד Q9 — דלג'});
+  out.push({ok:true, t:'נתח שוק / דרגה', d:'נמדדים ב-Q9 (מחצית הפוטנציאל) — בנה מוקדם, מתגמל בכל שלב'});
+  return {n,out};
+}
+function forecastAccuracy(){
+  const list=QUARTERS.map(forecastVariance).filter(Boolean);
+  // Two arrays, always — "no measurements yet" is an empty list, not a different return shape.
+  if(!list.length) return {list:[], bias:[]};
+  const byMetric={};
+  list.forEach(v=>v.rows.forEach(r=>{ if(r.err==null) return; (byMetric[r.metric]=byMetric[r.metric]||[]).push(r.err); }));
+  const bias=Object.entries(byMetric).map(([metric,errs])=>{
+    const mean=errs.reduce((a,b)=>a+b,0)/errs.length;
+    // A single measurement is never a bias. The precedence here bit me: without the parentheses
+    // `n>1 && all>0 || all<0` reported one negative reading as a consistent direction.
+    const sameSign=errs.length>1 && (errs.every(e=>e>0)||errs.every(e=>e<0));
+    return {metric, n:errs.length, meanErr:Math.round(mean), consistent:sameSign};
+  });
+  return {list, bias};
+}
+function criticalPath(base, levers){
+  const rows=rollingPlan(base, levers);
+  const now=[], missed=[];
+  rows.forEach(r=>r.must.forEach(m=>{
+    if(!m.open) return;
+    const item={...m, forQ:r.q};
+    if(m.status==='missed') missed.push(item); else if(m.status==='now') now.push(item);
+  }));
+  const order={contract:0, tech:1, capacity:2, produce:3};
+  const by=(a,b)=>(order[a.kind]-order[b.kind])||(qIndex(a.forQ)-qIndex(b.forQ));
+  return { now:now.sort(by), missed:missed.sort(by), rows };
+}
+function rollingPlan(base, levers){
+  const nq=nextQuarters(base); if(!nq.length) return [];
+  const proj=projectCashflow(base, levers||null);
+  const byQ={}; proj.forEach(p=>byQ[p.q]=p);
+  const pipe=plantPipeline(base, levers);
+  // R-15: the ramped path, not the one-grade-per-quarter path. The optimistic version made a
+  // three-grade climb look like three quarters when the reset after each patent makes it longer.
+  const tech=techPathRamped(base, levers);
+  const contracts=contractPlan();
+  const g=S.config.goals;
+  const firstActionable=nq[0];
+  const rows=nq.map(q=>{
+    const cash=byQ[q]||null;
+    const plants=pipe[q]||{};
+    const capX=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((plants[r.id]||{}).X||0)*((DATALOG.capacity.X||{})[r.id]||0),0);
+    const capY=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((plants[r.id]||{}).Y||0)*((DATALOG.capacity.Y||{})[r.id]||0),0);
+    const due=contracts.filter(c=>c.deliveryQuarter===q);
+    const must=[];
+    // 1 · contract deliveries — production one quarter earlier
+    due.forEach(c=>{
+      const gap=(c.bindingGap!=null?c.bindingGap:c.gap)||0;
+      must.push({ kind:'contract',
+        what:`אספקת ${fmt(c.qty)} ${c.product}${c.grade!=null?c.grade:''} לפי חוזה`,
+        startQ:c.productionQuarter, lead:1, open:gap>0,
+        why:gap>0?`חסרים ${fmt(gap)} יח׳ — הייצור חייב לקרות ב-${c.productionQuarter}`
+                 :'מכוסה מהמלאי הקיים',
+        form:'H6 / A2-2' });
+    });
+    // 2 · the tech grade a commitment or a target needs by this quarter
+    due.filter(c=>c.grade>0).forEach(c=>{
+      const have=(c.product==='X'?(S.quarters[base].operational.techX||0):(S.quarters[base].operational.techY||0));
+      const need=c.grade-have;
+      // R-15: not `need` quarters — the probability resets to zero after each patent, so each
+      // grade needs its own ramp of consecutive funded quarters.
+      const lead=rdQuartersForGrades(need, 0);
+      if(need>0) must.push({ kind:'tech',
+        what:`דרגת ${c.product}${c.grade} כדי לייצר לחוזה`,
+        startQ:startQuarterFor(c.productionQuarter, lead), lead, open:true,
+        why:`חסרות ${need} דרגות. ההסתברות <b>מתאפסת אחרי כל פטנט</b> (§4.3), ולכן זה אינו ${need} רבעונים אלא <b>${lead}</b> רבעוני מו״פ רצופים — והמו״פ חייב להתחיל ${lead} רבעונים לפני הייצור. <span class="est">אומדן הרמפה<sup>~</sup></span>`,
+        form:'H1-1' });
+    });
+    // 3 · capacity for what this quarter plans to produce
+    ['X','Y'].forEach(p=>{
+      const lev=(levers&&levers[q])||{};
+      const planned=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
+        a+activeLines(lev,r.id).filter(l=>l.product===p).reduce((b,l)=>b+(l.production||0),0),0);
+      const cap=p==='X'?capX:capY;
+      if(planned>cap) must.push({ kind:'capacity',
+        what:`קיבולת ל-${fmt(planned)} יח׳ ${p}`,
+        startQ:startQuarterFor(q,1), lead:1, open:true,
+        why:`מתוכנן ${fmt(planned)} מול קיבולת ${fmt(cap)} — מפעל נבנה רבעון אחד ומייצר רק מהרבעון שאחריו`,
+        form:'A2-1' });
+    });
+    // 4 · goods sold here had to be produced in the quarter before
+    const levHere=(levers&&levers[q])||{};
+    const soldHere=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
+      a+activeLines(levHere,r.id).reduce((b,l)=>b+(l.qtySold||0),0),0);
+    if(soldHere>0 && qIndex(q)>qIndex(firstActionable)) must.push({ kind:'produce',
+      what:`${fmt(soldHere)} יח׳ למכירה`,
+      startQ:startQuarterFor(q,1), lead:1, open:true,
+      why:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — מה שנמכר כאן חייב להיות מיוצר ברבעון שלפני',
+      form:'A2-2' });
+    return { q, cash, plants, capX, capY, tech:tech[q]||null, due, must,
+      isNext:q===firstActionable };
+  });
+  // mark each requirement: already missed, must start now, or still has slack
+  rows.forEach(row=>row.must.forEach(m=>{
+    if(!m.startQ){ m.status='missed'; m.slack=null; return; }
+    const d=qIndex(m.startQ)-qIndex(firstActionable);
+    m.slack=d;
+    m.status = d<0 ? 'missed' : (d===0 ? 'now' : 'later');
+  }));
+  return rows;
+}
 
 /* ==========================================================================
    CASH BUDGET — what the recommendations are allowed to cost.
@@ -2647,23 +2777,6 @@ window.applyRecommendedGoals=()=>{ const rec=window._goalRec; if(!rec)return; co
 /* On-stream plants per product for every quarter in the horizon. A plant decided in Q is
    paid for in Q and produces from Q+1, so the pipeline is the declared split today plus
    every newFac the plan commits, shifted one quarter forward. */
-function plantPipeline(base, levers){
-  const out={}; const split=plantSplit();
-  const cur={}; REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
-    cur[r.id]={ X:(split[r.id]&&split[r.id].X)||0, Y:(split[r.id]&&split[r.id].Y)||0 }; });
-  let running=JSON.parse(JSON.stringify(cur));
-  nextQuarters(base).forEach((q,i)=>{
-    out[q]=JSON.parse(JSON.stringify(running));
-    // whatever this quarter builds joins the NEXT quarter's on-stream count
-    const lev=(levers&&levers[q])||{};
-    REGIONS.filter(r=>r.id!=='hq').forEach(r=>{
-      const rl=(lev.regions&&lev.regions[r.id])||{};
-      const built=Math.max(0,Math.round(rl.newFac||0));
-      if(built>0){ const p=(rl.product==='X')?'X':'Y'; running[r.id][p]+=built; }
-    });
-  });
-  return out;
-}
 /* Expected grade per quarter, rather than only the end state projectedTechAt returns.
    A grade rises by at most one per quarter and only in a quarter that funds R&D at or
    above the legal minimum, so the path is a step function the plan can be checked against. */
@@ -2736,101 +2849,10 @@ function rdQuartersForGrades(n, gainedSoFar){
   for(let i=0;i<Math.max(0,n);i++){ q+=rdQuartersForNextGrade(gained); gained++; }
   return q;
 }
-/* Which quarter must the work start in, for a milestone that has to be true in `atQ`? */
-function startQuarterFor(atQ, leadQuarters){
-  const i=qIndex(atQ)-Math.max(0,leadQuarters);
-  return i>=0?QUARTERS[i]:null;
-}
 /* The path itself. One row per future quarter: what must be true there, and for each of
    those, when the work has to begin — or that it is already too late. */
-function rollingPlan(base, levers){
-  const nq=nextQuarters(base); if(!nq.length) return [];
-  const proj=projectCashflow(base, levers||null);
-  const byQ={}; proj.forEach(p=>byQ[p.q]=p);
-  const pipe=plantPipeline(base, levers);
-  // R-15: the ramped path, not the one-grade-per-quarter path. The optimistic version made a
-  // three-grade climb look like three quarters when the reset after each patent makes it longer.
-  const tech=techPathRamped(base, levers);
-  const contracts=contractPlan();
-  const g=S.config.goals;
-  const firstActionable=nq[0];
-  const rows=nq.map(q=>{
-    const cash=byQ[q]||null;
-    const plants=pipe[q]||{};
-    const capX=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((plants[r.id]||{}).X||0)*((DATALOG.capacity.X||{})[r.id]||0),0);
-    const capY=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>a+((plants[r.id]||{}).Y||0)*((DATALOG.capacity.Y||{})[r.id]||0),0);
-    const due=contracts.filter(c=>c.deliveryQuarter===q);
-    const must=[];
-    // 1 · contract deliveries — production one quarter earlier
-    due.forEach(c=>{
-      const gap=(c.bindingGap!=null?c.bindingGap:c.gap)||0;
-      must.push({ kind:'contract',
-        what:`אספקת ${fmt(c.qty)} ${c.product}${c.grade!=null?c.grade:''} לפי חוזה`,
-        startQ:c.productionQuarter, lead:1, open:gap>0,
-        why:gap>0?`חסרים ${fmt(gap)} יח׳ — הייצור חייב לקרות ב-${c.productionQuarter}`
-                 :'מכוסה מהמלאי הקיים',
-        form:'H6 / A2-2' });
-    });
-    // 2 · the tech grade a commitment or a target needs by this quarter
-    due.filter(c=>c.grade>0).forEach(c=>{
-      const have=(c.product==='X'?(S.quarters[base].operational.techX||0):(S.quarters[base].operational.techY||0));
-      const need=c.grade-have;
-      // R-15: not `need` quarters — the probability resets to zero after each patent, so each
-      // grade needs its own ramp of consecutive funded quarters.
-      const lead=rdQuartersForGrades(need, 0);
-      if(need>0) must.push({ kind:'tech',
-        what:`דרגת ${c.product}${c.grade} כדי לייצר לחוזה`,
-        startQ:startQuarterFor(c.productionQuarter, lead), lead, open:true,
-        why:`חסרות ${need} דרגות. ההסתברות <b>מתאפסת אחרי כל פטנט</b> (§4.3), ולכן זה אינו ${need} רבעונים אלא <b>${lead}</b> רבעוני מו״פ רצופים — והמו״פ חייב להתחיל ${lead} רבעונים לפני הייצור. <span class="est">אומדן הרמפה<sup>~</sup></span>`,
-        form:'H1-1' });
-    });
-    // 3 · capacity for what this quarter plans to produce
-    ['X','Y'].forEach(p=>{
-      const lev=(levers&&levers[q])||{};
-      const planned=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
-        a+activeLines(lev,r.id).filter(l=>l.product===p).reduce((b,l)=>b+(l.production||0),0),0);
-      const cap=p==='X'?capX:capY;
-      if(planned>cap) must.push({ kind:'capacity',
-        what:`קיבולת ל-${fmt(planned)} יח׳ ${p}`,
-        startQ:startQuarterFor(q,1), lead:1, open:true,
-        why:`מתוכנן ${fmt(planned)} מול קיבולת ${fmt(cap)} — מפעל נבנה רבעון אחד ומייצר רק מהרבעון שאחריו`,
-        form:'A2-1' });
-    });
-    // 4 · goods sold here had to be produced in the quarter before
-    const levHere=(levers&&levers[q])||{};
-    const soldHere=REGIONS.filter(r=>r.id!=='hq').reduce((a,r)=>
-      a+activeLines(levHere,r.id).reduce((b,l)=>b+(l.qtySold||0),0),0);
-    if(soldHere>0 && qIndex(q)>qIndex(firstActionable)) must.push({ kind:'produce',
-      what:`${fmt(soldHere)} יח׳ למכירה`,
-      startQ:startQuarterFor(q,1), lead:1, open:true,
-      why:'סחורה שיוצרה ברבעון נכנסת למלאי בסופו — מה שנמכר כאן חייב להיות מיוצר ברבעון שלפני',
-      form:'A2-2' });
-    return { q, cash, plants, capX, capY, tech:tech[q]||null, due, must,
-      isNext:q===firstActionable };
-  });
-  // mark each requirement: already missed, must start now, or still has slack
-  rows.forEach(row=>row.must.forEach(m=>{
-    if(!m.startQ){ m.status='missed'; m.slack=null; return; }
-    const d=qIndex(m.startQ)-qIndex(firstActionable);
-    m.slack=d;
-    m.status = d<0 ? 'missed' : (d===0 ? 'now' : 'later');
-  }));
-  return rows;
-}
 /* The subset that decides this quarter: what must start now, and what is already lost.
    This is the answer to "which of my Q4 decisions are really Q7 decisions". */
-function criticalPath(base, levers){
-  const rows=rollingPlan(base, levers);
-  const now=[], missed=[];
-  rows.forEach(r=>r.must.forEach(m=>{
-    if(!m.open) return;
-    const item={...m, forQ:r.q};
-    if(m.status==='missed') missed.push(item); else if(m.status==='now') now.push(item);
-  }));
-  const order={contract:0, tech:1, capacity:2, produce:3};
-  const by=(a,b)=>(order[a.kind]-order[b.kind])||(qIndex(a.forQ)-qIndex(b.forQ));
-  return { now:now.sort(by), missed:missed.sort(by), rows };
-}
 
 /* ==========================================================================
    I-2 · WHAT BREAKS FIRST.
@@ -2938,20 +2960,6 @@ function forecastVariance(q){
 }
 /* Every quarter we both forecast and then ingested, plus the one thing this is for:
    is the engine biased in a consistent direction? */
-function forecastAccuracy(){
-  const list=QUARTERS.map(forecastVariance).filter(Boolean);
-  if(!list.length) return {list:[], bias:null};
-  const byMetric={};
-  list.forEach(v=>v.rows.forEach(r=>{ if(r.err==null) return; (byMetric[r.metric]=byMetric[r.metric]||[]).push(r.err); }));
-  const bias=Object.entries(byMetric).map(([metric,errs])=>{
-    const mean=errs.reduce((a,b)=>a+b,0)/errs.length;
-    // A single measurement is never a bias. The precedence here bit me: without the parentheses
-    // `n>1 && all>0 || all<0` reported one negative reading as a consistent direction.
-    const sameSign=errs.length>1 && (errs.every(e=>e>0)||errs.every(e=>e<0));
-    return {metric, n:errs.length, meanErr:Math.round(mean), consistent:sameSign};
-  });
-  return {list, bias};
-}
 
 /* ---------- Alerts (F3.2) — the 6 red lights ---------- */
 function computeAlerts(q){
@@ -3099,21 +3107,21 @@ PAGE_RENDER.data = (c)=>{
     <span class="rh">רו״ה, מאזן ויחסים</span>
     <div class="small muted" style="margin-top:3px">בורר הרבעונים למעלה מחליף בין רבעון בודד ל<b>מצטבר</b>.</div></div>`);
   slot(c, bodyFinancials);
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref" style="margin-top:22px"><summary>${IC('target')} יעדי Q9, חוזים ופרמטרים</summary><div class="secbody" id="goalPane"></div></details>`);
+  const gp=$('#goalPane'); if(gp) bodyGoals(gp);
 };
 
 /* 3 · Every rule, in one place, with its source. */
 PAGE_RENDER.rules = (c)=>{ slot(c, bodyRules); };
 
 /* 4 · The quarter's decisions: budget at the top, actions against it, AI to optimise. */
+/* Money, the list, done. The orientation disclosure, the manual scenario editor and the goals
+   panel all came off this tab: the first was background nobody read, and the other two are data
+   entry that belongs where data lives (the financials tab) — the targets now derive themselves
+   from the plan and re-optimise on every ingest, so there is nothing here to tune by hand. */
 PAGE_RENDER.decide = (c)=>{
   slot(c, bodyDecisions);
-  c.insertAdjacentHTML('beforeend', `<details class="sec ref" style="margin-top:20px"><summary>${IC('scale')} התוכנית שלנו מול הצעת ה-AI</summary><div class="secbody" id="oursVsAi"></div></details>`);
-  try{ renderOursVsAI(); }catch(e){}
-  c.insertAdjacentHTML('beforeend', `<details class="sec ref"><summary>${IC('sliders')} כוונון ידני של המספרים</summary><div class="secbody" id="scenPane"></div></details>`);
-  const sp=$('#scenPane'); if(sp) bodyScenarioEditor(sp);
-  c.insertAdjacentHTML('beforeend', `<details class="sec ref"><summary>${IC('target')} יעדי Q9, חוזים ורצפות</summary><div class="secbody" id="goalPane"></div></details>`);
-  const gp=$('#goalPane'); if(gp) bodyGoals(gp);
-  c.insertAdjacentHTML('beforeend', `<details class="sec ref"><summary>${IC('cpu')} שיחה עם ה-AI על הרבעון</summary><div class="secbody" id="aiPane"></div></details>`);
+  c.insertAdjacentHTML('beforeend', `<details class="sec ref" style="margin-top:20px"><summary>${IC('cpu')} אסטרטג ומועצת יועצים</summary><div class="secbody" id="aiPane"></div></details>`);
   const ap=$('#aiPane'); if(ap) bodyAI(ap);
 };
 
@@ -3861,9 +3869,10 @@ function bodyDecisions(c){
       </div>
     </div>
 
-    <!-- THE LIST IS THE TEAM'S OWN PLAN. The engine's generated list is a second opinion and
-         lives in the background section below; the only part of it promoted back up here is
-         what it marks mandatory and the plan does not cover. -->
+    <!-- THE LIST IS THE TEAM'S OWN PLAN — for any quarter the plan covers. For one it does not
+         (Q1-Q3, or past Q9) the engine's generated list is the fallback, with its own AI review;
+         better a sourced list than an empty tab. Obligations the plan misses are promoted above
+         it either way, by planGaps. -->
     ${_planList || `<div id="decisionsTop"></div>
     <div style="margin:14px 0 12px">
       <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
@@ -3873,201 +3882,37 @@ function bodyDecisions(c){
           ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
       </div>
       <div id="enrichOut"></div>
+      ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
+      ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
+        <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
+      ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b>: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
     </div>
     ${actionList}`}
+    <!-- One way out, because there is only one. "המשך לסימולטור" pointed at go('sim'), and the sim
+         alias resolves to this very tab now that manual tuning is gone — a button that reloaded the
+         page you were already on. The ticked actions go straight to the sheet.
+         (No backticks in this comment: it sits inside a template literal.) -->
     <div class="read" style="margin-top:18px">
-      <span class="rh">סיימת לשלוח פעולות?</span>
-      <div class="small muted" style="margin:6px 0 10px;line-height:1.7">בסימולטור תכוונן את המספרים ותראה את ההשפעה על הציון והמזומן, ואז תעבור להזנה.</div>
+      <span class="rh">סיימת לסמן פעולות?</span>
+      <div class="small muted" style="margin:6px 0 10px;line-height:1.7">גיליון ההזנה מציג בדיוק את מה שסימנת, עם קודי הטפסים להזנה בסימולטור של המשחק.</div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
-        <button class="btn primary" onclick="go('sim')">${IC('sliders')} המשך לסימולטור →</button>
-        <button class="btn" onclick="go('export')">${IC('share')} דלג לגיליון ההזנה</button>
+        <button class="btn primary" onclick="go('export')">${IC('share')} המשך לגיליון ההזנה →</button>
       </div>
     </div>
 
-    <!-- Everything that explains, rather than decides. One disclosure, closed. -->
-    <details class="sec" style="margin-top:22px"><summary>${IC('book')} רקע — למה זו הרשימה, התוכנית הכתובה, והדרך עד Q9</summary>
-      <div class="secbody">
-        <details class="sec" style="margin-bottom:14px"><summary>${IC('cpu')} מה המנוע היה מציע מעצמו — ${decisionCount} פעולות (חוות דעת שנייה)</summary>
-          <div class="secbody">
-            <div class="small muted" style="line-height:1.8">${IC('info')} נבנה מחוקי המשחק, מהדוח האחרון ומהיעדים — בלי לראות את התוכנית הכתובה. מה שהמנוע מסמן כ<b>חובה</b> ואינו מכוסה בתוכנית כבר עלה למעלה, אז זה כאן להשוואה בלבד.</div>
-            <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
-              <button class="btn sm" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'תן ל-AI לבחון את רשימת המנוע'}</button>
-              ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</div>
-            <div id="enrichOut" style="margin-top:8px"></div>
-            ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
-            ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
-              <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
-            ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b>: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
-            <div style="margin-top:10px">${actionList}</div>
-          </div></details>
-        ${_topPivot?`<div class="note is-warn" style="margin-top:12px">${IC('warn')} <b>שינוי אסטרטגיה:</b> ${_topPivot}</div>`:''}
-        ${renderWhatBreaksFirst(q)}
-        ${(()=>{ try{ return renderPlanV6(q,targetQ); }catch(e){ return ''; } })()}
-        ${insightList?`<div class="read"><span class="rh">מה שכדאי לדעת לפני שמחליטים</span>${insightList}</div>`:''}
-        ${renderCriticalPath(q,targetQ)}
-        <details class="sec" style="margin-top:14px"><summary>${IC('calendar')} הנתיב המתגלגל ${targetQ}→Q9</summary>
-          <div class="secbody">${renderRollingPlan(q,targetQ)}</div></details>
-        <details class="sec" style="margin-top:14px"><summary>${IC('trendUp')} תוכנית-אב Q1→Q9, בשלות ותלויות</summary>
-          <div class="secbody">${renderRoadmap(q)}${renderDependencies(q,targetQ)}${renderForecastAccuracy()}</div></details>
-        <details class="sec" style="margin-top:14px"><summary>${IC('cpu')} חוות דעת שנייה מהיועץ (אינה משנה את הרשימה)</summary>
-          <div class="secbody">${renderAdvisorCard(q,targetQ)}</div></details>
-      </div>
-    </details>`
+    <!-- Nothing below the footer. The orientation material that used to live here in one closed
+         disclosure was removed outright: it explained the engine's reasoning about a list the tab
+         no longer shows. -->`
 };
 /* Decision-dependency layer: the canonical INTOPIA decision chain + the
    cross-decision prerequisites that are relevant to the current state, so the
    team sequences moves in the right order (and accounts for time lags). */
-function renderDependencies(q,targetQ){
-  const Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals;
-  const noSales=(f.revenue||0)===0;
-  const wantHigherGrade = g.techXTarget>op.techX || g.techYTarget>op.techY;
-  // where are we in the chain? (no sales => still upstream at production)
-  const chain=[
-    {n:'מו״פ (H1-1)', here:wantHigherGrade},
-    {n:'דגם/דרגה'},
-    {n:'מפעלים (A2-1)'},
-    {n:'ייצור (A2-3/A2-4)', here:noSales},
-    {n:'תמחור+פרסום (A1-1/A1-2)'},
-    {n:'מכירה'},
-    {n:'גבייה מדורגת'},
-    {n:'מזומן'},
-  ];
-  const deps=[];
-  deps.push({t:'מו״פ ⟵ קודם לדרגה גבוהה', d:'החלטת מו״פ (H1-1, בליכטנשטיין) נספרת רבעון קדימה — רק אחרי שהדרגה מוכנה אפשר לייצר ולמכור אותה. למכירת דרגה/דגם גבוה יותר, המו״פ חייב להקדים ברבעון (או יותר).'});
-  deps.push({t:'שבב ⟵ קודם למחשב', d:'מחשב (Y) דורש שבב (X). בשל עיכוב הרבעון, ייצור מחשבים ברבעון נתון מוגבל למלאי השבבים שנצבר מרבעונים קודמים — "אין שבב = אין מחשב". תזמן ייצור שבבים (A2-3) רבעון לפני ייצור המחשבים (A2-4).'});
-  deps.push({t:'ייצור ⟵ קודם לתמחור/מכירה', d:'תמחור ופרסום (A1-1 שבב / A1-2 מחשב) שווים משהו רק אם קיים מלאי. קבע ייצור (A2-3/A2-4) קודם — "אין מלאי / אין מחיר = אין מכירה".'});
-  deps.push({t:'מפעלים ⟵ מגבילים נפח ייצור', d:`הייצור חסום בקיבולת המפעלים (${op.factories} כרגע). הקמת מפעל (A2-1, עד 3 חדשים) אורכת זמן — ההחלטה חייבת להקדים את הרבעון שבו רוצים את הנפח.`});
-  deps.push({t:'רצפת מזומן ⟵ מגבילה כל הוצאה', d:`כל ההוצאות (מו״פ, ייצור, פרסום, מפעל, העברות) כפופות לרצפה${f.consolidated?` — מזומן נוכחי ${fmt(f.consolidated)} CHF`:''}. ודא מימון (A3-2 הלוואה מקומית / H4 הלוואה בין-חברות) לפני התחייבות להוצאות גדולות.`});
-  deps.push({t:'גבייה מדורגת ⟵ קובעת עיתוי מזומן', d:'הכנסה ממכירה נכנסת מדורג לפי לוח הגבייה האזורי (למשל ברזיל 30/30/40). החלטת מכירה היום משפיעה על המזומן ברבעונים הבאים — לא מיד. תזמן מול הרצפות.'});
-  REGIONS.forEach(r=>{ if((f.cash[r.id]||0)<0) deps.push({t:`העברה ⟵ נדרשת לפני פעילות ב${r.name}`,d:`גירעון מטבע ב${r.name}. העברת כסף (A3-1, Money Transfer מהמטה) חייבת להתבצע לפני/עם ההזנה, אחרת פעולות באזור ייכשלו.`}); });
-  return `<div class="card" style="margin-bottom:16px"><div class="ch"><h3>${IC('sliders')} תלויות ורצף החלטות</h3><span class="small muted">קבל את ההחלטות בסדר הנכון</span></div>
-    <div class="cb">
-      <div class="depchain">${chain.map((x,i)=>`<span class="depnode ${x.here?'here':''}">${x.n}</span>${i<chain.length-1?'<span class="deparrow">⟵</span>':''}`).join('')}</div>
-      <div class="small muted" style="margin-top:8px">כל שלב תלוי בקודמו. הנקודה המודגשת = היכן שאתה נמצא כעת בשרשרת.</div>
-      <ul style="padding-inline-start:20px;line-height:1.85;margin:12px 0 0">${deps.map(d=>`<li><b>${d.t}</b> — ${d.d}</li>`).join('')}</ul>
-    </div></div>`;
-}
-// WS-5: confidence tags — every recommendation says where it comes from (data / game rule / estimate).
-// WS-5: maturation countdown — will an investment still pay off by Q9?
-function quartersToEnd(q){ return (QUARTERS.length-1)-qIndex(q); }
-function maturationAdvice(q){
-  const n=quartersToEnd(q), out=[];
-  out.push({ok:n>=1, t:'מו״פ (H1-1)', d:n>=1?`מבשיל +1 רבעון — נותרו ${n}, עדיין משתלם`:'ב-Q9 לא יבשיל בזמן — אל תשקיע במו״פ חדש'});
-  out.push({ok:n>=3, t:'מפעל חדש (A2-1)', d:n>=3?'בנייה→ייצור→מכירה→גבייה עדיין נסגר עד Q9':'מאוחר מדי — לא יחזיר את ההשקעה עד Q9'});
-  out.push({ok:n>=2, t:'משרד מכירות (A1-3)', d:n>=2?'עלות קבועה שמחזירה עם צמיחת נפח':'ההחזר לא יתממש עד Q9 — דלג'});
-  out.push({ok:true, t:'נתח שוק / דרגה', d:'נמדדים ב-Q9 (מחצית הפוטנציאל) — בנה מוקדם, מתגמל בכל שלב'});
-  return {n,out};
-}
 /* I-2 · A red quarter with a lever attached. Which line causes the breach, and what single change
    clears it — all from figures the projection already produced. */
-function renderWhatBreaksFirst(q){
-  const sc=selectedExportScenario&&selectedExportScenario();
-  let w; try{ w=whatBreaksFirst(q, sc?sc.levers:null); }catch(e){ return ''; }
-  if(w.ok) return `<div class="read" style="margin-bottom:20px">
-    <div class="small">${IC('check')} <b>אין שבירת רצפה בהקרנה</b> — כל הרבעונים עד Q9 עומדים ברצפה ואין אזור בגירעון.</div></div>`;
-  const row=(i,tone)=>`<tr><td style="text-align:start"><b>${esc(i.what)}</b>${i.form&&i.form!=='—'?` <span class="form">${esc(i.form)}</span>`:''}
-      <div class="small muted" style="white-space:normal;line-height:1.6;max-width:420px">${i.how}</div></td>
-    <td class="num"><b>${fmt(i.sf)}</b></td>
-    <td>${i.movable?'<span class="tag a">ניתן להזיז</span>':'<span class="tag" style="opacity:.7">נגרר</span>'}</td></tr>`;
-  return `<div class="focus is-block">
-    <div class="eyebrow" style="color:var(--sig-block)">${IC('warn')} מה נשבר קודם</div>
-    <div class="between" style="flex-wrap:wrap;gap:8px">
-      <span class="rh">${w.q} — פער <span class="num">${fmt(w.gap)} SF</span></span>
-      <span class="small muted" style="max-width:340px;text-align:end">${esc(w.reason)}</span></div>
-    ${w.negs.length?`<div class="small" style="margin-top:8px;line-height:1.7">${IC('info')} <b>אזורים בגירעון:</b> ${w.negs.map(n=>`${esc(n.name)} — חסר ${fmt(n.short)} SF`).join(' · ')}. <span class="muted">מזומן אינו בר-המרה חופשית בין אזורים — גירעון אזורי דורש העברה (A3-1) ולא רק יתרה מאוחדת חיובית.</span></div>`:''}
-    ${w.items.length?`<div style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>מה יוצא מהמזומן ב-${w.q}</th><th>SF</th><th></th></tr></thead>
-      <tbody>${w.items.map(i=>row(i)).join('')}</tbody></table></div>`
-      :`<div class="small muted" style="margin-top:8px">${IC('info')} אין תרחיש עם מנופים ל-${w.q}, ולכן אין שורות הוצאה לפרק. הפער נובע מהמצב הקיים — רצפה, ריבית, מס והתחייבויות.</div>`}
-    ${w.single
-      ? `<div class="note is-warn" style="margin-top:10px">${IC('zap')} <b>שינוי בודד שסוגר את הפער:</b> <b>${esc(w.single.what)}</b> — ${fmt(w.single.sf)} SF מול פער ${fmt(w.gap)}. ${w.single.how}</div>`
-      : (w.combo.length
-        ? `<div class="note ${w.enough?'is-warn':'is-block'}" style="margin-top:10px">${IC('warn')} <b>אין שורה בודדת שמספיקה.</b> ${w.enough
-            ? `נדרש לוותר על <b>${w.combo.length}</b> שורות (הגדולות ראשונות): ${w.combo.map(c=>esc(c.what)).join(' · ')} — סה״כ ${fmt(w.combo.reduce((a,c)=>a+c.sf,0))} SF.`
-            : `<b>גם ויתור על כל ההוצאות שניתן להזיז (${fmt(w.movableTotal)} SF) אינו סוגר פער של ${fmt(w.gap)} SF.</b> זה אינו כוונון — נדרש מימון, האצת גבייה, או צמצום הנפח עצמו.`}</div>`
-        : `<div class="note is-block" style="margin-top:10px">${IC('warn')} <b>אין הוצאה שניתן להזיז ברבעון הזה</b> — הפער אינו נובע מהחלטות אלא מהמצב הקיים. נדרש מימון או האצת גבייה.</div>`)}
-  </div>`;
-}
 /* D-02 · The critical path, above the decisions rather than buried in a section. Two questions
    only: what has to start THIS quarter for a later quarter to work, and what is already lost. */
-function renderCriticalPath(q,targetQ){
-  const sc=selectedExportScenario&&selectedExportScenario();
-  let cp; try{ cp=criticalPath(q, sc?sc.levers:null); }catch(e){ return ''; }
-  if(!cp.now.length && !cp.missed.length) return '';
-  const kindLabel={contract:'התחייבות',tech:'מו״פ',capacity:'קיבולת',produce:'ייצור'};
-  const item=(m,tone)=>`<li style="margin-bottom:8px;line-height:1.75">
-    <span class="meta">${kindLabel[m.kind]||m.kind}</span>
-    <b>${esc(m.what)}</b> — נדרש ב-<b>${m.forQ}</b>${m.form?` <span class="form">${esc(m.form)}</span>`:''}
-    <div class="small muted" style="margin-top:2px">${m.why}</div></li>`;
-  return `<div class="read">
-    <div class="between" style="flex-wrap:wrap;gap:8px">
-      <span class="rh">הנתיב הקריטי</span>
-      <span class="row" style="gap:6px">${cp.missed.length?`<span class="tag r">${cp.missed.length} כבר איחרנו</span>`:''}${cp.now.length?`<span class="tag a">${cp.now.length} חייבות להתחיל ב-${targetQ}</span>`:''}</span></div>
-    ${cp.missed.length?`<div style="margin-top:10px"><b class="small" style="color:var(--red)">איחרנו את מועד ההתחלה — היעד הזה לא יושג בזמן:</b>
-      <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.missed.map(m=>item(m,'r')).join('')}</ul>
-      ${cp.missed.some(m=>!m.startQ)?`<div class="small" style="color:var(--red);margin-top:4px;line-height:1.7">${IC('warn')} עבור פריט אחד או יותר מועד ההתחלה נופל <b>לפני Q1</b> — כלומר גם משחק מושלם מהרבעון הראשון לא היה מגיע לשם בקצב מו״פ רגיל. זה אינו פיגור, זו הנחה שהייתה שגויה מהתחלה.</div>`:''}
-      <div class="small muted" style="margin-top:6px">${IC('info')} כשמועד ההתחלה עבר, השאלה אינה "איך נספיק" אלא <b>מה החלופה</b> — רכישה מחברה אחרת, דרגה נמוכה לפי סעיף 5, או הזזת היעד.</div></div>`:''}
-    ${cp.now.length?`<div style="margin-top:${cp.missed.length?'12':'10'}px"><b class="small" style="color:var(--amber)">חייב להתחיל ב-${targetQ}, אחרת המועד יאבד:</b>
-      <ul style="padding-inline-start:20px;margin:8px 0 0">${cp.now.map(m=>item(m,'a')).join('')}</ul></div>`:''}
-  </div>`;
-}
 /* The path table. One row per quarter to Q9 — cash, grade, capacity, commitments — plus the
    requirements that quarter creates for earlier ones. */
-function renderRollingPlan(q,targetQ){
-  const sc=selectedExportScenario&&selectedExportScenario();
-  let rows; try{ rows=rollingPlan(q, sc?sc.levers:null); }catch(e){ return `<div class="small muted">לא ניתן לחשב נתיב — ${esc(e.message)}</div>`; }
-  if(!rows.length) return `<div class="small muted">אין רבעונים נותרים לתכנון.</div>`;
-  const st={missed:'<span class="tag r">איחרנו</span>',now:'<span class="tag a">להתחיל עכשיו</span>',later:'<span class="tag b">יש זמן</span>'};
-  return `<div class="small muted" style="line-height:1.8;margin-bottom:10px">${IC('info')} כל שורה = רבעון עתידי. <b>"מה חייב להיות נכון"</b> נגזר מההתחייבויות, מהיעדים ומהמנופים בתרחיש הנבחר${sc?` (<b>${esc(sc.name)}</b>)`:' (טרם נבחר תרחיש — העמודות מציגות את המצב ללא תוכנית)'}. עמודת <b>"להתחיל ב-"</b> היא זמן ההובלה לאחור: מפעל רבעון · ייצור→מכירה רבעון · דרגה ≤1/רבעון.</div>
-  <div style="overflow-x:auto"><table class="tbl"><thead><tr>
-    <th>רבעון</th><th>מזומן מאוחד</th><th>רצפה</th><th>דרגות X/Y</th><th>קיבולת X/Y</th><th>התחייבויות</th><th>מה חייב להיות נכון — ומתי להתחיל</th></tr></thead><tbody>
-  ${rows.map(r=>`<tr${r.cash&&r.cash.breach?' style="background:rgba(255,93,108,.07)"':''}>
-    <td><b>${r.q}</b>${r.isNext?' <span class="tag b">הבא</span>':''}</td>
-    <td class="num">${r.cash?fmt(Math.round(r.cash.unified)):'—'}${r.cash&&r.cash.breach?' <span class="tag r">שבירה</span>':''}</td>
-    <td class="num small muted">${r.cash?fmt(r.cash.floor):'—'}</td>
-    <td class="num">${r.tech?`X${r.tech.X} / Y${r.tech.Y}`:'—'}</td>
-    <td class="num small">${fmt(r.capX)} / ${fmt(r.capY)}${anyCapUnverifiedInUse(r.plants)?' <sup style="color:var(--red)" title="נגזר ממספר קיבולת שאינו מופיע בדף המודפס של Data Log 03">?</sup>':''}</td>
-    <td class="small" style="text-align:start;white-space:normal">${r.due.length?r.due.map(c=>`${fmt(c.qty)} ${c.product}${c.grade!=null?c.grade:''}`).join('<br>'):'—'}</td>
-    <td class="small" style="text-align:start;white-space:normal;line-height:1.7;min-width:280px">${r.must.length
-      ? r.must.map(m=>`${st[m.status]||''} <b>${esc(m.what)}</b>${m.startQ?` — להתחיל ב-<b>${m.startQ}</b>`:` — <b style="color:var(--red)">מועד ההתחלה נופל לפני Q1</b>, כלומר בקצב הזה זה לא היה בר-השגה מעולם`}<div class="small muted">${m.why}</div>`).join('<div style="height:6px"></div>')
-      : '<span class="muted">אין דרישה חדשה</span>'}</td></tr>`).join('')}
-  </tbody></table></div>`;
-}
-/* I-4 · Was the engine right? Only quarters with both a stored forecast and an ingested report. */
-function renderForecastAccuracy(){
-  let fa; try{ fa=forecastAccuracy(); }catch(e){ return ''; }
-  if(!fa.list.length) return `<div class="cb" style="margin-top:12px"><div class="small muted">${IC('info')} <b>דיוק התחזית</b> — טרם נשמרה תחזית לרבעון שנקלט מאז. תחזית נשמרת ברגע שמעבירים תוכנית לתרחיש, ומושווית לדוח כשהרבעון נקלט.</div></div>`;
-  const sgn=v=>v>0?`+${v}%`:`${v}%`;
-  return `<div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('scale')} דיוק התחזית מול הדוח</h3>
-      <span class="small muted">${fa.list.length} רבעונים עם תחזית ותוצאה</span></div>
-    <div class="cb" style="overflow-x:auto"><table class="tbl"><thead><tr><th>רבעון</th><th>מדד</th><th>נחזה</th><th>בפועל</th><th>סטייה</th></tr></thead><tbody>
-    ${fa.list.map(v=>v.rows.map((r,i)=>`<tr><td>${i===0?`<b>${v.q}</b>`:''}</td><td style="text-align:start">${esc(r.metric)}</td>
-      <td class="num">${fmt(r.pred)}</td><td class="num">${fmt(r.act)}</td>
-      <td class="num" style="color:${r.err==null?'var(--muted)':(Math.abs(r.err)<=15?'var(--green)':(Math.abs(r.err)<=40?'var(--amber)':'var(--red)'))}">${r.err==null?'—':sgn(r.err)}</td></tr>`).join('')).join('')}
-    </tbody></table>
-    ${fa.bias&&fa.bias.length?`<div class="small" style="margin-top:10px;line-height:1.8">${IC('info')} <b>הטיה:</b>
-      ${fa.bias.map(b=>`${esc(b.metric)} — סטייה ממוצעת <b>${sgn(b.meanErr)}</b> על ${b.n} מדידות${b.consistent&&b.n>1?` <span class="tag a">עקבית בכיוון אחד</span>`:''}`).join(' · ')}
-      <br><span class="muted">סטייה עקבית בכיוון אחד היא הדבר שכדאי לתקן — היא אומרת שהמנוע טועה בשיטתיות, לא שהעולם רועש.</span></div>`:''}
-    </div></div>`;
-}
-function renderRoadmap(q){
-  const mat=maturationAdvice(q); const mp=masterPlanStatus();
-  const cells=QUARTERS.map(x=>{ const done=S.quarters[x].entered, cur=x===q; const sn=mp.snaps.find(s=>s.q===x);
-    return `<div class="rm-cell ${cur?'cur':(done?'done':'')}"><b>${x}</b><span>${sn?('ציון '+sn.score):(cur?'נוכחי':'—')}</span></div>`; }).join('<span class="rm-ar">←</span>');
-  const trackTag = mp.remaining===0 ? (mp.score>=mp.tScore?'g':'r') : (mp.onTrack?'g':'a');
-  const trackTxt = mp.remaining===0 ? (mp.score>=mp.tScore?'הגענו ליעד':'מתחת ליעד') : (mp.onTrack?'בקצב':'מפגר אחרי היעד');
-  return `<div class="card" style="margin-bottom:16px"><div class="ch"><h3>${IC('trendUp')} תוכנית-אב Q1→Q9</h3><span class="tag ${trackTag}">${trackTxt} · יעד Q9: ${mp.tScore}</span></div>
-    <div class="cb"><div class="rm-strip">${cells}</div>
-      <div class="kpis" style="margin-top:12px">
-        ${kpi('ציון נוכחי',mp.score.toFixed(0),`עבר ${mp.past.toFixed(0)} · עתיד ${mp.pot.toFixed(0)}`)}
-        ${kpi('נותרו עד Q9',mp.remaining+' רבעונים','')}
-        ${kpi('קצב מול נדרש',(mp.pace!=null?mp.pace.toFixed(1):'—')+' / '+(mp.required>0?mp.required.toFixed(1):'0'),mp.pace!=null&&mp.required>0?(mp.pace>=mp.required?'עומד בקצב':'איטי מדי'):'טרם נמדד')}
-      </div>
-      ${mp.pivots.length?`<div class="card pad" style="margin-top:12px;border-inline-start:4px solid var(--red)"><b style="color:var(--red)">${IC('warn')} דרוש שינוי אסטרטגיה (Pivot) — לא כוונון:</b>
-        <ul style="padding-inline-start:20px;line-height:1.85;margin:8px 0 0">${mp.pivots.map(x=>`<li class="small">${esc(x)}</li>`).join('')}</ul></div>`:''}
-      <div class="small muted" style="margin-top:12px">מה עוד מבשיל עד Q9 אם מתחילים מ-${q}:</div>
-      <ul style="padding-inline-start:20px;line-height:1.9;margin:6px 0 0">${mat.out.map(m=>`<li class="small"><span style="color:${m.ok?'var(--green)':'var(--red)'};font-weight:800">${m.ok?'✓':'✕'}</span> <b>${esc(m.t)}</b> — ${esc(m.d)}</li>`).join('')}</ul>
-    </div></div>`;
-}
 // Value-chain maturation: factory (1q) -> chips (1q) -> PCs from chips (1q) -> first possible sale.
 // Selling in quarter N requires finished PCs in the ENDING inventory of quarter N-1.
 function chainStage(q){ // where are we on the mandatory build-up path?
@@ -4646,18 +4491,6 @@ ROLE_PANEL.ceo=(base)=>{ const sp=scoreProxy(null); const top=computeAlerts(base
     <div class="card pad" style="margin-top:14px"><b>${IC('warn')} 3 הדחופים ביותר</b><ul style="padding-inline-start:20px;line-height:1.9;margin:8px 0 0">${top.map(a=>`<li class="small"><span class="tag ${a.level==='red'?'r':(a.level==='amber'?'a':'b')}">${a.level==='red'?'אדום':(a.level==='amber'?'כתום':'מידע')}</span> ${esc(a.title)}</li>`).join('')||'<li class="small">אין התראות פתוחות</li>'}</ul></div>
     <div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('scale')} התוכנית שלנו מול המלצת ה-AI</h3></div><div class="cb" id="oursVsAi"></div></div>`;
 };
-function renderOursVsAI(){ const box=$('#oursVsAi'); if(!box)return;
-  const ours=S.scenarios.find(s=>s.name!=='MAX — מיקסום Q9'); const ai=S.scenarios.find(s=>s.name==='MAX — מיקסום Q9');
-  const spO=ours?scoreProxy(ours.levers):scoreProxy(null); const spA=ai?scoreProxy(ai.levers):null;
-  const col=(title,sp,sub)=>`<div class="card pad" style="flex:1;min-width:200px"><div class="small muted">${title}</div><div style="font-size:30px;font-weight:800;line-height:1.1">${sp?sp.value.toFixed(0):'—'}<span style="font-size:12px;color:var(--muted2)">/100</span></div><div class="small muted">${sub}</div>${sp?`<div class="small" style="margin-top:6px">עבר ${sp.pastHalf.toFixed(0)} · עתיד ${sp.potentialHalf.toFixed(0)} · מזומן Q9 ${fmt(Math.round(sp.endCash))}</div>`:''}</div>`;
-  const delta=(spA&&spO)?(spA.value-spO.value):null;
-  box.innerHTML=`<div class="row" style="gap:12px;align-items:stretch;flex-wrap:wrap">
-    ${col('התוכנית שלנו'+(ours?` · ${esc(ours.name)}`:''),spO,ours?'תרחיש נוכחי':'בסיס — טרם נבנה תרחיש')}
-    ${col('המלצת ה-AI (MAX)',spA,ai?'תוכנית מיטבית':'טרם חושבה')}
-   </div>
-   ${delta!=null?`<div class="tag ${delta>=0?'g':'a'}" style="margin-top:12px;display:block">פער: ה-AI ${delta>=0?'משפר ב-':'נמוך ב-'}${Math.abs(delta).toFixed(0)} נק׳${delta>=0?' — שקול לאמץ':' — התוכנית שלנו מובילה'}</div>`:''}
-   ${!ai?`<button class="btn primary" style="margin-top:12px" onclick="go('goals')">${IC('zap')} הרץ מיקסום ליצירת המלצת AI</button>`:`<button class="btn" style="margin-top:12px" onclick="go('sim')">${IC('sliders')} פתח בסימולטור</button>`}`;
-}
 ROLE_PANEL.cfo=(base)=>{ const f=S.quarters[base].financial; const cash=unifiedCashOf(base), ef=effectiveFloor(base);
   return `<div class="kpis">${kpi('מזומן מאוחד (SF)',fmt(cash),'')}${kpi('מרחק מרצפה'+(ef.src==='derived'?' (נגזרת)':''),ef.src==='none'?'—':fmt(Math.round(cash-ef.value)),`<div class="small muted" style="margin-top:2px">${ef.label}${ef.value>0?` · ${fmt(Math.round(ef.value))} SF`:''}</div>`)}${kpi('חוב',fmt(f.loans),'')}${kpi('ROE / ROI / ROS',(f.roe||0)+'/'+(f.roi||0)+'/'+(f.ros||0)+'%','')}</div>
     <div class="card" style="margin-top:14px"><div class="ch"><h3>${IC('wallet')} מזומן לפי אזור</h3></div><div class="cb"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>אזור</th><th>מקומי</th><th>שווי SF</th></tr></thead><tbody>${REGIONS.map(r=>`<tr><td>${r.name}</td><td class="num" style="${(f.cash[r.id]||0)<0?'color:var(--red)':''}">${fmt(f.cash[r.id]||0)} ${r.cur}</td><td class="num">${fmt(Math.round((f.cash[r.id]||0)*fxRate(r.cur)))}</td></tr>`).join('')}</tbody></table></div></div></div>
@@ -5033,7 +4866,22 @@ window.confirmQuarter=()=>{ const q=S.activeQuarter;
   S.quarters[q].entered=true;
   // the pending ingest is done, so the panel goes back to offering the NEXT missing report
   S.ui=S.ui||{}; S.ui.ingestQ=null;
-  updateLearning(); updateMasterPlan(); save();
+  updateLearning(); updateMasterPlan();
+  /* Re-optimise the targets against the quarter that just landed. The Q9 goals come from the
+     written plan (they are the team's own commitments, not something to retype), and the cash
+     floors are re-derived from the new state — a floor computed against a three-quarter-old
+     balance sheet is not a floor. Both are recomputed on every ingest so nothing goes stale
+     between quarters, and the plan's own floors win for the quarters it itemises. */
+  try{
+    const g=planV6Goals(), G=S.config.goals;
+    G.techXTarget=g.techXTarget; G.techYTarget=g.techYTarget;
+    G.cumProfitTarget=g.cumProfitTarget;
+    if(g.finalRETarget!=null) G.finalRETarget=g.finalRETarget;
+    G.noExternalLoans=true;
+    const derived=recommendFloors().floors;
+    G.floors={...(G.floors||{}), ...derived, ...g.floors};
+  }catch(e){}
+  save();
   // I-4: ingestion is the moment the forecast for this quarter becomes checkable. Saying it out
   // loud here — rather than only in a panel — is what turns a projection into a calibration.
   let v=null; try{ v=forecastVariance(q); }catch(e){}
@@ -5226,49 +5074,10 @@ function renderMarketShare(mi){
     </div></div>`;
 }
 
-/* ----- SIMULATOR (F6) ----- */
-function bodyScenarioEditor(c){
-  const q=S.activeQuarter;
-  if(!S.quarters[q].entered){ c.innerHTML=emptyBlock(IC('sliders'),'אין נתוני בסיס','קלוט רבעון בסיס כדי לבנות תרחישים.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
-  c.innerHTML=`
-    ${howTo('sim',`${IC('sliders')} איך עובד הסימולטור (בסיס: ${q})`,
-      `<b>1.</b> <b>תרחיש</b> = תוכנית פעולה מלאה לרבעונים הבאים. כל פעולה ש<b>"שלחת לסימולטור"</b> מלשונית ההחלטות נאספת לתרחיש כאן.<br>
-      <b>2.</b> <b>כוונן</b> את המנופים (המספרים) — המנוע מחשב <b>בזמן אמת</b> את ההשפעה על הציון (50/50) ועל המזומן, בתחתית העורך.<br>
-      <b>3.</b> מרוצה? <b>"בחר להגשה"</b>, ואז עבור ל<b>"5 · הזנה והגשה"</b> כדי לייצא לגיליון INTOPIA.<br>
-      <span class="small muted">"קסם" סורק אוטומטית שילובי מנופים ובוחר את המיטבי · "רגישות" בודק מה קורה אם ההנחות זזות ±10%.</span>`)}
-    <div class="between" style="margin-bottom:12px">
-      <b>${IC('scale')} שלב 1 · התרחישים שלך (<span id="scenCount">${S.scenarios.length}</span>)</b>
-      <div class="row">${S.scenarios.length?`<button class="btn" onclick="cloneLastScenario()" title="שכפל את התרחיש האחרון והמשך ממנו">⧉ שכפל אחרון</button>`:''}<button class="btn" onclick="sensitivity()">± רגישות</button><button class="btn primary" onclick="newScenario()">+ תרחיש חדש</button></div>
-    </div>
-    <div id="scenarioArea"></div>`;
-  renderScenarios();
-  maybeSeedFromRecommendations();
-};
 /* The 5-step loop promised a pipeline but step 4 opened blank: the Decisions tab produced
    a ranked action list and then asked the player to start a scenario from nothing. If no
    scenario exists yet, build one from the mandatory recommendations so the plan arrives
    already carrying what the engine just said had to happen. */
-function maybeSeedFromRecommendations(){
-  if(S.scenarios.length) return;
-  const q=S.activeQuarter, targetQ=nextQuarters(q)[0];
-  if(!targetQ) return;
-  let items=[]; try{ items=buildActionPlan(q,targetQ)||[]; }catch(e){ return; }
-  // Only the ones the engine called mandatory, and only those it can express as levers.
-  const musts=items.filter(it=>(it.level||it.sev)==='red' && it.sim && !it.blocked);
-  const area=$('#scenarioArea'); if(!area) return;
-  if(!musts.length){
-    area.innerHTML=`<div class="card pad" style="border-inline-start:4px solid var(--line)">
-      <b>${IC('info')} אין עדיין תרחיש</b>
-      <div class="small muted" style="margin-top:6px;line-height:1.7">המנוע לא מצא פעולות חובה שניתן להמיר אוטומטית לתוכנית. פתח תרחיש ריק, או חזור ל<b>"3 · החלטות"</b> ושלח משם פעולות לסימולטור.</div>
-      <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary" onclick="newScenario()">+ תרחיש חדש</button><button class="btn" onclick="go('plan')">← חזרה להחלטות</button></div></div>`;
-    return;
-  }
-  area.innerHTML=`<div class="card pad" style="border-inline-start:4px solid var(--accent)">
-    <b>${IC('zap')} ${musts.length} פעולות חובה מלשונית ההחלטות מוכנות להפוך לתוכנית</b>
-    <ul style="padding-inline-start:20px;line-height:1.8;margin:8px 0">${musts.map(m=>`<li class="small">${esc((m.title||'').slice(0,110))}</li>`).join('')}</ul>
-    <div class="row" style="gap:8px"><button class="btn primary" onclick="seedScenarioFromMusts()">${IC('zap')} צור תוכנית מההמלצות</button><button class="btn" onclick="newScenario()">התחל ריק</button></div>
-    <div class="small muted" style="margin-top:8px">נוצר תרחיש לכל הרבעונים עד Q9, עם המנופים שהמנוע כבר חישב. הכל נשאר לעריכה.</div></div>`;
-}
 window.seedScenarioFromMusts=()=>{
   const q=S.activeQuarter, targetQ=nextQuarters(q)[0]; if(!targetQ) return;
   const musts=(buildActionPlan(q,targetQ)||[]).filter(it=>(it.level||it.sev)==='red' && it.sim && !it.blocked);
@@ -5334,7 +5143,13 @@ window.delScenario=(id)=>{ S.scenarios=S.scenarios.filter(s=>s.id!==id); save();
 window.editScenario=(id)=>{
   const sc=S.scenarios.find(s=>s.id===id); if(!sc)return;
   _simEditId=id;
-  const qs=Object.keys(sc.levers); const ed=$('#editorArea'); const op=S.quarters[S.activeQuarter].operational;
+  /* The editor writes into #editorArea, which NO page renders any more: the team asked for the
+     manual tuning panel removed ("כוונון ידני של המספרים — ניתן להסיר"), and `sim` now aliases to
+     the decisions tab, which does not host it. The scenario itself is still real — planAddToSheet
+     writes into it and the submission sheet reads it — so creating one must keep working; only the
+     editing surface is gone. Bail out on the missing host instead of throwing on a null node. */
+  const qs=Object.keys(sc.levers); const ed=$('#editorArea'); if(!ed) return;
+  const op=S.quarters[S.activeQuarter].operational;
   const gradeMax=Math.max(op.maxProducible||0,8);
   const m=sc._lastMagic;
   ed.innerHTML=`
@@ -6201,18 +6016,6 @@ function planV6Tally(actions){
   actions.forEach(a=>{ t[planV6Check(a.check).state]++; });
   return t;
 }
-function planV6Row(a, idx){
-  const v=planV6Check(a.check);
-  return `<tr>
-    <td class="num" style="opacity:.6">${a.n!=null?a.n:(idx+1)}</td>
-    <td style="text-align:start;white-space:normal;min-width:190px"><b>${esc(a.what)}</b>
-      <div class="small muted" style="white-space:normal;line-height:1.6;margin-top:3px">${esc(a.value||'')}</div></td>
-    <td style="white-space:nowrap">${a.form&&a.form!=='—'?`<span class="form">${esc(a.form)}</span>`:'<span class="small muted">—</span>'}</td>
-    <td style="text-align:start;white-space:normal;min-width:230px">
-      ${planV6Mark(v.state)}
-      <div class="small" style="white-space:normal;line-height:1.7;margin-top:4px;color:var(--muted)">${v.txt}</div></td>
-  </tr>`;
-}
 /* ==========================================================================
    THE TEAM'S OWN LIST, CHECKED — not a list the engine invented.
 
@@ -6341,10 +6144,73 @@ function planGaps(engineItems, blk){
 function planPicks(q){ S.ui=S.ui||{}; S.ui.planPicks=S.ui.planPicks||{};
   S.ui.planPicks[q]=S.ui.planPicks[q]||{}; return S.ui.planPicks[q]; }
 function isPicked(q,n){ return !!planPicks(q)[n]; }
+/* A sale action is the one plan line whose value depends on a number the plan does not fix: the
+   price. Ticking one therefore asks for it, and shows what the evidence says — the calibrated
+   demand anchor if there is one, otherwise the competitors' observed prices from MR17&28,
+   otherwise the Data Log's opening price. Never a number with no source: if nothing is
+   calibrated the dialog says so and leaves the plan's own price in the field. */
+function planSaleInfo(a){
+  const c=a&&a.cash; if(!c||!(c.in>0)) return null;
+  const rid=c.region||'europe', reg=REGIONS.find(r=>r.id===rid)||REGIONS[1];
+  // the plan's own price and volume, pulled out of the line it states them in
+  const m=/([\d,]+)\s*יח׳[^0-9]*×\s*([\d,]+)\s*([A-Z]{3})/.exec(String(c.note||''));
+  const planUnits=m?Number(m[1].replace(/,/g,'')):null;
+  const planPrice=m?Number(m[2].replace(/,/g,'')):null;
+  const L=S.learning||{};
+  const anchor=(L.anchors||{})[rid+'|Y'];
+  const mr=(typeof mrMarketPrice==='function')?mrMarketPrice(rid,'Y'):null;
+  const dl=(DATALOG.initialConsumerPrice&&DATALOG.initialConsumerPrice.Y)?DATALOG.initialConsumerPrice.Y[rid]:0;
+  let rec=null, src=null, calibrated=false;
+  if(anchor&&anchor.price>0){ rec=Math.round(anchor.price); src=`עוגן ביקוש שנלמד מ-${L.obs||0} רבעונים`; calibrated=true; }
+  else if(mr&&mr.median>0){ rec=Math.round(mr.median); src=`חציון מחירי המתחרים ב-MR17&28 (${mr.n} חברות, ${fmt(mr.min)}–${fmt(mr.max)} ${reg.cur})`; calibrated=true; }
+  else if(dl>0){ rec=dl; src='מחיר פתיחה מ-Data Log — לא מכויל מול תצפיות'; }
+  const cap=(typeof marketCapUnits==='function')?marketCapUnits('Y',rid):null;
+  return { rid, reg, planUnits, planPrice, rec, src, calibrated, cap,
+    maxPrice:(rid==='brazil')?DATALOG.maxPCPriceY0toY3:null };
+}
+function planSalePick(q,n){ S.ui=S.ui||{}; S.ui.planSale=S.ui.planSale||{};
+  S.ui.planSale[q]=S.ui.planSale[q]||{}; return S.ui.planSale[q][n]||null; }
+window.openSalePrompt=(n)=>{
+  const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter, blk=planV6For(q);
+  const a=blk&&blk.actions.find((x,i)=>(x.n!=null?x.n:i+1)===n); if(!a) return;
+  const info=planSaleInfo(a); if(!info){ togglePlanPick(n); return; }
+  const cur=planSalePick(q,n);
+  const price=cur?cur.price:(info.planPrice||info.rec||0);
+  const units=cur?cur.units:(info.planUnits||0);
+  openModal(`${IC('dollar')} מחיר מכירה — ${esc(a.what)}`,
+    `<div class="small muted" style="line-height:1.9">
+       ${info.rec?`<b>ההמלצה: ${fmt(info.rec)} ${esc(info.reg.cur)}</b> ליחידה.<br><span class="${info.calibrated?'':'muted'}" style="${info.calibrated?'':'color:var(--sig-warn)'}">מקור: ${info.src}${info.calibrated?'':' — קנו מחקר מחירים (MR41/MR17&28) כדי לכייל'}</span>`
+        :`<span style="color:var(--sig-warn)">${IC('warn')} אין עדיין בסיס לתמחור: לא נלמד עוגן ביקוש ולא נקלטו מחירי מתחרים. המחיר שבשדה הוא של התוכנית בלבד.</span>`}
+       ${info.planPrice?`<br>התוכנית עצמה נוקבת <b>${fmt(info.planPrice)} ${esc(info.reg.cur)}</b>.`:''}
+       ${info.cap?`<br>ספיגת השוק לרבעון לפי Data Log: כ-<b>${fmt(info.cap)}</b> יח׳ — כמות מעליה לא תימכר.`:''}
+       ${info.maxPrice?`<br>תקרת מחיר חוקית לדרגות Y0–Y3 בברזיל: <b>${fmt(info.maxPrice)} BRL</b>.`:''}
+     </div>
+     <div class="row" style="gap:10px;margin-top:14px;flex-wrap:wrap">
+       <div class="field" style="flex:1;min-width:130px"><label class="fl">מחיר ליחידה (${esc(info.reg.cur)})</label>
+         <input class="f" type="number" id="salePrice" value="${price||''}"></div>
+       <div class="field" style="flex:1;min-width:130px"><label class="fl">כמות יחידות</label>
+         <input class="f" type="number" id="saleUnits" value="${units||''}"></div>
+     </div>
+     <div class="small muted" style="margin-top:8px">ההכנסה תיכנס למאזן הכסף לפי לוח הגבייה של האזור (Data Log 09) — לא במלואה ברבעון הזה.</div>`,
+    `<button class="btn primary" onclick="confirmSalePick(${n})">${IC('check')} שמור וסמן</button>
+     ${info.rec?`<button class="btn" onclick="document.getElementById('salePrice').value=${info.rec}">השתמש בהמלצה</button>`:''}`);
+};
+window.confirmSalePick=(n)=>{
+  const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const price=parseFloat(($('#salePrice')||{}).value)||0, units=parseFloat(($('#saleUnits')||{}).value)||0;
+  S.ui=S.ui||{}; S.ui.planSale=S.ui.planSale||{}; S.ui.planSale[q]=S.ui.planSale[q]||{};
+  if(price>0&&units>0) S.ui.planSale[q][n]={price,units};
+  planPicks(q)[n]=true; save(); closeModal(); go('plan');
+};
 window.togglePlanPick=(n)=>{
   const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
-  const picks=planPicks(q); if(picks[n]) delete picks[n]; else picks[n]=true;
-  save(); go('plan');
+  const picks=planPicks(q);
+  if(picks[n]){ delete picks[n]; save(); go('plan'); return; }
+  // ticking a SALE asks for the price first — it is the one figure the plan leaves to the quarter
+  const blk=planV6For(q);
+  const a=blk&&blk.actions.find((x,i)=>(x.n!=null?x.n:i+1)===n);
+  if(a && planSaleInfo(a) && typeof openModal==='function'){ openSalePrompt(n); return; }
+  picks[n]=true; save(); go('plan');
 };
 window.planPickAll=(on)=>{
   const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter, blk=planV6For(q);
@@ -6374,7 +6240,14 @@ function planPickedCash(q){
     out.picked++;
     const c=a.cash||{};
     if(c.floor){ out.inFloor+=(c.out||0); out.lines.push({n, what:a.what, floor:true, out:c.out||0}); return; }
-    const o=c.out||0, gross=c.in||0;
+    const sale=planSalePick(q,n);
+    const o=c.out||0;
+    // a price the team set replaces the plan's stated revenue — same currency, converted once
+    let gross=c.in||0;
+    if(sale && sale.price>0 && sale.units>0){
+      const reg=REGIONS.find(r=>r.id===(c.region||'europe'))||REGIONS[1];
+      gross=Math.round(sale.price*sale.units*fxRate(reg.cur));
+    }
     out.out+=o; out.gross+=gross;
     let now=gross, later=0;
     if(gross>0){
@@ -6495,111 +6368,6 @@ function renderPlanActions(base, targetQ, engineItems){
 /* The written plan as the baseline of the decisions tab. It does NOT replace the engine's own
    list below it — the two are deliberately separate: this is what the team committed to on
    paper, and beside every line, whether the engine can still stand behind it today. */
-function renderPlanV6(base, targetQ){
-  const blk=planV6For(targetQ);
-  if(!blk) return '';
-  const tally=planV6Tally(blk.actions);
-  const gradeRow=PLAN_V6.grades.find(g=>g.q===targetQ);
-  const op=S.quarters[base].operational;
-  const floorChk=blk.key==='Q4'?planV6Check('floorQ4'):(blk.key==='Q5'?planV6Check('floorQ5'):null);
-  const loans=planV6Check('noNewLoans'), breach=planV6Check('cashBreach');
-  const sum=(k)=>tally[k];
-  return `<div class="read" style="margin-bottom:16px">
-    <div class="between" style="flex-wrap:wrap;gap:8px">
-      <span class="rh">${IC('clipboard')} התוכנית הכתובה — גרסה ${PLAN_V6_VERSION} · ${esc(blk.label)}</span>
-      <span class="small" style="display:flex;gap:12px;flex-wrap:wrap">
-        ${['ok','warn','block','na'].map(k=>`<span class="pv6 ${k}">${PLAN_V6_STATES[k].glyph} <b class="num">${sum(k)}</b> ${PLAN_V6_STATES[k].label}</span>`).join('')}
-      </span>
-    </div>
-    <div class="small muted" style="margin-top:7px;line-height:1.8">
-      <b style="color:var(--txt)">${esc(PLAN_V6.headline)}</b> — ${esc(blk.subtitle||'')}.
-      זהו הבסיס שהצוות כתב, ולצד כל שורה מה שהמנוע יכול לומר עליה <b>היום</b>.
-      <b>"לא נבדק" אינו אישור</b> — הוא אומר שאין לשורה מדד במנוע.
-      רשימת ההחלטות שהמנוע בונה בעצמו נמצאת בהמשך העמוד, והיא לא מוחלפת בזו.
-    </div>
-    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
-      <span class="tag ${PLAN_V6_STATES[loans.state].tag}">חוב: ${PLAN_V6_STATES[loans.state].label}</span>
-      <span class="tag ${PLAN_V6_STATES[breach.state].tag}">תזרים: ${PLAN_V6_STATES[breach.state].label}</span>
-      ${gradeRow?`<span class="tag ${(op.techX||0)>=parseInt((gradeRow.grade.match(/X(\d)/)||[])[1]||0)?'g':'a'}">דרגות בפועל X${op.techX||0}/Y${op.techY||0} · יעד ${esc(gradeRow.grade)}</span>`:''}
-    </div>
-    <div style="overflow-x:auto;margin-top:12px"><table class="tbl compact">
-      <thead><tr><th>#</th><th>הפעולה לפי התוכנית</th><th>טופס</th><th>מה המנוע אומר עליה</th></tr></thead>
-      <tbody>${blk.actions.map(planV6Row).join('')}</tbody></table></div>
-    ${gradeRow?`<div class="small muted" style="margin-top:10px;line-height:1.8">${IC('cpu')} <b>לוח הדרגות ל-${esc(gradeRow.q)}:</b>
-      מו״פ שבבים <b class="num">${fmt(gradeRow.rdX)}</b> SF · מחשבים <b class="num">${fmt(gradeRow.rdY)}</b> SF · דרגה בסוף <b>${esc(gradeRow.grade)}</b> ·
-      ייצור <b>${esc(gradeRow.produce)}</b> · אירופה ${esc(gradeRow.europe)} · ברזיל ${esc(gradeRow.brazil)}.</div>`:''}
-    <details class="fverd" style="margin-top:12px"><summary>${IC('dollar')} רצפת הרבעון לפי התוכנית — ${blk.floorTotal?fmt(blk.floorTotal)+' SF':'טווח'} ⌄</summary>
-      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact">
-        <thead><tr><th>רכיב</th><th>סכום</th><th>ב-SF</th><th>מקור</th></tr></thead><tbody>
-        ${blk.floor.map(r=>`<tr><td style="text-align:start;white-space:normal">${esc(r[0])}</td>
-          <td class="small" style="text-align:start;white-space:nowrap">${esc(r[1]||'')}</td>
-          <td class="num">${r[2]?fmt(r[2]):'—'}</td>
-          <td class="small muted" style="text-align:start;white-space:normal">${esc(r[3]||'')}</td></tr>`).join('')}
-        ${blk.floorTotal?`<tr style="background:rgba(139,124,255,.08)"><td><b>סה״כ לפי התוכנית</b></td><td></td><td class="num"><b>${fmt(blk.floorTotal)}</b></td><td></td></tr>`:''}
-      </tbody></table></div>
-      <div class="small muted" style="margin-top:8px;line-height:1.7"><b>מקורות לפי התוכנית:</b> ${esc(blk.sources)}</div>
-      ${floorChk?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.7;background:var(--bg2);border:1px solid var(--line)">
-        ${planV6Mark(floorChk.state)} ${floorChk.txt}</div>`:''}
-    </details>
-    ${blk.close?`<details class="fverd" style="margin-top:8px"><summary>${IC('trendUp')} מצב הסגירה שהתוכנית מבטיחה ⌄</summary>
-      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact"><tbody>
-        ${blk.close.map(r=>`<tr>${r.map((cell,i)=>`<td style="text-align:start;white-space:normal"${i===0?'':' class="small"'}>${i===0?`<b>${esc(cell)}</b>`:esc(cell)}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div>
-      ${blk.closeNote?`<div class="small muted" style="margin-top:8px;line-height:1.7">${esc(blk.closeNote)}</div>`:''}</details>`:''}
-    <details class="fverd" style="margin-top:8px"><summary>${IC('warn')} טריגרי הסיכון — ומה מהם פעיל עכשיו ⌄</summary>
-      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact">
-        <thead><tr><th>סיכון</th><th>טריגר מדיד</th><th>התאמה מיידית</th><th>רבעון אחרון</th><th>מדידה</th></tr></thead><tbody>
-        ${PLAN_V6.risks.map(r=>{ const v=planV6Check(r.check);
-          return `<tr><td style="text-align:start;white-space:normal"><b>${esc(r.risk)}</b></td>
-            <td class="small" style="text-align:start;white-space:normal">${esc(r.trigger)}</td>
-            <td class="small" style="text-align:start;white-space:normal">${esc(r.fix)}</td>
-            <td class="small">${esc(r.last)}</td>
-            <td style="text-align:start;white-space:normal">${planV6Mark(v.state)}
-              <div class="small muted" style="line-height:1.6;margin-top:3px;max-width:320px">${r.check?v.txt:'הטריגר נמדד מדוח שוק ולא מהמנוע.'}</div></td></tr>`; }).join('')}
-      </tbody></table></div></details>
-    <details class="fverd" style="margin-top:8px"><summary>${IC('book')} הרקע שהתוכנית עומדת עליו — שבעת התיקונים, ברזיל, והקצאת המלאי ⌄</summary>
-      <div class="small muted" style="margin-top:8px;line-height:1.8"><b>${IC('warn')} ההסתייגות של התוכנית עצמה:</b> ${esc(PLAN_V6.caveat)}</div>
-      <div style="overflow-x:auto;margin-top:10px"><table class="tbl compact">
-        <thead><tr><th>#</th><th>מה היה שגוי</th><th>העובדה שנמצאה</th><th>ההשלכה</th><th>המנוע</th></tr></thead><tbody>
-        ${PLAN_V6.corrections.map(c=>{ const v=planV6Check(c.check);
-          return `<tr><td class="num" style="opacity:.6">${c.n}</td>
-            <td class="small" style="text-align:start;white-space:normal">${esc(c.was)}</td>
-            <td class="small" style="text-align:start;white-space:normal">${esc(c.found)}</td>
-            <td class="small" style="text-align:start;white-space:normal">${esc(c.impact)}</td>
-            <td style="text-align:start;white-space:normal">${planV6Mark(v.state)}
-              <div class="small muted" style="line-height:1.6;margin-top:3px;max-width:300px">${c.check?v.txt:'—'}</div></td></tr>`; }).join('')}
-      </tbody></table></div>
-      <div style="overflow-x:auto;margin-top:12px"><table class="tbl compact">
-        <thead><tr><th>רכיב ליחידת מחשב</th><th>אירופה @ 120 EUR</th><th>ברזיל @ 800 BRL</th></tr></thead><tbody>
-        ${PLAN_V6.brazilMargin.rows.map(r=>`<tr><td style="text-align:start">${esc(r[0])}</td><td class="num">${esc(r[1])}</td><td class="num">${esc(r[2])}</td></tr>`).join('')}
-      </tbody></table></div>
-      <div class="small muted" style="margin-top:8px;line-height:1.8">${esc(PLAN_V6.brazilMargin.note)}</div>
-      ${(()=>{ const v=planV6Check(PLAN_V6.brazilMargin.check);
-        return `<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.7;background:var(--bg2);border:1px solid var(--line)">
-          ${planV6Mark(v.state)} ${v.txt}</div>`; })()}
-      <div style="overflow-x:auto;margin-top:12px"><table class="tbl compact">
-        <thead><tr><th>יעד</th><th>כמות</th><th>רבעון מכירה</th><th>מחיר</th><th>ערוץ</th><th>תרומה ליח׳ (SF)</th><th>סה״כ (SF)</th></tr></thead><tbody>
-        ${PLAN_V6.allocation.rows.map(r=>`<tr>${r.map((cell,i)=>`<td${i===0?' style="text-align:start"':' class="num"'}>${esc(cell)}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div>
-      <div class="small muted" style="margin-top:8px;line-height:1.8">${esc(PLAN_V6.allocation.note)}</div>
-      <div class="small muted" style="margin-top:10px;line-height:1.8">${IC('info')} ${esc(PLAN_V6.gradeRule)}</div>
-      <div class="small" style="margin-top:10px;padding:9px 11px;border-radius:8px;line-height:1.7;background:rgba(255,176,32,.09);border:1px solid rgba(255,176,32,.28)">
-        ${IC('warn')} <b>השאלה שנותרה למרצה לפני הגשת Q4:</b> ${esc(PLAN_V6.question)}</div>
-    </details>
-    <details class="fverd" style="margin-top:8px"><summary>${IC('trendUp')} סיכום פיננסי Q4→Q9 לפי התוכנית ⌄</summary>
-      <div style="overflow-x:auto;margin-top:8px"><table class="tbl compact">
-        <thead><tr><th>רבעון</th><th>אירופה (יח׳)</th><th>ברזיל (יח׳)</th><th>חוזה/רישוי</th><th>נקי אירופה</th><th>נקי ברזיל</th><th>מטה (SF)</th><th>מאוחד (SF)</th><th>עודפים (SF)</th></tr></thead><tbody>
-        ${PLAN_V6.finance.map(r=>`<tr${r.q===targetQ?' style="background:rgba(139,124,255,.10)"':''}>
-          <td><b>${esc(r.q)}</b></td><td class="num">${esc(r.eu)}</td><td class="num">${esc(r.br)}</td>
-          <td class="small" style="text-align:start;white-space:normal">${esc(r.deal)}</td>
-          <td class="small num">${esc(r.netEU)}</td><td class="small num">${esc(r.netBR)}</td>
-          <td class="small num">${esc(r.hq)}</td>
-          <td class="num" style="color:${typeof r.consol==='number'?(r.consol<0?'var(--sig-block)':'var(--sig-ok)'):'inherit'}">${typeof r.consol==='number'?(r.consol>=0?'+':'')+fmt(r.consol):esc(r.consol)}</td>
-          <td class="num" style="color:${r.cum<0?'var(--sig-block)':'var(--sig-ok)'}">${r.cum>=0?'+':''}${fmt(r.cum)}</td></tr>`).join('')}
-      </tbody></table></div>
-      <div class="small muted" style="margin-top:8px;line-height:1.8">${esc(PLAN_V6.financeNote)}</div></details>
-  </div>`;
-}
 /* ==========================================================================
    THE WRITTEN PLAN (Q4-Q9 v5) — the team's own strategy document, embedded so the tool
    can hand it back and, more usefully, hand back an UPDATED copy in the same layout with
@@ -7850,6 +7618,42 @@ function buildAIContext(){
   const alerts=computeAlerts(q);
   L.push(`## נורות פעילות (${alerts.length})`);
   alerts.forEach(a=> L.push(`- [${a.level==='red'?'אדום':'כתום'}] ${a.title}: ${a.desc.replace(/<[^>]+>/g,'')}`));
+  /* The timing engine, handed to the model as facts. Without these it re-derives lead times from
+     prose and gets them wrong; with them it can only argue about what to do, not about when. */
+  try{
+    const cp=criticalPath(q,null);
+    if(cp && (cp.now.length||cp.missed.length)){
+      L.push(`## נתיב קריטי [מחושב במנוע] — מה חייב להתחיל עכשיו, ומה כבר איחרנו`);
+      cp.missed.forEach(m=> L.push(`- [איחרנו] ${m.what} — נדרש ב-${m.forQ}${m.startQ?` · היה צריך להתחיל ב-${m.startQ}`:' · מועד ההתחלה לפני Q1'}. ${String(m.why||'').replace(/<[^>]+>/g,'')}`));
+      cp.now.forEach(m=> L.push(`- [להתחיל ${q}] ${m.what} — נדרש ב-${m.forQ}${m.form?` (${m.form})`:''}. ${String(m.why||'').replace(/<[^>]+>/g,'')}`));
+    }
+  }catch(e){}
+  try{
+    const rp=rollingPlan(q,null);
+    if(rp && rp.length){
+      L.push(`## הנתיב המתגלגל עד Q9 [מחושב במנוע] — מה חייב להיות נכון בכל רבעון`);
+      rp.forEach(r=> L.push(`- ${r.q}: מזומן צפוי ${fmt(Math.round(r.cash||0))} SF · דרגות X${r.techX}/Y${r.techY}${r.needs&&r.needs.length?` · דורש: ${r.needs.map(n=>String(n).replace(/<[^>]+>/g,'')).join(' ; ')}`:''}`));
+    }
+  }catch(e){}
+  /* An investment that matures after Q9 is a cost with no return, and the model cannot see the
+     calendar unless it is told. `quartersToEnd` is the only thing that decides this. */
+  try{
+    const ma=maturationAdvice(q);
+    if(ma && ma.out.length){
+      L.push(`## הבשלה מול סוף המשחק [מחושב במנוע] — נותרו ${ma.n} רבעונים אחרי ${q}`);
+      ma.out.forEach(m=> L.push(`- [${m.ok?'משתלם':'מאוחר מדי'}] ${m.t}: ${m.d}`));
+    }
+  }catch(e){}
+  /* forecastAccuracy returns {list, bias[]} — one entry per metric, `consistent` only when more
+     than one reading points the same way. It used to be read as {n, mape, bias:number}, which is
+     no shape this function ever returned: `fa.n>0` was undefined>0, so the section never printed. */
+  try{
+    const fa=forecastAccuracy();
+    if(fa && fa.list.length){
+      L.push(`## דיוק התחזיות שלנו עד כה [מחושב במנוע] — ${fa.list.length} רבעונים נמדדו`);
+      fa.bias.forEach(b=> L.push(`- ${b.metric}: ${b.n} מדידות, סטייה ממוצעת ${fmt(b.meanErr)}${b.consistent?` · <b>הטיה שיטתית ${b.meanErr>0?'כלפי מעלה':'כלפי מטה'}</b> — תקן את הביטחון בהתאם`:' · אין כיוון עקבי'}`));
+    }
+  }catch(e){}
   const proj=projectCashflow(q,null);
   L.push(`## הקרנת תזרים (מנוע דטרמיניסטי, מצב "כפי שהוא")`);
   proj.forEach(p=> L.push(`- ${p.q}: מזומן מאוחד ${fmt(p.unified)} · רצפה ${fmt(p.floor)} · ${p.breach?'שבירה':'תקין'} (מרחק ${fmt(p.distance)})`));
@@ -8300,9 +8104,6 @@ const ADVISOR_SYSTEM = `אתה יועץ בכיר ומנוסה לצוות INTOPIA
 פעולות שהמנוע הציע ואתה מתקן או דוחה — עם העמוד שנכשל (חוק/MR/מזומן/כדאיות) והתיקון המדויק.
 ## סיכון נסתר + תדריך (3 משפטים)
 הסיכון היחיד שהכי מסוכן שהמספרים לא מראים · היכן אנחנו מול Q9 · המהלך המרכזי של {targetQ}.`;
-function mdLite(t){ return esc(t)
-  .replace(/^##\s*(.+)$/gm,'<b style="display:block;margin:12px 0 4px;color:var(--purple);font-size:14px">$1</b>')
-  .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); }
 function buildAdvisorContext(q,targetQ,items){
   const L=[], mp=masterPlanStatus(), ls=learningSummary(), f=S.quarters[q].financial, sp=scoreProxy(null);
   L.push(`# הקשר ליועץ — חברה 8 · רבעון פעיל ${q} · רבעון החלטה ${targetQ}`);
@@ -8342,17 +8143,6 @@ window.runQuarterAdvisor=async()=>{
   }catch(e){ S.ai.advisor={q,targetQ,text:aiErr(e),ts:Date.now(),err:true}; }
   if(currentPage==='plan') go('plan');
 };
-function renderAdvisorCard(q,targetQ){
-  const adv=S.ai&&S.ai.advisor, fresh=adv&&adv.q===q, hasKey=!!getApiKey();
-  return `<div class="card" style="margin-bottom:16px">
-    <div class="ch"><h3>${IC('cpu')} יועץ הרבעון</h3><span class="small muted">ביקורת 4 עמודים</span>
-      <div class="row" style="gap:8px"><span class="small muted">${AI_PROVIDERS[aiProvider()].short}</span>
-        <button class="btn sm primary" id="advBtn" onclick="runQuarterAdvisor()">${IC('zap')} ${fresh?'רענן':(hasKey?'הפעל יועץ':'חבר AI')}</button></div></div>
-    <div class="cb" id="advOut">${fresh
-      ? `<div class="small muted" style="margin-bottom:6px">מבוסס על החלטת ${adv.targetQ} · ${new Date(adv.ts).toLocaleTimeString('he-IL')}</div><div style="line-height:1.75">${mdLite(adv.text)}</div>`
-      : `<div class="small muted">ה-AI בודק כל פעולה של המנוע מול 4 עמודים — <b>חוקים · מחקרי שוק · נזילות אזורית · כדאיות מול 50/50</b> — ומוציא רשימת פעולות מדויקת ומוכנה-להזנה, עם תיקונים ואזהרות. המספרים מהמנוע; השיפוט מה-AI. לחץ "הפעל יועץ" (קריאת API אחת).</div>`}</div>
-  </div>`;
-}
 // Every request is time-boxed. Without this a stalled mobile connection leaves the
 // "מנתח…" placeholder on screen forever with no error and no way to retry.
 const LLM_TIMEOUT_MS=90000;

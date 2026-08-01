@@ -14,9 +14,16 @@ await page.evaluate(()=>{
   S.config.plantSplit={us:{X:0,Y:0},europe:{X:2,Y:2},brazil:{X:0,Y:0}};
   S.activeQuarter='Q3'; save();
 });
-const res=await page.evaluate(()=>{
-  const tq=nextQuarters('Q3')[0];
-  const items=buildActionPlan('Q3',tq)||[];
+/* The written plan owns the list for every quarter it covers (Q4 onward), and a plan action is
+   never model-authored — so the render path this finding guards lives in the quarters the plan
+   does NOT cover, where the engine's generated list is still what the tab shows. Inject there:
+   reviewing Q4 and then rendering Q1→Q2 put the item on a page it was never going to appear on,
+   which made the assertion pass or fail for reasons unrelated to escaping. */
+const BASE='Q1';
+const res=await page.evaluate((BASE)=>{
+  S.activeQuarter=BASE;
+  const tq=nextQuarters(BASE)[0];
+  const items=buildActionPlan(BASE,tq)||[];
   const inj='<img src=x onerror="window.__pwned=1"><b>PWNED</b>';
   const rev=parseReviewJSON(JSON.stringify({rationale:'ok',plan:[
      {verdict:'add',title:inj,form:'A1-2',level:'info',why:inj+' <img src=y onerror="window.__pwned2=1">',
@@ -25,19 +32,21 @@ const res=await page.evaluate(()=>{
   S.ai=S.ai||{}; S.ai.review={q:tq,at:Date.now(),rationale:rev.rationale,...ap};
   save();
   return {added:ap.list.filter(x=>x.aiVerdict==='add').length, rejected:ap.rejected,
-          titleRaw:(ap.list.find(x=>x.aiVerdict==='add')||{}).title};
-});
+          targetQ:tq, titleRaw:(ap.list.find(x=>x.aiVerdict==='add')||{}).title};
+}, BASE);
 console.log(JSON.stringify(res));
-await page.evaluate(()=>go('plan'));
+await page.evaluate(()=>{ go('plan'); });
 await new Promise(r=>setTimeout(r,1200));
 const out=await page.evaluate(()=>({
   pwned:!!window.__pwned, pwned2:!!window.__pwned2,
   injectedImgs:document.querySelectorAll('img[src="x"],img[src="y"]').length,
   pwnedText:/PWNED/.test(document.body.innerText),
-  // The engine's list (where a model-authored action lands) is now a second opinion inside the
-  // decisions tab's background disclosure, so read textContent — the point of this assertion is
-  // that the markup is rendered as TEXT rather than parsed, not that it is on screen unopened.
-  escapedVisible:/<img src=x/.test(document.body.textContent)
+  // The whole point: the markup reaches the user as characters he can read, not as a node the
+  // browser parsed. If this is false, check first that the injected action is on the rendered
+  // list at all — an item that never renders also never executes, and would pass every
+  // assertion above while proving nothing.
+  escapedVisible:/<img src=x/.test(document.body.innerText),
+  onList:/PWNED/.test(document.body.innerText)
 }));
 ck('D-01 · the injected action is accepted by the engine (so the render path is really exercised)',
   res.added===1, `added ${res.added}`);
@@ -45,6 +54,8 @@ ck('D-01 · the title is stored escaped', /^&lt;img/.test(String(res.titleRaw||'
 ck('D-01 · no handler ran from the title', out.pwned===false);
 ck('D-01 · no handler ran from the detail', out.pwned2===false);
 ck('D-01 · no injected node reached the DOM', out.injectedImgs===0, `${out.injectedImgs} nodes`);
+ck('D-01 · the injected action really is on the rendered list, not merely in state',
+  out.onList===true, `target ${res.targetQ}`);
 ck('D-01 · the markup is shown to the user as literal text', out.escapedVisible===true);
 ck('D-01 · no JavaScript errors', errors.filter(e=>!/net::ERR|Failed to load|clipboard/i.test(e)).length===0);
 await browser.close();
