@@ -111,6 +111,28 @@ ck('confirming the quarter no longer depends on that form — the button is on t
   ui.confirmOnPanel===true);
 ck('...and a misread figure is still fixable, one click away', ui.manualBtn===true);
 
+// ---------------- balance-sheet fields: carrying values must win over MIS quantities
+const balance=await page.evaluate(()=>{
+  const row=(label,v)=>{ const r=[label]; r[8]=v; return r; };
+  const scan={}, found=[];
+  extractBalance([
+    row('INVENTORY',2251199),
+    row('NET PLANT & EQUIPMENT',708800),
+    row('TOTAL ASSETS',4027451),
+    row("TOTAL SHAREHOLDERS' EQUITY",1239506),
+  ],scan,found);
+  applyParsed({scan});
+  const f=S.quarters.Q3.financial;
+  return {scan,found,inventoryValue:inventoryValue('Q3'),f};
+});
+ck('the balance-sheet inventory carrying value is extracted and retained',
+  balance.scan.inventoryBookValue===2251199 && balance.f.inventoryBookValue===2251199 && balance.inventoryValue===2251199,
+  `parsed=${balance.scan.inventoryBookValue}, stored=${balance.f.inventoryBookValue}, shown=${balance.inventoryValue}`);
+ck('NET PLANT & EQUIPMENT accepts the ampersand label used by some reports',
+  balance.scan.netPlant===708800 && balance.f.netPlant===708800, `parsed=${balance.scan.netPlant}`);
+ck('TOTAL SHAREHOLDERS\' EQUITY is recognised as total equity',
+  balance.scan.totalEquity===1239506 && balance.f.totalEquity===1239506, `parsed=${balance.scan.totalEquity}`);
+
 const opened=await page.evaluate(()=>{
   openVerifyPanel();
   const v=document.getElementById('verifyWrap');
