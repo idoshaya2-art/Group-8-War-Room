@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **750 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **757 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **776**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **783**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -255,6 +255,26 @@ cover a shortfall in another.
 
 Capacity here is **maximal and per quarter** — the game has no months, and the *optimal* figure is
 not in the Data Log at all (MR24 measures it).
+
+### The table said what the plants can make; the banner said what is already made
+
+Nothing related the two, so the reader had to do the division in their head to answer the question
+those numbers exist to answer together: **is the next constraint the factory, or the warehouse?**
+`plantOverview().link` derives both relations from figures already on the page:
+
+- **Which line is the bottleneck.** A full quarter of PC output consumes
+  `DATALOG.chipPerPC[techX][techY]` chips per unit. With 2 chip plants and 2 PC plants in Europe
+  that is 36,000 chips of a 70,000 capacity — so *the computers are the constraint, not the chips*,
+  and 34,000 chips of capacity are spare. Saying so stops "we have 70,000 chip capacity" from
+  reading as headroom that could become sales. When the ratio does exceed the chip line the
+  sentence flips and names the chips; when the grade pair is a `0` in the conversion table it says
+  the capacity is unbuildable at the current grades rather than printing a number.
+- **What the finished stock is worth in production time.** 35,000 unsold Y0 against 36,000 a
+  quarter is a whole quarter of the factory already made and not yet converted to cash — the
+  argument against producing more before pricing it, with the Data Log 06 carrying cost named.
+
+Both branches the team's own numbers do not currently exercise are asserted too, so the flip
+cannot rot unnoticed.
 
 Both tables (`standingFactsHTML`) sit **below** the headline figures and the alerts, by request.
 They answer questions that do not change within a quarter, so they are reference beneath the

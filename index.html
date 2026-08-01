@@ -615,7 +615,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v13.7 · סולם טיפוגרפי אחיד';
+const APP_VERSION = 'v13.8 · מה הקיבולת אומרת';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3467,7 +3467,40 @@ function plantOverview(q){
   const totX=rows.reduce((a,x)=>a+(x.capX||0),0), totY=rows.reduce((a,x)=>a+(x.capY||0),0);
   const anyUndeclared=rows.some(x=>x.total>0 && (x.nx==null||x.ny==null));
   const plants=rows.reduce((a,x)=>a+(x.total||0),0);
-  return { rows, totX, totY, anyUndeclared, plants };
+
+  /* The table said how much the plants CAN make and the banner said how much finished stock is
+     sitting there, and nothing on the page related the two — so the reader had to do the division
+     in their head to answer the question those two numbers exist to answer together: is the next
+     constraint the factory, or the warehouse?
+
+     Two relations, both from figures already on this page:
+       · which product line is the bottleneck — a full quarter of PC output consumes
+         chipPerPC[techX][techY] chips per unit, so chip capacity is only binding if that
+         consumption exceeds it. With 2 X and 2 Y plants it usually is not, and saying so stops
+         "we have 70,000 chip capacity" from reading as headroom that can be turned into sales.
+       · what the finished stock is worth in production time — 35,000 unsold PCs against 36,000
+         a quarter is a full quarter of the factory already made and not yet converted to cash,
+         which is the argument against producing more before pricing it. */
+  const op2=S.quarters[q].operational;
+  const inv=(op2.inventory||[]);
+  const pcStock=inv.filter(i=>i.product==='Y'&&(i.qty||0)>0);
+  const pcUnits=pcStock.reduce((a,i)=>a+(i.qty||0),0);
+  const pcGrades=[...new Set(pcStock.map(i=>i.grade).filter(g=>g!=null))].sort();
+  const chipUnits=inv.filter(i=>i.product==='X'&&(i.qty||0)>0).reduce((a,i)=>a+(i.qty||0),0);
+  const gx=op2.techX||0, gy=op2.techY||0;
+  const ratio=((DATALOG.chipPerPC[gx]||[])[gy]);
+  const known=!anyUndeclared && plants>0;
+  const chipsForFullY=(known && ratio>0) ? totY*ratio : null;
+  const link = !known ? null : {
+    ratio, gx, gy,
+    chipsForFullY,
+    // is the chip line actually the constraint, or does it just look big?
+    chipBound: chipsForFullY!=null && chipsForFullY>totX,
+    chipSpare: chipsForFullY!=null ? totX-chipsForFullY : null,
+    pcUnits, pcGrades, chipUnits,
+    stockQuarters: totY>0 ? pcUnits/totY : null,
+  };
+  return { rows, totX, totY, anyUndeclared, plants, link };
 }
 function renderPlantOverview(q){
   const o=plantOverview(q);
@@ -3487,6 +3520,28 @@ function renderPlantOverview(q){
           <td style="text-align:start"><b class="num">${fmt(o.totX)}</b> יח׳/רבעון</td><td></td>
           <td style="text-align:start"><b class="num">${fmt(o.totY)}</b> יח׳/רבעון</td></tr>
       </tbody></table></div>
+    ${(()=>{ const L=o.link; if(!L) return '';
+      const lines=[];
+      /* Which line is actually the constraint. "70,000 chip capacity" reads as headroom until you
+         see that a full quarter of PC output only consumes a fraction of it — the factory that
+         limits you is the PC one, and no amount of chip capacity changes that. */
+      if(L.ratio>0 && L.chipsForFullY!=null){
+        lines.push(L.chipBound
+          ? `<b style="color:var(--sig-warn)">השבבים הם צוואר הבקבוק:</b> ייצור מלא של ${fmt(o.totY)} מחשבים דורש ${fmt(L.chipsForFullY)} שבבים (יחס X${L.gx}→Y${L.gy} = ${L.ratio}:1) מול קיבולת ${fmt(o.totX)} — חסרים ${fmt(-L.chipSpare)}.`
+          : `<b>המחשבים הם צוואר הבקבוק, לא השבבים:</b> ייצור מלא של ${fmt(o.totY)} מחשבים צורך ${fmt(L.chipsForFullY)} שבבים (יחס X${L.gx}→Y${L.gy} = ${L.ratio}:1) מתוך ${fmt(o.totX)} — נשארים ${fmt(L.chipSpare)} שבבים פנויים לחוזים או למכירה תעשייתית.`);
+      } else if(L.ratio===0){
+        lines.push(`<b style="color:var(--sig-block)">דרגת שבב X${L.gx} אינה יכולה לייצר מחשב Y${L.gy}</b> (0 בטבלת ההמרה) — הקיבולת למעלה אינה ניתנת למימוש בדרגות הנוכחיות ללא מו״פ.`);
+      }
+      /* What the finished stock is worth in production time. This is the argument against building
+         or producing more before the warehouse is converted to cash. */
+      if(L.pcUnits>0 && L.stockQuarters!=null){
+        const qn=L.stockQuarters;
+        lines.push(`במלאי כבר <b>${fmt(L.pcUnits)}</b> מחשבים מוגמרים${L.pcGrades.length?` (Y${L.pcGrades.join(', Y')})`:''} — <b>${qn>=0.95&&qn<=1.05?'רבעון ייצור שלם':`${qn.toFixed(2)} רבעוני ייצור`}</b> שכבר יוצרו ועדיין לא הומרו למזומן. כל עוד הם לא נמכרו, ייצור נוסף מוסיף עלות אחזקה [DL-06] ולא הכנסה.`);
+      }
+      if(L.chipUnits>0) lines.push(`ובנוסף <b>${fmt(L.chipUnits)}</b> שבבים במלאי — הם נחשבים לצריכה עצמית לפני ייצור שבבים חדש.`);
+      return lines.length?`<div class="small" style="margin-top:10px;line-height:1.85;padding:9px 11px;border-radius:8px;background:var(--bg2);border:1px solid var(--line)">
+        <b>${IC('info')} מה הקיבולת הזו אומרת</b><br>${lines.join('<br>')}</div>`:'';
+    })()}
     <div class="small muted" style="margin-top:8px;line-height:1.8">${IC('info')} הקיבולת היא <b>מקסימלית</b> לפי Data Log 03 (מפעלים × קיבולת לאזור), ו<b>לרבעון</b> — המשחק אינו מתנהל בחודשים. הקיבולת ה<b>אופטימלית</b> (זו שבה עלות היחידה מינימלית) אינה ב-Data Log כלל; <b>MR24</b> מודד אותה.
     ${o.anyUndeclared?`<br><span style="color:var(--sig-warn)">${IC('warn')} באזור אחד או יותר לא הוצהר הפילוח X/Y — הדוח נותן סך מפעלים לאזור בלבד. הצהירו אותו כדי שהקיבולת תהיה מספר ולא סימן שאלה.</span>`:''}</div>`;
 }

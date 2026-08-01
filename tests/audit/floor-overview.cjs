@@ -148,6 +148,55 @@ ck('...and cash per region, each in its own currency with the SF equivalent besi
   dash.hasRegionCash===true && dash.regionRowsLabelled===true);
 ck('the headline KPIs name their currency', dash.kpisLabelled===true);
 
+/* The plants table said what the factories CAN make and the finished-goods banner said what is
+   already made and unsold, and nothing on the page related the two — the reader had to do the
+   division in their head to answer the question those numbers exist to answer together: is the
+   next constraint the factory or the warehouse? Both relations come from figures already on the
+   page, so what is asserted is the arithmetic, not the wording. */
+const link=await page.evaluate(()=>{
+  const q='Q3', Q=S.quarters[q];
+  const keep=JSON.stringify({s:S.config.plantSplit, i:Q.operational.inventory,
+    p:Q.operational.plantsByRegion, x:Q.operational.techX, y:Q.operational.techY});
+  const set=(gx,gy,pcQty)=>{
+    Q.operational.plantsByRegion={us:0,europe:4,brazil:0};
+    S.config.plantSplit={us:{X:0,Y:0},europe:{X:2,Y:2},brazil:{X:0,Y:0}};
+    Q.operational.inventory=pcQty?[{product:'Y',grade:gy,region:'europe',qty:pcQty,cost:70,price:0}]:[];
+    Q.operational.techX=gx; Q.operational.techY=gy; S.activeQuarter=q; save();
+    return plantOverview(q);
+  };
+  // the team's actual Q3 mix: 2 chip plants + 2 PC plants in Europe, 35,000 unsold Y0
+  const real=set(2,0,35000);
+  go('dash');
+  const txt=[...document.querySelectorAll('.content .read')]
+    .find(x=>/מפעלים וקיבולת/.test(x.innerText))?.innerText||'';
+  // a grade pair the conversion table forbids
+  const bad=set(0,5,0);
+  // a mix where the chips genuinely ARE the constraint (X3->Y1 costs 1 chip? use a costly pair)
+  const costly=set(0,2,0);   // chipPerPC[0][2] = 3 chips per PC
+  const r=JSON.parse(keep);
+  S.config.plantSplit=r.s; Q.operational.inventory=r.i; Q.operational.plantsByRegion=r.p;
+  Q.operational.techX=r.x; Q.operational.techY=r.y; save();
+  return { real:real.link, txt, badRatio:bad.link.ratio, costly:costly.link };
+});
+ck('capacity is plants × Data Log 03 on both lines', link.real.chipsForFullY===36000,
+  `X 70,000 · Y 36,000 · full Y run eats ${link.real.chipsForFullY} chips`);
+ck('the page names which line is the bottleneck, from the conversion ratio',
+  link.real.chipBound===false && link.real.chipSpare===34000 &&
+  /צוואר הבקבוק/.test(link.txt), `spare ${link.real.chipSpare} chips`);
+ck('...and says the spare chip capacity is spare, not sellable computers',
+  /34,000/.test(link.txt) && /36,000/.test(link.txt));
+ck('the finished stock is stated in quarters of production, not just units',
+  Math.abs(link.real.stockQuarters-35000/36000)<1e-9 && /רבעון ייצור/.test(link.txt),
+  `${link.real.stockQuarters.toFixed(3)} quarters`);
+ck('...and says plainly that producing more before selling it only adds carrying cost',
+  /עלות אחזקה/.test(link.txt) && /DL-06/.test(link.txt));
+/* The other two branches, which the team's own numbers do not currently exercise. */
+ck('an incompatible grade pair is reported as unbuildable rather than as capacity',
+  link.badRatio===0, `chipPerPC[0][5] = ${link.badRatio}`);
+ck('when a PC run really would outrun the chip line, the chips are named as the bottleneck',
+  link.costly.ratio===3 && link.costly.chipBound===true && link.costly.chipSpare<0,
+  `ratio ${link.costly.ratio}:1 → needs ${link.costly.chipsForFullY} of 70,000`);
+
 /* ---------------- the three unavoidable costs that were missing entirely */
 const extra=await page.evaluate(()=>{
   const Q=S.quarters.Q3.financial;
