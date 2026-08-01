@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **696 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **716 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **722**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **742**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -420,6 +420,29 @@ Each verdict renders **beside the action it judges**, in that card's own closed 
 ("מה המנוע מודד") — not in a panel of its own, so the arithmetic is one click from the line it is
 about. `PLAN_DOC` (v5) is still the *document* the submission tab hands back; v6 is deliberately **not**
 committed as a file. `planDeltas()` compares against v6's anchors.
+
+## What a new report actually re-derives
+
+`tests/audit/quarter-rollover.cjs` measures both sides of an ingest, because a derived figure that
+is *identical* before and after is the failure mode and is invisible unless something checks. The
+chain, each link asserted to have moved:
+
+`applyParsed` writes the report **and carries the X/Y plant split into `S.config.plantSplit`** —
+capacity reads the declaration, not the raw plant count, so without that step a new plant mix would
+leave capacity at "not declared". Then `confirmQuarter()` — and only it — enters the quarter and
+runs: `updateLearning` (observation count, confidence, a re-anchored demand model that picks up
+markets it had never seen), `updateMasterPlan` (a snapshot, so the next forecast has something to be
+scored against), `planV6Goals` + `recommendFloors` (Q9 targets and every floor). Everything else —
+cash, score, alerts, `whatBreaksFirst`, `contractPlan`, the fact pack — is derived at render time
+and needs no invalidation at all.
+
+**The one incomplete link is data, not wiring.** `PLAN_V6`'s Q5 block has thirteen actions and a
+fully itemised floor, and **not one `cash` object between them**. Ticking all thirteen moves the
+ledger by zero, so line 5 read "cost of what I ticked: 0" as though the quarter were free. The
+engine cannot invent those figures — they are the team's to state — so the tab says the quarter is
+unpriced instead. The caveat goes in the **label**; the figure stays a figure, because the ledger's
+whole promise is that its six lines add up. When Q5 gains real economics, that suite's assertions
+flip and tell the next reader to delete the notice.
 
 ## What is settled, and what the app still does not claim to know
 

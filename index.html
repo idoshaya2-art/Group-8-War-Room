@@ -561,7 +561,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v13.4 · דשבורד מסודר, פיננסים נקי';
+const APP_VERSION = 'v13.5 · רבעון חדש מעדכן הכול';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -3800,7 +3800,15 @@ function bodyDecisions(c){
      the plan's: ticked costs out, ticked revenue in, split by Data Log 09's collection schedule.
      Actions whose cost is already in the floor contribute nothing — see planPickedCash. */
   const _pick=planPickedCash(targetQ);
-  const _hasPlan=!!planV6For(targetQ);
+  const _planBlk=planV6For(targetQ);
+  const _hasPlan=!!_planBlk;
+  /* A quarter can be in the plan as a LIST of actions without any of them carrying costed
+     economics — Q5 is exactly that: thirteen actions, a fully itemised floor, and not one `cash`
+     object between them. Ticking all thirteen then moves the ledger by zero, and line 5 prints
+     "cost of what I ticked: 0" as though the quarter were free. That is the silent wrong reading
+     this tool refuses everywhere else, so the quarter has to say it out loud instead. */
+  const _costed=_hasPlan && _planBlk.actions.some(a=>a.cash&&((a.cash.out||0)>0||(a.cash.in||0)>0));
+  const _uncosted=_hasPlan && !_costed;
   const _out   = _hasPlan?_pick.out   : alloc.totalOut;
   const _inNow = _hasPlan?_pick.inNow : alloc.inNow;
   const _inLater=_hasPlan?_pick.inLater: alloc.inLater;
@@ -3842,17 +3850,23 @@ function bodyDecisions(c){
         <div title="החלק מהמכירות שברשימה שנגבה כבר ברבעון הזה (Data Log 09). היתר מגיע ברבעונים הבאים."><span>ייכנס עוד ברבעון הזה</span><b class="num figure pos">+${fmt(_inNow)} SF</b></div>
         <div title="מינימום חוקי, עלויות מפעל קבועות, משרדים, מו״פ מינימלי, מס וריבית"><span>רצפה — אסור לרדת מתחתיה</span><b class="num figure neg">−${fmt(alloc.floor)} SF</b></div>
         <div class="sum"><span>זמין להוצאה</span><b class="num figure${_capacity<0?' neg':''}">${_capacity<0?'−':''}${fmt(Math.abs(_capacity))} SF</b></div>
-        <div><span>${_hasPlan?'עלות הפעולות שסימנתי':'עלות הפעולות ברשימה'}</span><b class="num figure neg">−${fmt(_out)} SF</b></div>
+        <!-- The caveat goes in the LABEL, never in place of the figure: the ledger's whole promise
+             is that the six lines add up, and a word where a number belongs breaks it for a reader
+             exactly as it would for the suite. -->
+        <div><span>${_hasPlan?'עלות הפעולות שסימנתי':'עלות הפעולות ברשימה'}${_uncosted?' <span class="muted">(לא תומחר בתוכנית)</span>':''}</span><b class="num figure neg">−${fmt(_out)} SF</b></div>
         <div class="tot"><span>${_over>0?'חסר':'נשאר'}</span><b class="num figure ${_over>0?'neg':'pos'}">${_over>0?'−':''}${fmt(Math.abs(_left))} SF</b></div>
       </div>
       <div style="margin-top:9px;height:9px;border-radius:6px;background:var(--bg2);overflow:hidden;border:1px solid var(--line)">
         <i style="display:block;height:100%;width:${Math.min(100,_capacity?_out/_capacity*100:0).toFixed(0)}%;background:${_over>0?'var(--red)':'linear-gradient(90deg,var(--accent),var(--accent2))'}"></i></div>
       <div class="small" style="margin-top:7px;line-height:1.6;color:var(--muted)">
-        ${_hasPlan&&_pick.picked===0
+        ${_uncosted
+          ? `<span style="color:var(--sig-warn)">${IC('warn')} לפעולות של ${targetQ} בתוכנית הכתובה <b>אין כלכלה מתומחרת</b> — יש רשימת פעולות ורצפה מפורטת, אך לא עלות או הכנסה לכל פעולה.</span>
+             <br><span class="muted">לכן שורה 5 אינה 0 במובן של "חינם" אלא <b>לא נמדדה</b>, וסימון פעולה כאן לא יזיז את המאזן. הרצפה למעלה כן מעודכנת. כדי שהמאזן יעבוד ב-${targetQ} צריך להזין את העלות/ההכנסה של כל פעולה בתוכנית.</span>`
+          : (_hasPlan&&_pick.picked===0
           ? `<span style="color:var(--sig-warn)">עדיין לא סימנת אף פעולה — סמן פעולות ברשימה למטה והמאזן יתעדכן.</span>`
           : (_over>0
             ? `<b style="color:var(--sig-block)">הפעולות שסימנת עולות ${fmt(_over)} SF יותר ממה שיש.</b>`
-            : `מה שסימנת נכנס בתקציב.`)}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">בהמשך הדרך התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}
+            : `מה שסימנת נכנס בתקציב.`))}${(_wb&&!_wb.ok)?` <b style="color:var(--sig-block)">בהמשך הדרך התזרים נשבר ב-${_wb.q}</b> (פער ${fmt(_wb.gap)} SF).`:''}
         ${_pick.inFloor>0?`<br><span class="muted">${fmt(_pick.inFloor)} SF מהפעולות שסימנת כבר שמורים ברצפה ולכן אינם נספרים שוב.</span>`:''}
         ${_inNow>0?`<details class="fverd" style="margin-top:5px"><summary>שורה 2 מותנית במכירה — מה קורה אם לא יימכר ⌄</summary>
           <div class="small muted" style="line-height:1.75;margin-top:6px">המכירות שסימנת מכניסות <b>${fmt(_income)} SF</b> בסך הכול, אבל לפי Data Log 09 רק <b>${fmt(_inNow)}</b> נגבים כבר ברבעון הזה (ארה״ב 40% · אירופה 50% · ברזיל 30%); היתר, ${fmt(_inLater)} SF, מגיע ברבעונים הבאים. לכן שורה 2 מותנית בכך שהסחורה באמת תימכר במחיר שהוזן. אם לא יימכר כלום — ${_strict<0?`<b style="color:var(--sig-warn)">תרד ${fmt(-_strict)} SF מתחת לרצפה</b>. זה הסיכון.`:`עדיין תישאר מעל הרצפה, עם ${fmt(_strict)} SF מרווח.`}</div></details>`:''}
