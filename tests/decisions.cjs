@@ -21,6 +21,28 @@ ck('sales / pricing is still covered', has(/A1-2|מכור/));
 ck('R&D is covered', has(/H1-1|מו״פ/));
 ck('at least 4 distinct decision categories present', new Set(fams.map(f=>f.cat)).size>=3, [...new Set(fams.map(f=>f.cat))].join(','));
 
+/* ---- manual decision forms: the + picker exposes the whole catalog and writes to Input ---- */
+const manualPicker=await page.evaluate(async()=>{
+  S.scenarios=[]; S.ui=Object.assign(S.ui||{},{decisionScenarioId:null,exportScenarioId:null}); save(); go('plan');
+  await new Promise(r=>setTimeout(r,250));
+  const targetQ=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const plus=!![...document.querySelectorAll('button')].find(b=>/הוסף פעולה/.test(b.textContent));
+  openDecisionActionPicker(targetQ);
+  const forms=[...document.querySelectorAll('#modalRoot .form')].map(x=>x.textContent.trim());
+  decisionAddAction(targetQ,'W3');
+  await new Promise(r=>setTimeout(r,250));
+  const sc=S.scenarios[0], acts=(sc.levers[targetQ].actions||[]).map(a=>a.form);
+  const rows=buildInputRows(targetQ,sc).filter(r=>r.form==='W3');
+  go('export'); await new Promise(r=>setTimeout(r,250));
+  return {plus, forms, acts, rows:rows.length, scenarioId:sc.id, selected:(document.getElementById('expScenario')||{}).value};
+});
+ck('Decisions has a + button for manual actions', manualPicker.plus);
+ck('the + picker exposes all 19 official forms', manualPicker.forms.length===19 && manualPicker.forms.includes('W3'), manualPicker.forms.join(','));
+ck('a manually selected form is stored in the scenario', manualPicker.acts.includes('W3'));
+ck('a manual form reaches the input sheet before its fields are filled', manualPicker.rows===1);
+ck('Input stays on the scenario selected in Decisions', manualPicker.selected===manualPicker.scenarioId);
+await page.evaluate(()=>{ S.scenarios=[]; save(); go('plan'); });
+
 /* ---- the advertising action must be honest about where NOT to spend ---- */
 const adv=await page.evaluate(()=>{ const q=S.activeQuarter,t=nextQuarters(q)[0];
   const it=(buildActionPlan(q,t)||[]).find(x=>/פרסום/.test(x.title)); return it?{d:it.detail,sim:it.sim}:null; });

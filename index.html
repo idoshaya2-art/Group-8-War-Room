@@ -4044,6 +4044,19 @@ function bodyDecisions(c){
       </div>
     </div>
 
+    <div class="card pad" style="margin-top:14px;border:1px dashed var(--accent)">
+      <div class="between" style="gap:10px;flex-wrap:wrap">
+        <div>
+          <b>${IC('sliders')} פעולות לתרחיש ההזנה</b>
+          <div class="small muted" style="margin-top:4px">בחר טופס החלטה — הוא יתווסף לאותו תרחיש ויופיע מיד בלשונית ההזנה.</div>
+        </div>
+        <button class="btn primary" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
+      </div>
+      ${(()=>{ const sc=decisionScenario(); const acts=(sc&&sc.levers[targetQ]&&sc.levers[targetQ].actions)||[];
+        return `<div class="row" style="gap:7px;flex-wrap:wrap;margin-top:11px">${acts.length?acts.map(a=>{ const sf=simForm(a.form)||{label:a.form}; const rn=a.region?(REGIONS.find(r=>r.id===a.region)||{}).name:''; return `<span class="tag b">${esc(a.form)} · ${esc(sf.label)}${rn?' · '+esc(rn):''}</span>`; }).join(''):`<span class="small muted">עדיין לא נוספו פעולות ידניות לתרחיש.</span>`}<button class="btn sm ghost" onclick="go('submit')">פתח גיליון הזנה →</button></div>`;
+      })()}
+    </div>
+
     <!-- THE LIST IS THE TEAM'S OWN PLAN — for any quarter the plan covers. For one it does not
          (Q1-Q3, or past Q9) the engine's generated list is the fallback, with its own AI review;
          better a sourced list than an empty tab. Obligations the plan misses are promoted above
@@ -5577,12 +5590,41 @@ const SIM_FORMS=[
   {form:'H4',label:'הלוואה בין-חברות',scope:'hq',kind:'note',grp:'אחר'},
   {form:'H5',label:'רישיון רמה טכנולוגית',scope:'hq',kind:'note',grp:'אחר'},
   {form:'H6',label:'מכירה תעשייתית בין-חברות',scope:'region',kind:'note',grp:'אחר'},
-  {form:'A3-3',label:'המרת מטבע (W3)',scope:'region',kind:'note',grp:'אחר'},
+  {form:'A3-3',label:'המרת כל המט״ח באזור',scope:'region',kind:'note',grp:'אחר'},
   {form:'A4',label:'העברת רכיבים ועדיפויות',scope:'region',kind:'note',grp:'אחר'},
   {form:'W1',label:'תשלום עבור שירותים',scope:'region',kind:'note',grp:'אחר'},
   {form:'W2',label:'מכירת מפעל בין-חברות',scope:'region',kind:'note',grp:'אחר'},
+  {form:'W3',label:'המרת מטבע בבנק מקומי',scope:'region',kind:'note',grp:'אחר'},
 ];
 function simForm(f){ return SIM_FORMS.find(x=>x.form===f); }
+/* The Decisions tab is not a separate scratchpad: it writes into the same scenario that feeds
+   the input sheet.  Keeping the selected scenario in UI state makes that connection visible
+   even after moving between tabs. */
+function decisionScenario(){ const id=S.ui&&S.ui.decisionScenarioId; return S.scenarios.find(s=>s.id===id)||S.scenarios[0]||null; }
+window.openDecisionActionPicker=(targetQ)=>{
+  const active=decisionScenario();
+  const groups=['ייצור','מכירות','פיננסי','אחר'];
+  const options=S.scenarios.map(s=>`<option value="${s.id}" ${active&&s.id===active.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  const cards=groups.map(g=>`<div style="margin-top:14px"><b class="small" style="color:var(--muted)">${g}</b>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:7px">${SIM_FORMS.filter(f=>f.grp===g).map(f=>`<button class="btn" style="text-align:start;min-height:58px;white-space:normal" onclick="decisionAddAction('${targetQ}','${f.form}')"><span class="form">${f.form}</span><br><b>${f.label}</b></button>`).join('')}</div></div>`).join('');
+  openModal('＋ הוספת פעולה — כל טפסי ההחלטה',`
+    <div class="field"><label class="fl">התרחיש שיסונכרן לגיליון ההזנה</label>
+      <select class="f" id="decisionScenario">${options||'<option value="__new__">תוכנית חדשה</option>'}</select></div>
+    <div class="small muted" style="line-height:1.7">לחץ על טופס כדי להוסיף אותו ל-${targetQ}. לאחר מכן הוא מופיע בגיליון ההזנה של אותו תרחיש.</div>
+    ${cards}`,'');
+};
+window.decisionAddAction=(targetQ,form)=>{
+  const sel=document.getElementById('decisionScenario'); let sc=sel&&sel.value?S.scenarios.find(s=>s.id===sel.value):decisionScenario();
+  if(!sc){ sc={id:uid(),name:'תוכנית '+targetQ,base:S.activeQuarter,levers:{},createdAt:Date.now()}; S.scenarios.unshift(sc); }
+  ensureLevRegions(sc,targetQ);
+  const before=(sc.levers[targetQ].actions||[]).length;
+  addSimAction(sc.id,targetQ,form);
+  if((sc.levers[targetQ].actions||[]).length===before) return;
+  S.ui=S.ui||{}; S.ui.decisionScenarioId=sc.id; S.ui.exportScenarioId=sc.id;
+  save(); closeModal();
+  toast(`${form} נוסף ל"${sc.name}" ומוכן בגיליון ההזנה ✓`,'g');
+  if(currentPage==='decide') go('decide');
+};
 // Rebuild the action list from a legacy lever object (scenarios created before the builder existed).
 function deriveSimActions(lv){ const acts=[]; const g=()=>Math.random().toString(36).slice(2,8);
   if((lv.rd||0)>0) acts.push({aid:g(),form:'H1-1'});
@@ -6493,9 +6535,8 @@ function planPickedCash(q){
    the one thing about it that is machine-usable, so it is what the sheet button carries: the form
    is added to the quarter's scenario and you type the numbers into it. No lever payload is
    fabricated from the plan's prose — the plan states economic intent, not field values, and
-   guessing them would be exactly the invention this tool refuses everywhere else.
-   `W3` is how the guide labels currency conversion; the simulator's own code for it is `A3-3`. */
-const PLAN_FORM_ALIAS={ W3:'A3-3' };
+   guessing them would be exactly the invention this tool refuses everywhere else. */
+const PLAN_FORM_ALIAS={};
 function planFormCodes(action){
   const raw=String((action&&action.form)||'');
   const out=[];
@@ -6910,7 +6951,7 @@ function bodySubmit(c){
     <div class="between" style="margin-bottom:16px">
       <div class="small muted">גיליון הזנה לרבעון <b>${targetQ}</b> מבוסס על התרחיש הנבחר. בפורמט טפסי INTOPIA.</div>
       <div class="row">
-        <select class="f" id="expScenario" style="max-width:200px" onchange="refreshExport()">${S.scenarios.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')||'<option>— אין תרחיש —</option>'}</select>
+        <select class="f" id="expScenario" style="max-width:200px" onchange="setExportScenario(this.value)">${S.scenarios.map(s=>`<option value="${s.id}" ${(S.ui&&S.ui.exportScenarioId===s.id)?'selected':''}>${esc(s.name)}</option>`).join('')||'<option>— אין תרחיש —</option>'}</select>
         <button class="btn primary" onclick="downloadInputSheet('${targetQ}')">${IC('download')} ייצוא XLSX</button>
       </div>
     </div>
@@ -6947,7 +6988,8 @@ function bodySubmit(c){
   c.insertAdjacentHTML('beforeend', journalSectionHTML());
   refreshExport(); renderFormsReference($('#formsRef')); renderPlanDeltaPreview();
 };
-function selectedExportScenario(){ const id=$('#expScenario')?.value; return S.scenarios.find(s=>s.id===id)||S.scenarios[0]; }
+function selectedExportScenario(){ const id=$('#expScenario')?.value||(S.ui&&S.ui.exportScenarioId); return S.scenarios.find(s=>s.id===id)||S.scenarios[0]; }
+window.setExportScenario=(id)=>{ S.ui=S.ui||{}; S.ui.exportScenarioId=id; S.ui.decisionScenarioId=id; save(true); refreshExport(); };
 function renderPlanDeltaPreview(){
   const box=$('#planDeltaPreview'); if(!box) return;
   // The column is headed "בפועל", so it must not be filled from a state that has no actuals.
@@ -7095,6 +7137,21 @@ function buildInputRows(targetQ,sc){
   /* ---------- W · cross-area ---------- */
   REGIONS.forEach(r=>{ const rl=(lev.regions&&lev.regions[r.id])||{};
     if((rl.fxSell||0)>0) add('W3',`המרת מטבע בבנק מקומי — ${r.name}`,rl.fxSell,`${r.cur} · Sell/Buy לכל מט״ח בנפרד`); });
+
+  /* Actions added from Decisions are intentional entries, even before their numbers are filled.
+     Keep their form on the input sheet instead of making it look as if the click disappeared.
+     Engine-backed forms already emit a populated row once fields are entered; note forms always
+     need their own explicit row because their values live on the action, not on a lever. */
+  (lev.actions||[]).forEach(a=>{
+    const sf=simForm(a.form); if(!sf || a.form==='H1-2') return;
+    const r=a.region?(REGIONS.find(x=>x.id===a.region)||{}):null;
+    const where=r?` — ${r.name}`:'';
+    if(sf.kind==='note'){
+      add(a.form,`${sf.label}${where}`,a.amount||0,a.note||'נוסף מלשונית ההחלטות — מלא את פרטי הטופס',simActionFilled(lev,a)?'':'למלא');
+    } else if(!simActionFilled(lev,a)){
+      add(a.form,`${sf.label}${where}`,0,'נוסף מלשונית ההחלטות — מלא את שדות הפעולה','למלא');
+    }
+  });
 
   /* ---------- what the game asks for and the plan does not answer ---------- */
   const emitted=new Set(rows.map(r=>r.form));
