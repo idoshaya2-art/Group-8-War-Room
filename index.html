@@ -79,8 +79,17 @@ a{color:var(--accent2)}
   background:rgba(11,16,32,.7);backdrop-filter:blur(8px);position:sticky;top:0;z-index:20;
 }
 .topbar h2{font-size:19px}
-.topbar .sub{color:var(--muted);font-size:13px}
+.topbar .sub{color:var(--muted);font-size:12px}
 .topbar .spacer{flex:1}
+/* Overflow menu for the actions that are not part of a quarter's work. */
+.ovf{position:relative}
+.ovf-btn{font-size:17px;line-height:1;padding:6px 11px;letter-spacing:1px}
+.ovf-menu{position:absolute;inset-inline-end:0;top:calc(100% + 6px);z-index:60;
+  display:flex;flex-direction:column;gap:4px;padding:6px;min-width:170px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:10px;
+  box-shadow:0 14px 34px rgba(0,0,0,.45)}
+.ovf-menu[hidden]{display:none}
+.ovf-menu .btn{justify-content:flex-start;width:100%}
 .qsel{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px 8px}
 .qsel label{font-size:12px;color:var(--muted)}
 .qsel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font-weight:700}
@@ -466,10 +475,21 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
   .nav .sec,.side .qbox{display:none}
   .content{padding:16px}
   .grid[style*="1.15fr"],.grid[style*="1.3fr"],.grid[style*="1fr 1fr"]{grid-template-columns:1fr !important}
-  /* topbar + north-star must wrap, never push the page wider than the viewport */
-  .topbar{flex-wrap:wrap;padding:10px 14px;row-gap:8px}
-  .topbar .spacer{display:none}
-  .topbar h2{font-size:16px}
+  /* The header used to eat 428px of an 844px screen before any content: brand, nav, version,
+     title, subtitle, and three buttons wrapping onto two rows. Everything that is not the tab's
+     name or the quarter now goes; the rest fits on ONE row that does not wrap.
+     `.tabhead-budget` in wave5 measures the result. */
+  .topbar{flex-wrap:nowrap;padding:8px 14px;gap:8px;align-items:center}
+  .topbar .spacer{flex:1}
+  .topbar h2{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* The subtitle explains the tab you have already chosen — it is the first thing to go. */
+  .topbar .sub{display:none}
+  .topbar .qsel label{display:none}
+  .topbar .qsel select{max-width:82px}
+  /* The version already sits in the footer; at the top of a phone it is a second copy. */
+  .side>div:last-child{display:none}
+  /* The nav strip above reaches every tab already — a second pager row is 44px of duplication. */
+  .tabnav{display:none}
   .northstar{padding:10px 14px 0}
   .ns-wrap{gap:10px;padding:10px 12px}
   .ns-num{font-size:22px}
@@ -504,14 +524,22 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
         <div class="sub" id="pageSub">תמונת מצב חברה 8</div>
       </div>
       <div class="spacer"></div>
+      <!-- The quarter selector is the one control that matters on every tab, so it stays in the
+           title row. Backup / restore / sync are used a handful of times a game and were taking
+           two rows of a 390px phone on every screen — they live behind the ⋯ menu now. -->
       <div class="qsel">
         <label>רבעון</label>
         <select id="quarterSelect"></select>
       </div>
-      <button class="btn sm ghost" id="btnExportData" title="הורדת גיבוי נתונים (JSON)"><svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> גיבוי</button>
-      <button class="btn sm ghost" id="btnImportData" title="שחזור מגיבוי / טעינת מצב מהצוות"><svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> שחזור</button>
+      <div class="ovf">
+        <button class="btn sm ghost ovf-btn" id="btnMore" aria-haspopup="true" aria-expanded="false" title="עוד פעולות">⋯</button>
+        <div class="ovf-menu" id="moreMenu" hidden>
+          <button class="btn sm ghost" id="btnExportData" title="הורדת גיבוי נתונים (JSON)"><svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> גיבוי</button>
+          <button class="btn sm ghost" id="btnImportData" title="שחזור מגיבוי / טעינת מצב מהצוות"><svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> שחזור</button>
+          <button class="btn sm ghost" id="btnSync" title="סנכרון צוותי" style="display:none"><span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span> סנכרון</button>
+        </div>
+      </div>
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
-      <button class="btn sm ghost" id="btnSync" title="סנכרון צוותי" style="display:none"><span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block"></span> סנכרון</button>
     </div>
     <div class="northstar" id="northstar"></div>
     <div class="content" id="content"></div>
@@ -561,7 +589,7 @@ button.chip,button.x,.tabnav button,.qbox button{min-height:36px;min-width:36px;
    tell whether what they are looking at is the build that was just pushed — five waves shipped
    while this string still said v10.2, and the honest answer to "did it deploy?" was unknowable
    from the screen. It renders in the footer and in the page title. */
-const APP_VERSION = 'v13.5 · רבעון חדש מעדכן הכול';
+const APP_VERSION = 'v13.6 · מסך נקי, אזהרה אחת';
 const QUARTERS = ['Q1','Q2','Q3','Q4','Q5','Q6','Q7','Q8','Q9'];
 const REGIONS  = [
   {id:'us',     name:'ארה״ב (U.S.)',        cur:'USD'},
@@ -1219,12 +1247,21 @@ function tabHead(id){
   const i=PAGES.findIndex(p=>p.id===id); if(i<0) return '';
   const prev=PAGES[i-1], next=PAGES[i+1];
   const nm=p=>esc(p.name.replace(/^\d+ · /,''));
-  // The sticky header above already names the tab and what it is for. This row is only the way
-  // out — back one step, forward one step — so it is on every tab in the same place.
+  /* The sticky header above already names the tab and what it is for. This row is only the way
+     out — back one step, forward one step.
+
+     It is NOT `primary`. It used to be, which made "go to the next tab" the strongest thing on the
+     dashboard: the least important action on the page wearing the loudest treatment. Primary is
+     the page's own main action — reviewing with the AI, continuing to the sheet — and if six of
+     them are on screen at once, as they were on the decisions tab, none of them reads as primary.
+
+     It is also hidden on a phone (`.tabnav` in the mobile block). The sidebar strip already
+     scrolls to every tab and is one tap away; a second navigation row cost 44px of a screen where
+     the header was already eating half. */
   return `<div class="tabnav">
-    ${prev?`<button class="btn sm" onclick="go('${prev.id}')">→ ${nm(prev)}</button>`:'<span></span>'}
+    ${prev?`<button class="btn sm ghost" onclick="go('${prev.id}')">→ ${nm(prev)}</button>`:'<span></span>'}
     <span class="small muted">${i+1} מתוך ${PAGES.length}</span>
-    ${next?`<button class="btn sm primary" onclick="go('${next.id}')">${nm(next)} ←</button>`:'<span></span>'}
+    ${next?`<button class="btn sm" onclick="go('${next.id}')">${nm(next)} ←</button>`:'<span></span>'}
   </div>`;
 }
 function go(id){
@@ -1300,7 +1337,14 @@ function renderNorthStar(){
   if(!Q||!Q.entered){ box.innerHTML=`<div class="ns-wrap"><div class="ns-lbl">${IC('inbox')} קלוט דוח רבעון כדי לראות את הציון החי (50% עבר / 50% פוטנציאל)</div></div>`; return; }
   const sp=scoreProxy(null);
   const cash=unifiedCashOf(base), ef=effectiveFloor(base), dist=cash-ef.value;
-  const alerts=computeAlerts(base);
+  /* The strip points at the most urgent thing you are NOT already looking at. The dashboard draws
+     the unpriced-stock banner — the same fact, quantified, with a button — so repeating it here
+     put two reds side by side saying one thing. On every other tab the banner does not exist and
+     this strip is the only place the alert appears, so the skip is scoped to the one page that
+     already shows it rather than applied generally. */
+  let alerts=computeAlerts(base);
+  if(currentPage==='dash'){ const fgx=finishedGoods(base);
+    if(fgx.hasFinished&&fgx.anyUnpriced) alerts=alerts.filter(a=>a.key!=='noprice'); }
   const top=alerts.find(a=>a.level==='red')||alerts.find(a=>a.level==='amber')||alerts[0];
   const tlvl=top?(top.level==='red'?'red':(top.level==='amber'?'amber':'ok')):'ok';
   // The halves used to render as two bare numbers with the labels floating beside them, so
@@ -2969,9 +3013,25 @@ function forecastVariance(q){
 function computeAlerts(q){
   const Q=S.quarters[q], g=S.config.goals, out=[];
   if(!Q.entered){ out.push({level:'amber',key:'noData',title:'אין נתוני רבעון',desc:`רבעון ${q} טרם נקלט — העלה את דוח התוצאות.`}); return out; }
-  const proj=projectCashflow(q,null); const firstBreach=proj.find(x=>x.breach);
-  if(firstBreach) out.push({level:'red',key:'floor',title:'שבירת רצפת מזומן צפויה',
-    desc:`לפי ההקרנה, ב-${firstBreach.q} המזומן המאוחד (${fmt(firstBreach.unified)}) יורד מתחת לרצפה (${fmt(firstBreach.floor)}). מרחק: ${fmt(firstBreach.distance)}.`});
+  /* Red means something is broken NOW; amber means a risk ahead. This alert was unconditionally
+     red while its own title said "צפויה" — projected — so a breach three quarters out shouted as
+     loudly as inventory you cannot sell today, and with three reds on the dashboard at once none
+     of them read as urgent. A breach in the quarter you are standing in is still red. */
+  /* Two different facts, and they must not share a colour.
+
+     `projectCashflow` starts at startIdx+1 — it never reports on the quarter you are standing in —
+     so "is the breach the current quarter?" is a question it structurally cannot answer, and
+     testing `firstBreach.q===q` would be a branch that never fires. The present-tense case is its
+     own comparison: cash held now against the floor now. */
+  const _efNow=effectiveFloor(q);
+  if(_efNow.src!=='none' && unifiedCashOf(q) < _efNow.value){
+    out.push({level:'red', key:'floor', title:'המזומן כבר מתחת לרצפה',
+      desc:`המזומן המאוחד (${fmt(Math.round(unifiedCashOf(q)))}) נמוך מ${_efNow.label} (${fmt(Math.round(_efNow.value))}). חסר ${fmt(Math.round(_efNow.value-unifiedCashOf(q)))} SF.`});
+  } else {
+    const proj=projectCashflow(q,null); const firstBreach=proj.find(x=>x.breach);
+    if(firstBreach) out.push({level:'amber', key:'floor', title:`שבירת רצפת מזומן צפויה ב-${firstBreach.q}`,
+      desc:`לפי ההקרנה, ב-${firstBreach.q} המזומן המאוחד (${fmt(firstBreach.unified)}) יורד מתחת לרצפה (${fmt(firstBreach.floor)}). מרחק: ${fmt(firstBreach.distance)}.`});
+  }
   REGIONS.forEach(r=>{ const v=Q.financial.cash[r.id]; if(v!==undefined&&v<0)
     out.push({level:'red',key:'cur_'+r.id,title:`יתרת מטבע שלילית — ${r.name}`,desc:`יתרה ${fmt(v)} ${r.cur}. גירעון מטבע דורש טיפול לפני ההזנה.`}); });
   if((Q.financial.supplierCredit||0)>0) out.push({level:'amber',key:'sc',title:'אשראי ספקים פעיל',
@@ -3352,7 +3412,12 @@ function bodyDashboard(c){
          do not change within a quarter (how many plants, where, what capacity, how much cash sits
          in which currency), so they are reference beneath the headline rather than above it. -->
     <div style="margin-top:22px">${standingFactsHTML(q)}</div>`;
-  renderAlerts($('#alertsBox'),computeAlerts(q));
+  /* The unpriced-stock banner above is the quantified, actionable version of the `noprice` alert —
+     same fact, with the units, the value and a button. Printing the sentence again in the alerts
+     card put the same red thing on the screen twice. The alert itself is untouched: it still
+     drives the north-star strip and every other tab, it is only not repeated beside its banner. */
+  const _dupBanner=fg.hasFinished&&fg.anyUnpriced;
+  renderAlerts($('#alertsBox'),computeAlerts(q).filter(a=>!(_dupBanner&&a.key==='noprice')));
   drawTrend($('#trendChart'));
 };
 /* What the team keeps asking each other in the room: how many plants have we got, where, making
@@ -7373,7 +7438,7 @@ window.downloadInputSheet=(targetQ)=>{
 function journalSectionHTML(){
   const list=[...S.decisions].sort((a,b)=>b.ts-a.ts);
   return `<div class="card" style="margin-top:18px">
-    <div class="ch"><h3>${IC('book')} יומן החלטות</h3><button class="btn sm primary" onclick="openDecisionModal(null)">+ רישום החלטה</button></div>
+    <div class="ch"><h3>${IC('book')} יומן החלטות</h3><button class="btn sm" onclick="openDecisionModal(null)">+ רישום החלטה</button></div>
     <div class="cb">
     ${list.length? list.map(d=>`
       <div class="card pad" style="margin-bottom:12px">
@@ -8594,6 +8659,15 @@ function openModal(title,body,footer){
     <div class="mb">${body}</div>${footer!==''?`<div class="mf"><button class="btn ghost" onclick="closeModal()">ביטול</button>${footer}</div>`:''}</div></div>`;
 }
 window.closeModal=()=>{ $('#modalRoot').innerHTML=''; };
+
+/* ---------- The overflow menu that holds them ----------
+   Closes on a click anywhere else and on Escape, so it cannot be left hanging over the page. */
+const _moreMenu=$('#moreMenu'), _moreBtn=$('#btnMore');
+window.closeMore=()=>{ if(!_moreMenu) return; _moreMenu.hidden=true; _moreBtn.setAttribute('aria-expanded','false'); };
+if(_moreBtn) _moreBtn.onclick=(e)=>{ e.stopPropagation();
+  const open=_moreMenu.hidden; _moreMenu.hidden=!open; _moreBtn.setAttribute('aria-expanded',String(open)); };
+document.addEventListener('click',e=>{ if(_moreMenu && !_moreMenu.hidden && !e.target.closest('.ovf')) closeMore(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeMore(); });
 
 /* ---------- Data backup / restore ---------- */
 $('#btnExportData').onclick=()=>{

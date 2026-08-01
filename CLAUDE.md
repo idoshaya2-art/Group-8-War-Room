@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **716 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **743 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **742**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **769**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -59,6 +59,41 @@ failures and the run said `SOME SUITES FAILED`. When the two disagree, find the 
 ```
 for t in <every suite in run.sh>; do node "$t.cjs" >/dev/null 2>&1; echo "$? $t"; done | grep -v "^0 "
 ```
+
+## The chrome is measured, not styled
+
+`tests/audit/shell.cjs` holds three rules that were each a measured regression, not a matter of
+taste. It measures the app frame, so a failure there means something was added to the **top of the
+app** — not to the tab that reported it.
+
+- **The header cost 428px of an 844px phone** before any content. Backup/restore/sync sat on every
+  screen and wrapped onto two rows; the subtitle restated the tab you had already chosen; the
+  version string was printed twice. They are behind a `⋯` menu, hidden, and deleted respectively;
+  the quarter selector stays, because it is the one control every tab needs. Now **305px**, and the
+  budget is asserted at ≤320 on three tabs. This is why the decisions tab kept failing an
+  above-the-fold assertion that had nothing to do with the decisions tab.
+- **`primary` is the page's own main action, and is rare.** The pager's "next tab" button was
+  `primary`, which made the least important action on the dashboard the loudest thing on it. The
+  cap is asserted per tab (dash 1, the rest 2). Count with
+  `!b.closest('details:not([open])')` — Chromium reports an `offsetParent` for content inside a
+  **closed** `<details>`, so a naive query counts buttons nobody can see. Measuring it wrongly is
+  how "six primaries on the decisions tab" got reported when there were two.
+- **Red means something is broken now; amber means a risk ahead.** Three reds fired at once and two
+  of them rendered twice. `floor` was unconditionally red while its own title said *"צפויה"*.
+
+### The floor alert is two facts, and `projectCashflow` can only see one
+
+`projectCashflow` iterates from `startIdx+1` — it **never reports on the quarter you are standing
+in** — so `firstBreach.q===q` is a branch that can never fire, and writing the present-tense test
+that way would have made the alert amber forever, losing the ability to shout when cash is actually
+below the floor. The present case is its own comparison: `unifiedCashOf(q) < effectiveFloor(q)`,
+red, in the present tense. Only the projection is amber. Both branches are asserted.
+
+The same fact is never drawn twice at full weight: the unpriced-stock **banner** is the quantified
+version of the `noprice` alert, so the alert is filtered out of the dashboard's alerts card and out
+of the north-star strip while the banner is up. The alert itself is untouched — it still drives
+every other tab. A sticky strip above its own detail list is *not* duplication; two full-weight red
+blocks stating one fact is.
 
 ## The shell is six tabs
 
