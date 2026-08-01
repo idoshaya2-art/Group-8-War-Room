@@ -41,6 +41,35 @@ const pager=await page.evaluate(()=>{
 ck('the tab pager exists but is never the page\'s primary action',
   pager && pager.primaries===0, pager?pager.labels.join(' | '):'no pager');
 
+/* ---------- the type scale
+   The app had reached 22 distinct font sizes, four of them (12 · 12.5 · 13 · 13.5) inside 1.5px
+   of each other. Half a pixel is not a rank a reader can see, so those four read as one and the
+   distinctions that were supposed to matter had nothing left to work with. Every size now comes
+   from a --fs-* variable; what is asserted is the PAINTED result, because a variable nobody uses
+   would pass a source check while a hand-written 13.5px sailed through. */
+const SCALE=[10,12,14,16,20,26,40];
+const type=await page.evaluate(()=>{
+  const seen={};
+  ['dash','decide','submit','rules'].forEach(()=>{});
+  [...document.querySelectorAll('.content *, .topbar *, .side *, .northstar *')].forEach(e=>{
+    if(!e.offsetParent || !e.textContent.trim()) return;
+    const px=parseFloat(getComputedStyle(e).fontSize);
+    seen[px]=(seen[px]||0)+1;
+  });
+  return seen;
+});
+const offScale=Object.keys(type).map(Number).filter(px=>!SCALE.includes(px));
+ck('every painted font size is one of the seven scale steps',
+  offScale.length===0, offScale.length?`off-scale: ${offScale.join(', ')}px`:SCALE.join(' · '));
+ck('...and the scale has no two steps closer than 2px, so each rank is visible',
+  SCALE.every((v,i)=>i===0||v-SCALE[i-1]>=2), SCALE.join(' · '));
+/* Painted sizes only prove the pages this suite happens to open. The file-level check is what
+   stops a raw size being added to a view nobody screenshots. */
+const raw=require('fs').readFileSync(require('path').join(__dirname,'../../index.html'),'utf8')
+  .match(/font-size:\s*[0-9.]+px/g)||[];
+ck('the source declares no raw pixel font sizes — they all go through --fs-*',
+  raw.length===0, raw.length?`${raw.length} raw: ${[...new Set(raw)].slice(0,6).join(', ')}`:'none');
+
 // ---------- one alarm at a time, and each fact stated once
 const reds=await page.evaluate(()=>{
   const q=S.activeQuarter, a=computeAlerts(q);
@@ -69,6 +98,32 @@ ck('...nor in the north-star strip, which points at what you are NOT already loo
   !reds.hasBanner || !/ללא מחיר/.test(reds.nsText||''), reds.nsText);
 ck('the strip and the banner never both carry the same red fact', reds.stripAlsoBanner===false,
   reds.nsText);
+
+/* ---------- the north-star strip is three things, not seven numbers
+   It carried the score, its two halves, cash-vs-floor, profit rank, market share and an alert —
+   seven figures in one line, read right-to-left as a wall. Rank and share are not peers of the
+   score, they are INPUTS to it (60% of the past half, 30% of the potential half), and
+   openScoreBreakdown itemises both with their weights. A component drawn beside its own total
+   competes with the number it feeds. */
+const strip=await page.evaluate(()=>{
+  const w=document.querySelector('.ns-wrap');
+  const kpis=[...w.querySelectorAll('.ns-kpi')].map(k=>k.querySelector('.k')?.innerText.trim());
+  const bd=(()=>{ openScoreBreakdown();
+    const t=document.querySelector('#modalRoot')?.innerText||''; closeModal(); return t; })();
+  return { kpis, score:!!w.querySelector('.ns-score'),
+    halves:w.querySelectorAll('.ns-h').length,
+    alert:!!w.querySelector('.ns-alert'),
+    bdHasRank:/דירוג מול המתחרים|מתוך/.test(bd), bdHasShare:/נתח שוק/.test(bd) };
+});
+ck('the strip keeps the score and its two halves — that is one unit',
+  strip.score===true && strip.halves===2, `${strip.halves} halves`);
+ck('...one standing figure beside it, and the alert — no more',
+  strip.kpis.length===1 && strip.alert===true, strip.kpis.join(' | ')||'none');
+ck('rank and market share are gone from the strip',
+  !strip.kpis.some(k=>/דירוג|נתח שוק/.test(k||'')), strip.kpis.join(' | '));
+ck('...because the score breakdown already itemises both, one click away',
+  strip.bdHasRank===true && strip.bdHasShare===true,
+  `rank ${strip.bdHasRank} · share ${strip.bdHasShare}`);
 /* A breach in the quarter you are standing in is a different thing, and must stay red.
    `projectCashflow` deliberately does NOT read S.config.goals.floors — a breach there is also
    triggered by a negative region, and re-pointing it would move every projection the suite pins.

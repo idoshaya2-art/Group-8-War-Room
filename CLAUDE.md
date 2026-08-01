@@ -40,14 +40,14 @@ It serves GitHub Pages, so everything committed is world-readable.
 the gate; a green line without exit 0 has happened before (a suite that reports and
 then throws), so trust the code, not the text.
 
-Measured baseline: **743 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
+Measured baseline: **750 passes, 0 failures, exit 0** — the sum of the per-suite `PASS n FAIL n`
 lines. Measure it the same way every time, or the comparison is meaningless:
 
 ```
 bash tests/run.sh 2>&1 | grep -E "PASS [0-9]+" | awk '{p+=$2; f+=$4} END{print p, f}'
 ```
 
-(Counting the `✓` lines instead gives **769**, because three suites print ticks without a PASS
+(Counting the `✓` lines instead gives **776**, because three suites print ticks without a PASS
 summary. Either number is fine; mixing them is not.) If the count drops, a suite stopped running
 rather than started passing — find out which.
 
@@ -80,6 +80,34 @@ app** — not to the tab that reported it.
   how "six primaries on the decisions tab" got reported when there were two.
 - **Red means something is broken now; amber means a risk ahead.** Three reds fired at once and two
   of them rendered twice. `floor` was unconditionally red while its own title said *"צפויה"*.
+
+### The type scale is seven steps, and nothing between them
+
+The app had reached **22 distinct font sizes**, four of them (12 · 12.5 · 13 · 13.5) inside 1.5px
+of each other and three more (14 · 14.5 · 15). Half a pixel is not a rank a reader can see, so
+those four read as one and the distinctions that were meant to matter — a figure against its
+label, a heading against its body — had nothing left to work with.
+
+```
+--fs-micro 10 · --fs-sm 12 · --fs-md 14 · --fs-lg 16 · --fs-xl 20 · --fs-num 26 · --fs-display 40
+```
+
+Every step is ≥2px and **every `font-size` in the file goes through one of these variables**. The
+scale runs *down* from where the app was (12.5→12, 15→14): the decisions tab's own height budget
+had 5px of headroom, so rounding up would have failed it.
+
+Two sizes had never been chosen by any stylesheet and only appeared once painted: a bare `<h3>`
+inherits `1.17em` (16.38px) and `<sup>` defaults to `smaller` (10px). `h1`–`h4` and `sup` now
+state their step. This is why `shell.cjs` asserts the **painted** sizes as well as the source — a
+variable nobody uses would pass a grep while a browser default sailed through.
+
+### The north-star strip is three things, not seven numbers
+
+It carried the score, its two halves, cash-vs-floor, profit rank, market share and an alert. Rank
+and share are **not peers of the score — they are inputs to it** (60% of the past half, 30% of the
+potential half), and `openScoreBreakdown` already itemises both with their weights and sources. A
+component drawn beside its own total competes with the number it feeds, so the two tiles are gone
+and the strip is: the score with its halves · one standing figure · the alert.
 
 ### The floor alert is two facts, and `projectCashflow` can only see one
 
