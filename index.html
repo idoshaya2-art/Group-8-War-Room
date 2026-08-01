@@ -1426,6 +1426,12 @@ function inventoryValue(q){
   // MIS gives units by product/region but no carrying cost, so treating those units as
   // zero-value (or mixing their local-currency cost into a CHF balance) corrupts assets.
   if(f.inventoryBookValue!=null) return f.inventoryBookValue;
+  /* Some report versions expose the inventory total only through Total Assets. In that
+     layout, the residual after the separately recognised cash, securities, receivables
+     and net plant is the inventory carrying value. This is still a balance-sheet value,
+     not an estimate from units. */
+  const residual=(f.totalAssets||0)-(f.consolidated||unifiedCashOf(q))-(f.securities||0)-(f.ar||0)-(f.netPlant||0);
+  if((f.totalAssets||0)>0 && residual>0) return residual;
   return S.quarters[q].operational.inventory.reduce((a,i)=>{
     const r=REGIONS.find(x=>x.id===i.region);
     return a+(i.qty||0)*(i.cost||0)*fxRate(r?r.cur:'CHF');
@@ -3748,7 +3754,8 @@ function bodyFinancials(c){
   const assets=f.totalAssets || ((f.consolidated||0)+(f.securities||0)+invVal+(f.netPlant||0));
   const liab=(f.loans||0)+(f.ap||0)+(f.supplierCredit||0);
   const balanceGap=assets-(liab+equity);
-  const balanceCloses=Math.abs(balanceGap)<1;
+  // Statements are rounded to whole CHF, so a one-franc difference is not a real imbalance.
+  const balanceCloses=Math.abs(balanceGap)<=1;
   const nMargin=f.revenue>0? f.netProfit/f.revenue*100 : null;
   const roe=f.roe|| (equity>0? f.netProfit/equity*100 : null);
   const roa=assets>0? f.netProfit/assets*100 : null;
@@ -4828,7 +4835,7 @@ function extractBalance(rows,scan,f){
   const sec=cell(rows,/^GOVERNMENT SECURITIES/,IS_COL.cons); if(sec!==null){ scan.securities=sec; }
   // The report uses carrying values here. Do not derive them from unit or plant counts:
   // acquisition date and depreciation make that calculation unreliable.
-  const inv=cell(rows,/^(?:INVENTOR(?:Y|IES)|ENDING INVENTOR(?:Y|IES)|FINISHED GOODS)/,IS_COL.cons);
+  const inv=cell(rows,/(?:^| )(?:ENDING |CLOSING )?(?:INVENTOR(?:Y|IES)|FINISHED GOODS)/,IS_COL.cons);
   if(inv!==null){ scan.inventoryBookValue=inv; f.push('מלאי (ערך מאזני)'); }
   const plant=cell(rows,/^NET PLANT(?:\s+(?:AND|&))?\s+EQUIPMENT/,IS_COL.cons);
   if(plant!==null){ scan.netPlant=plant; f.push('רכוש קבוע נטו'); }
