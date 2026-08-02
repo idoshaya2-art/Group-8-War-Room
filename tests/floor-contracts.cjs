@@ -1,7 +1,7 @@
-const {loadPW,APP}=require('./lib.cjs');
+const {loadPW,APP,CHROME}=require('./lib.cjs');
 const { chromium } = loadPW();
 (async()=>{
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const b=await chromium.launch({executablePath:CHROME});
 const p=await b.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(String(e)));
 await p.goto(APP); await p.waitForTimeout(700);
 const R=await p.evaluate(()=>{

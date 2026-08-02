@@ -124,9 +124,10 @@ const balance=await page.evaluate(()=>{
   applyParsed({scan});
   const f=S.quarters.Q3.financial;
   const directInventory=inventoryValue('Q3');
+  const parsedNetPlant=f.netPlant, parsedTotalEquity=f.totalEquity;
   f.inventoryBookValue=null; f.consolidated=1067452; f.securities=0; f.ar=0;
   f.netPlant=5040000; f.totalAssets=8358651;
-  return {scan,found,directInventory,residualInventory:inventoryValue('Q3'),f};
+  return {scan,found,directInventory,residualInventory:inventoryValue('Q3'),parsedNetPlant,parsedTotalEquity};
 });
 ck('the balance-sheet inventory carrying value is extracted and retained',
   balance.scan.inventoryBookValue===2251199 && balance.directInventory===2251199,
@@ -134,9 +135,9 @@ ck('the balance-sheet inventory carrying value is extracted and retained',
 ck('inventory falls back to the balance-sheet residual when its row is absent',
   balance.residualInventory===2251199, `shown=${balance.residualInventory}`);
 ck('NET PLANT & EQUIPMENT accepts the ampersand label used by some reports',
-  balance.scan.netPlant===708800 && balance.f.netPlant===708800, `parsed=${balance.scan.netPlant}`);
+  balance.scan.netPlant===708800 && balance.parsedNetPlant===708800, `parsed=${balance.scan.netPlant}`);
 ck('TOTAL SHAREHOLDERS\' EQUITY is recognised as total equity',
-  balance.scan.totalEquity===1239506 && balance.f.totalEquity===1239506, `parsed=${balance.scan.totalEquity}`);
+  balance.scan.totalEquity===1239506 && balance.parsedTotalEquity===1239506, `parsed=${balance.scan.totalEquity}`);
 
 const opened=await page.evaluate(()=>{
   openVerifyPanel();

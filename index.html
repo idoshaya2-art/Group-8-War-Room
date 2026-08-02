@@ -4044,19 +4044,6 @@ function bodyDecisions(c){
       </div>
     </div>
 
-    <div class="card pad" style="margin-top:14px;border:1px dashed var(--accent)">
-      <div class="between" style="gap:10px;flex-wrap:wrap">
-        <div>
-          <b>${IC('sliders')} פעולות לתרחיש ההזנה</b>
-          <div class="small muted" style="margin-top:4px">בחר טופס החלטה — הוא יתווסף לאותו תרחיש ויופיע מיד בלשונית ההזנה.</div>
-        </div>
-        <button class="btn primary" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
-      </div>
-      ${(()=>{ const sc=decisionScenario(); const acts=(sc&&sc.levers[targetQ]&&sc.levers[targetQ].actions)||[];
-        return `<div class="row" style="gap:7px;flex-wrap:wrap;margin-top:11px">${acts.length?acts.map(a=>{ const sf=simForm(a.form)||{label:a.form}; const rn=a.region?(REGIONS.find(r=>r.id===a.region)||{}).name:''; return `<span class="tag b">${esc(a.form)} · ${esc(sf.label)}${rn?' · '+esc(rn):''}</span>`; }).join(''):`<span class="small muted">עדיין לא נוספו פעולות ידניות לתרחיש.</span>`}<button class="btn sm ghost" onclick="go('submit')">פתח גיליון הזנה →</button></div>`;
-      })()}
-    </div>
-
     <!-- THE LIST IS THE TEAM'S OWN PLAN — for any quarter the plan covers. For one it does not
          (Q1-Q3, or past Q9) the engine's generated list is the fallback, with its own AI review;
          better a sourced list than an empty tab. Obligations the plan misses are promoted above
@@ -4067,6 +4054,7 @@ function bodyDecisions(c){
         <b style="font-size:var(--fs-lg)">${decisionCount} ההחלטות ל-${targetQ}${mustCount?` · <span style="color:var(--sig-block)">${mustCount} חובה</span>`:''}${sentCount?` · <span style="color:var(--sig-ok)">${sentCount} הועברו</span>`:''}${rv?`<span class="small" style="font-weight:400;color:var(--sig-ai)"> · נבחנו ע״י AI</span>`:''}</b>
         <span class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn sm ${rv?'':'primary'}" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'שפר עם AI'}</button>
+          <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
           ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
       </div>
       <div id="enrichOut"></div>
@@ -6618,6 +6606,7 @@ function renderPlanActions(base, targetQ, engineItems){
         <span class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn sm ghost" onclick="planPickAll(${_picked<blk.actions.length?'true':'false'})">${_picked<blk.actions.length?'סמן הכל':'נקה הכל'}</button>
           <button class="btn sm ${rv?'':'primary'}" id="planAiBtn" onclick="reviewPlanWithAI()">${IC('cpu')} ${rv?'בדוק מחדש':'בדוק עם AI'}</button>
+          <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
           ${rv?`<button class="btn sm ghost" onclick="clearPlanReview()">נקה בדיקת AI</button>`:''}</span>
       </div>
       <div class="small" style="margin-top:6px;display:flex;gap:11px;flex-wrap:wrap" title="סיכום בדיקת המנוע על פעולות התוכנית">

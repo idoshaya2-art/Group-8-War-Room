@@ -282,7 +282,7 @@ const sheet=await page.evaluate(()=>{
   const blk=planV6For('Q4');
   const codes=blk.actions.map(a=>planFormCodes(a));
   return { perAction:codes.map(c=>c.join('+')||'—'),
-    // "W3" is the guide's name for currency conversion; the simulator calls it A3-3
+    // W3 has its own official form; A3-3 means convert all foreign currency in an area.
     aliasResolved:planFormCodes({form:'W3'}).join(','),
     // a form that does not exist in the simulator is dropped rather than added blind
     unknownDropped:planFormCodes({form:'Z9-9 (invented)'}).length,
@@ -293,7 +293,7 @@ const sheet=await page.evaluate(()=>{
 ck('a plan action resolves to the simulator form codes it names',
   sheet.perAction[0]==='A3-1+A3-3' && sheet.perAction[13]==='A2-3+A2-4',
   sheet.perAction.slice(0,3).join(' | '));
-ck('W3 resolves to the simulator\'s own code for currency conversion', sheet.aliasResolved==='A3-3');
+ck('W3 keeps its own official currency-exchange form code', sheet.aliasResolved==='W3');
 ck('a form the simulator does not have is dropped, not passed through', sheet.unknownDropped===0);
 ck('"automatic" and "—" are not treated as forms', sheet.autoIsNotAForm===0);
 ck('most of the plan is actionable into the sheet, and the rest says so instead of pretending',

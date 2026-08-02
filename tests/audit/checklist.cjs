@@ -69,7 +69,7 @@ const r1=await row();
 ck('a ticked action gets its own row in the checklist — this is the sync that was missing',
   !!r1, 'action #2 is listed');
 ck('...and it is OPEN while its form has not been added to the sheet', r1.s==='open', r1.need);
-ck('...naming the form that is missing, not just "incomplete"', /A3-3/.test(r1.need), r1.need);
+ck('...naming the form that is missing, not just "incomplete"', /W3/.test(r1.need), r1.need);
 ck('...and offering the one-click fix beside it', r1.fix===true);
 
 await page.evaluate(()=>planAddToSheet(1)); await page.waitForTimeout(700);
@@ -79,10 +79,10 @@ ck('adding the form moves it off OPEN — the checklist tracks the sheet, not a 
   r2.s!=='open', `now ${r2.s}`);
 ck('...but it is NOT a pass yet: the form is present with empty fields, so it reports NOT CHECKED',
   r2.s==='na', r2.need);
-ck('...and says which form is still blank', /A3-3/.test(r2.need), r2.need);
+ck('...and says which form is still blank', /W3/.test(r2.need), r2.need);
 
 await page.evaluate(()=>{ const q=nextQuarters('Q3')[0];
-  S.scenarios[0].levers[q].actions.find(a=>a.form==='A3-3').amount=338790; save(); go('export'); });
+  S.scenarios[0].levers[q].actions.find(a=>a.form==='W3').amount=338790; save(); go('export'); });
 await page.waitForTimeout(800);
 const r3=await row();
 ck('filling the field is what finally makes it a pass', r3.s==='ok', `state ${r3.s}`);
@@ -100,10 +100,10 @@ const perForm=await page.evaluate(()=>{
   const l=[...document.querySelectorAll('#checklist li')].find(x=>/#5 ·/.test(x.innerText));
   return {codes, has:!!l, s:l?(/done/.test(l.querySelector('.check').className)?'ok'
     :(/na/.test(l.querySelector('.check').className)?'na':'open')):null,
-    otherFilled:(lv.actions.find(z=>z.form==='A3-3')||{}).amount};
+    otherFilled:(lv.actions.find(z=>z.form==='W3')||{}).amount};
 });
 ck('a second action stays unchecked even though another form in the same quarter IS filled',
-  perForm.s!=='ok', `#5 is ${perForm.s} while A3-3 holds ${perForm.otherFilled}`);
+  perForm.s!=='ok', `#5 is ${perForm.s} while W3 holds ${perForm.otherFilled}`);
 
 /* ---------- the dashboard reading order, on BOTH dashboards.
    There are two renderers — `bodyDashboard` for a single quarter and `renderCumulativeDashboard`

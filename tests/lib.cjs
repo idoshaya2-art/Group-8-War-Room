@@ -1,7 +1,9 @@
 /* Shared harness for the INTOPIA War Room test suites.
    Every suite runs the real index.html in a real browser — no mocks of the app itself. */
 const path=require('path');
-const CHROME='/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+// CI keeps Chromium under /opt; local contributors can point the same real-browser
+// suites at an installed Chrome without changing the tests themselves.
+const CHROME=process.env.PLAYWRIGHT_CHROME||'/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const APP='file://'+path.resolve(__dirname,'..','index.html');
 
 function loadPlaywright(){

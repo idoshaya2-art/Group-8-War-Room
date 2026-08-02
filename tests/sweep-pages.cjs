@@ -1,5 +1,5 @@
 const { chromium } = require('./lib.cjs').loadPW();
-const PW='/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const PW=require('./lib.cjs').CHROME;
 const results=[];
 const rec=(name,pass,detail)=>results.push({name,pass:!!pass,detail:detail||''});
 
