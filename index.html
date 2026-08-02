@@ -4055,7 +4055,7 @@ function bodyDecisions(c){
         <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה ידנית</button>
       </div>
       <div class="small muted" style="margin-top:6px">לא מוצגות כאן המלצות אוטומטיות. כדי לקבל בדיקת AI יש להוסיף את הרבעון לתוכנית הכתובה; פעולות ידניות שתוסיף יופיעו בגיליון ההזנה.</div>
-    </div>`}
+    </div>${renderDecisionScenarioActions(targetQ)}`}
     <!-- One way out, because there is only one. "המשך לסימולטור" pointed at go('sim'), and the sim
          alias resolves to this very tab now that manual tuning is gone — a button that reloaded the
          page you were already on. The ticked actions go straight to the sheet.
@@ -5581,29 +5581,236 @@ function simForm(f){ return SIM_FORMS.find(x=>x.form===f); }
    the input sheet.  Keeping the selected scenario in UI state makes that connection visible
    even after moving between tabs. */
 function decisionScenario(){ const id=S.ui&&S.ui.decisionScenarioId; return S.scenarios.find(s=>s.id===id)||S.scenarios[0]||null; }
-window.openDecisionActionPicker=(targetQ)=>{
-  const active=decisionScenario();
+/* Real INTOPIA fields for the manual Decisions flow. Values live on the action as `fields`, so
+   Decisions, Strategy and Input all read the same record instead of maintaining three copies. */
+const DECISION_FORM_FIELDS={
+  'A1-1':[
+    {key:'price',label:'מחיר Standard ליחידה',type:'number',required:true,min:0},
+    {key:'deluxePrice',label:'מחיר Deluxe ליחידה',type:'number',min:0,optional:true},
+    {key:'quantity',label:'כמות מתוכננת למכירה',type:'number',required:true,min:0},
+    {key:'advertising',label:'תקציב פרסום',type:'number',required:true,min:0}],
+  'A1-2':[
+    {key:'price',label:'מחיר Standard ליחידה',type:'number',required:true,min:0},
+    {key:'deluxePrice',label:'מחיר Deluxe ליחידה',type:'number',min:0,optional:true},
+    {key:'quantity',label:'כמות מתוכננת למכירה',type:'number',required:true,min:0},
+    {key:'advertising',label:'תקציב פרסום',type:'number',required:true,min:0}],
+  'A1-3':[{key:'offices',label:'מספר משרדי מכירות (0 או 2–10)',type:'number',required:true,min:0,max:10,step:1}],
+  'A2-1':[
+    {key:'chipFactories',label:'מפעלי Chip חדשים',type:'number',min:0,max:3,step:1,optional:true},
+    {key:'pcFactories',label:'מפעלי Computer חדשים',type:'number',min:0,max:3,step:1,optional:true}],
+  'A2-3':[
+    {key:'quantity',label:'כמות שבבים לייצור',type:'number',required:true,min:0},
+    {key:'grade',label:'דרגת שבב X',type:'number',required:true,min:0,max:9,step:1},
+    {key:'model',label:'סוג קו',type:'select',required:true,options:[['Standard','Standard'],['Deluxe','Deluxe']]},
+    {key:'unitCost',label:'עלות מתוכננת ליחידה',type:'number',required:true,min:0}],
+  'A2-4':[
+    {key:'quantity',label:'כמות מחשבים לייצור',type:'number',required:true,min:0},
+    {key:'grade',label:'דרגת מחשב Y',type:'number',required:true,min:0,max:9,step:1},
+    {key:'model',label:'סוג קו',type:'select',required:true,options:[['Standard','Standard'],['Deluxe','Deluxe']]},
+    {key:'unitCost',label:'עלות מתוכננת ליחידה',type:'number',required:true,min:0}],
+  'A3-1':[
+    {key:'direction',label:'כיוון ההעברה',type:'select',required:true,options:[['to','מהמטה לאזור'],['from','מהאזור למטה']]},
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'amount',label:'סכום',type:'number',required:true,min:0}],
+  'A3-2':[
+    {key:'mode',label:'סוג הפעולה',type:'select',required:true,options:[['invest','Invest — השקעה'],['borrow','Borrow — הלוואה']]},
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'amount',label:'סכום',type:'number',required:true,min:0}],
+  'A3-3':[
+    {key:'currency',label:'המטבע הזר להמרה',type:'select',required:true,options:'currencies'},
+    {key:'convertAll',label:'המרת כל היתרה',type:'select',required:true,options:[['yes','כן']] }],
+  'A4':[
+    {key:'transferPriceX',label:'מחיר העברה ל-Chip',type:'number',min:0,optional:true},
+    {key:'transferPriceY',label:'מחיר העברה ל-Computer',type:'number',min:0,optional:true},
+    {key:'reserve',label:'יחידות Chip לשמירה לצרכנים',type:'number',min:0,optional:true},
+    {key:'priorityX',label:'עדיפות עיבוד Chip',type:'number',min:0,step:1,optional:true},
+    {key:'priorityY',label:'עדיפות עיבוד Computer',type:'number',min:0,step:1,optional:true}],
+  'H1-1':[
+    {key:'rdX',label:'השקעת מו״פ ב-Chip / X (SF)',type:'number',min:0,optional:true},
+    {key:'rdY',label:'השקעת מו״פ ב-Computer / Y (SF)',type:'number',min:0,optional:true}],
+  'H1-2':[
+    {key:'study1',label:'מחקר שוק 1',type:'select',required:true,options:'mr'},
+    {key:'study2',label:'מחקר שוק 2',type:'select',options:'mr',optional:true},
+    {key:'study3',label:'מחקר שוק 3',type:'select',options:'mr',optional:true}],
+  'H2':[
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'instrument',label:'אפיק',type:'select',required:true,options:[['investment','Investment'],['bonds','Bonds']]},
+    {key:'amount',label:'סכום',type:'number',required:true,min:0}],
+  'H4':[
+    {key:'borrower',label:'החברה הלווה',type:'select',required:true,options:'companies'},
+    {key:'currency',label:'מטבע ההלוואה',type:'select',required:true,options:'currencies'},
+    {key:'principal',label:'קרן ההלוואה',type:'number',required:true,min:0},
+    {key:'finalPayment',label:'תשלום סופי',type:'number',required:true,min:0},
+    {key:'paymentQuarter',label:'רבעון תשלום',type:'select',required:true,options:'quarters'},
+    {key:'interest',label:'ריבית רבעונית (%)',type:'number',required:true,min:0,step:'0.01'}],
+  'H5':[
+    {key:'receiver',label:'החברה המקבלת',type:'select',required:true,options:'companies'},
+    {key:'product',label:'מוצר',type:'select',required:true,options:[['X','Chip / X'],['Y','Computer / Y']]},
+    {key:'grade',label:'דרגה',type:'number',required:true,min:0,max:9,step:1},
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'restriction',label:'סוג רישיון',type:'select',required:true,options:[['restricted','Restricted'],['unrestricted','Unrestricted']]},
+    {key:'amount',label:'סכום העסקה',type:'number',required:true,min:0}],
+  'H6':[
+    {key:'buyer',label:'חברה קונה',type:'select',required:true,options:'companies'},
+    {key:'destination',label:'אזור יעד',type:'select',required:true,options:'areas'},
+    {key:'product',label:'מוצר',type:'select',required:true,options:[['X','Chip / X'],['Y','Computer / Y']]},
+    {key:'grade',label:'דרגת המוכר',type:'number',required:true,min:0,max:9,step:1},
+    {key:'units',label:'כמות יחידות',type:'number',required:true,min:0},
+    {key:'freight',label:'הובלה על חשבון',type:'select',required:true,options:[['seller','המוכר'],['buyer','הקונה']]},
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'unitPrice',label:'מחיר ליחידה',type:'number',required:true,min:0},
+    {key:'payNow',label:'תשלום עכשיו (%)',type:'number',required:true,min:0,max:100,default:100},
+    {key:'payQ1',label:'תשלום ברבעון הבא (%)',type:'number',required:true,min:0,max:100,default:0},
+    {key:'payQ2',label:'תשלום בעוד שני רבעונים (%)',type:'number',required:true,min:0,max:100,default:0}],
+  'W1':[
+    {key:'receiverCompany',label:'חברה מקבלת',type:'select',required:true,options:'companies'},
+    {key:'receiverArea',label:'אזור מקבל',type:'select',required:true,options:'areas'},
+    {key:'payerCompany',label:'חברה משלמת',type:'select',required:true,options:'companies'},
+    {key:'payerArea',label:'אזור משלם',type:'select',required:true,options:'areas'},
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'amount',label:'סכום',type:'number',required:true,min:0}],
+  'W2':[
+    {key:'product',label:'סוג מפעל / מוצר',type:'select',required:true,options:[['X','Chip / X'],['Y','Computer / Y']]},
+    {key:'factoryNumber',label:'מספר המפעל',type:'number',required:true,min:1,step:1},
+    {key:'buyer',label:'חברה קונה',type:'select',required:true,options:'companies'},
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'price',label:'מחיר המכירה',type:'number',required:true,min:0}],
+  'W3':[
+    {key:'currency',label:'מטבע',type:'select',required:true,options:'currencies'},
+    {key:'side',label:'פעולה',type:'select',required:true,options:[['sell','Sell — מכירה'],['buy','Buy — קנייה']]},
+    {key:'amount',label:'סכום',type:'number',required:true,min:0}]
+};
+function decisionFieldOptions(def){
+  if(Array.isArray(def.options)) return def.options;
+  if(def.options==='currencies') return ['SF','USD','EUR','BRL'].map(x=>[x,x]);
+  if(def.options==='companies') return Array.from({length:10},(_,i)=>[String(i+1),'חברה '+(i+1)]);
+  if(def.options==='areas') return REGIONS.map(r=>[r.id,r.name]);
+  if(def.options==='quarters') return QUARTERS.map(q=>[q,q]);
+  if(def.options==='mr') return (typeof MR_STUDIES!=='undefined'?MR_STUDIES:[]).map(m=>[m.code,`${m.code} · ${m.short}`]);
+  return [];
+}
+function decisionFieldValue(def,values){ const v=values&&values[def.key]; return (v==null||v==='')?(def.default==null?'':def.default):v; }
+function decisionFieldHTML(def,values){
+  const value=decisionFieldValue(def,values), req=def.required?' <span style="color:var(--sig-block)">*</span>':' <span class="muted">(אופציונלי)</span>';
+  if(def.type==='select'){
+    const options=decisionFieldOptions(def).map(([v,t])=>`<option value="${esc(v)}" ${String(value)===String(v)?'selected':''}>${esc(t)}</option>`).join('');
+    return `<div class="field"><label class="fl" for="daf_${def.key}">${def.label}${req}</label><select class="f" id="daf_${def.key}"><option value="">בחר…</option>${options}</select></div>`;
+  }
+  return `<div class="field"><label class="fl" for="daf_${def.key}">${def.label}${req}</label><input class="f" id="daf_${def.key}" type="${def.type||'text'}" value="${esc(value)}" ${def.min!=null?`min="${def.min}"`:''} ${def.max!=null?`max="${def.max}"`:''} ${def.step!=null?`step="${def.step}"`:''} inputmode="decimal"></div>`;
+}
+function decisionActionInitialFields(lv,act){
+  if(act&&act.fields) return Object.assign({},act.fields);
+  const sf=act&&simForm(act.form), rl=act&&act.region&&lv&&lv.regions?lv.regions[act.region]:null; if(!sf) return {};
+  const line=rl&&sf.product?([rl,...(rl.lines||[])].find(x=>x.product===sf.product)||rl):rl;
+  if(sf.kind==='produce') return {quantity:line&&line.production||'',grade:(line&&line.grade)!=null?line.grade:'',model:line&&line.model||'Standard',unitCost:line&&line.unitCost||''};
+  if(sf.kind==='price') return {price:line&&line.price||'',quantity:line&&line.qtySold||'',advertising:line&&line.advertising||''};
+  if(sf.kind==='factory') return {
+    chipFactories:rl&&(rl.chipFactories||((rl.product==='X'&&rl.newFac)||0))||'',
+    pcFactories:rl&&(rl.pcFactories||((rl.product!=='X'&&rl.newFac)||0))||''};
+  if(sf.kind==='offices') return {offices:rl&&rl.offices||''};
+  if(sf.kind==='transfer') return {direction:rl&&rl.transferOut>0?'from':'to',currency:'',amount:rl&&(rl.transferOut||rl.transferIn)||''};
+  if(sf.kind==='invest') return {mode:rl&&rl.borrowLocal>0?'borrow':'invest',currency:'',amount:rl&&(rl.borrowLocal||rl.invest)||''};
+  if(sf.kind==='rd') return {rdX:lv&&lv.rdX||'',rdY:lv&&lv.rdY||''};
+  return {};
+}
+window.openDecisionActionPicker=(targetQ,preferredId)=>{
+  const active=S.scenarios.find(s=>s.id===preferredId)||decisionScenario();
   const groups=['ייצור','מכירות','פיננסי','אחר'];
-  const options=S.scenarios.map(s=>`<option value="${s.id}" ${active&&s.id===active.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  const options=S.scenarios.map(s=>`<option value="${s.id}" ${active&&s.id===active.id?'selected':''}>${esc(s.name)}</option>`).join('')+`<option value="__new__" ${!S.scenarios.length?'selected':''}>＋ תוכנית חדשה</option>`;
   const cards=groups.map(g=>`<div style="margin-top:14px"><b class="small" style="color:var(--muted)">${g}</b>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:7px">${SIM_FORMS.filter(f=>f.grp===g).map(f=>`<button class="btn" style="text-align:start;min-height:58px;white-space:normal" onclick="decisionAddAction('${targetQ}','${f.form}')"><span class="form">${f.form}</span><br><b>${f.label}</b></button>`).join('')}</div></div>`).join('');
   openModal('＋ הוספת פעולה — כל טפסי ההחלטה',`
     <div class="field"><label class="fl">התרחיש שיסונכרן לגיליון ההזנה</label>
-      <select class="f" id="decisionScenario">${options||'<option value="__new__">תוכנית חדשה</option>'}</select></div>
-    <div class="small muted" style="line-height:1.7">לחץ על טופס כדי להוסיף אותו ל-${targetQ}. לאחר מכן הוא מופיע בגיליון ההזנה של אותו תרחיש.</div>
+      <select class="f" id="decisionScenario">${options}</select></div>
+    <div class="small muted" style="line-height:1.7">בחר טופס. בשלב הבא ייפתחו השדות האמיתיים לכמויות, סכומים ופרטי העסקה; הפעולה תתווסף רק לאחר שמירה.</div>
     ${cards}`,'');
 };
 window.decisionAddAction=(targetQ,form)=>{
-  const sel=document.getElementById('decisionScenario'); let sc=sel&&sel.value?S.scenarios.find(s=>s.id===sel.value):decisionScenario();
-  if(!sc){ sc={id:uid(),name:'תוכנית '+targetQ,base:S.activeQuarter,levers:{},createdAt:Date.now()}; S.scenarios.unshift(sc); }
-  ensureLevRegions(sc,targetQ);
-  const before=(sc.levers[targetQ].actions||[]).length;
-  addSimAction(sc.id,targetQ,form);
-  if((sc.levers[targetQ].actions||[]).length===before) return;
+  const sel=document.getElementById('decisionScenario');
+  openDecisionActionForm(targetQ,form,sel&&sel.value||'__new__');
+};
+window.openDecisionActionForm=(targetQ,form,scenarioId,aid)=>{
+  const sf=simForm(form); if(!sf) return;
+  const sc=S.scenarios.find(s=>s.id===scenarioId)||null;
+  const lv=sc&&sc.levers[targetQ], act=aid&&lv&&(lv.actions||[]).find(a=>a.aid===aid);
+  const values=decisionActionInitialFields(lv,act||{form,region:sf.scope==='region'?'europe':undefined});
+  const region=act&&act.region||'europe';
+  const regionField=sf.scope==='region'?`<div class="field"><label class="fl" for="daf_region">אזור <span style="color:var(--sig-block)">*</span></label><select class="f" id="daf_region">${REGIONS.filter(r=>r.id!=='hq').map(r=>`<option value="${r.id}" ${r.id===region?'selected':''}>${r.name}</option>`).join('')}</select></div>`:'';
+  const fields=(DECISION_FORM_FIELDS[form]||[]).map(d=>decisionFieldHTML(d,values)).join('');
+  openModal(`${aid?'עריכת':'הוספת'} פעולה · ${form} — ${sf.label}`,`
+    <div class="small muted" style="line-height:1.75;margin-bottom:12px">${targetQ} · ${sc?`נשמר בתרחיש <b>${esc(sc.name)}</b>`:'תוכנית חדשה תיווצר רק לאחר שמירה'} · השדות המסומנים בכוכבית הם חובה.</div>
+    <div id="decisionActionErrors" class="tag r" role="alert" style="display:none;margin-bottom:12px;white-space:normal;line-height:1.7"></div>
+    <div style="display:grid;grid-template-columns:1fr;gap:4px">${regionField}${fields}</div>`,
+    `<button class="btn primary" id="decisionActionSave" onclick="saveDecisionAction('${targetQ}','${form}','${sc?sc.id:'__new__'}','${aid||''}')">${IC('check')} שמור והוסף להחלטות</button>
+     <button class="btn" onclick="openDecisionActionPicker('${targetQ}','${sc?sc.id:''}')">חזרה לבחירת פעולה</button>`);
+};
+function readDecisionActionFields(form){
+  const out={}; (DECISION_FORM_FIELDS[form]||[]).forEach(d=>{ const el=document.getElementById('daf_'+d.key); if(!el)return;
+    if(d.type==='number') out[d.key]=el.value===''?'':Number(el.value); else out[d.key]=el.value; }); return out;
+}
+function validateDecisionAction(form,fields){
+  const errors=[];
+  (DECISION_FORM_FIELDS[form]||[]).forEach(d=>{ const v=fields[d.key];
+    if(d.required&&(v===''||v==null)) errors.push(`יש למלא: ${d.label}`);
+    if(d.type==='number'&&v!==''&&v!=null){ if(!Number.isFinite(v)) errors.push(`${d.label}: יש להזין מספר`); if(d.min!=null&&v<d.min) errors.push(`${d.label}: הערך המינימלי הוא ${d.min}`); if(d.max!=null&&v>d.max) errors.push(`${d.label}: הערך המקסימלי הוא ${d.max}`); }
+  });
+  if(form==='A1-3'&&fields.offices!==0&&(fields.offices<2||fields.offices>10)) errors.push('מספר משרדי המכירות חייב להיות 0 או בין 2 ל-10.');
+  if(form==='A2-1'&&!((fields.chipFactories||0)+(fields.pcFactories||0))) errors.push('יש להזין לפחות מפעל אחד מסוג Chip או Computer.');
+  if(form==='H1-1'&&!((fields.rdX||0)+(fields.rdY||0))) errors.push('יש להזין השקעת מו״פ לפחות במוצר אחד.');
+  if(form==='A4'&&!Object.values(fields).some(v=>Number(v)>0)) errors.push('יש להזין לפחות ערך אחד להעברה או לעדיפות.');
+  if(form==='H1-2'){
+    const studies=[fields.study1,fields.study2,fields.study3].filter(Boolean);
+    if(new Set(studies).size!==studies.length) errors.push('אין לבחור את אותו מחקר יותר מפעם אחת.');
+  }
+  if(form==='H6'&&Math.round((fields.payNow||0)+(fields.payQ1||0)+(fields.payQ2||0))!==100) errors.push('אחוזי התשלום חייבים להסתכם ב-100%.');
+  return errors;
+}
+function decisionActionSummary(act){
+  const defs=DECISION_FORM_FIELDS[act.form]||[], f=act.fields||{};
+  return defs.map(d=>{ const v=f[d.key]; if(v===''||v==null||v===0)return null;
+    const opt=d.type==='select'?decisionFieldOptions(d).find(x=>String(x[0])===String(v)):null;
+    return `${d.label}: ${opt?opt[1]:fmt(v)}`; }).filter(Boolean).join(' · ');
+}
+function applyDecisionActionToLevers(lv,act){
+  const sf=simForm(act.form), f=act.fields||{}; if(!sf)return;
+  if(sf.kind==='rd'){ lv.rdX=Number(f.rdX)||0; lv.rdY=Number(f.rdY)||0; lv.rd=lv.rdX+lv.rdY; return; }
+  const rl=act.region&&lv.regions[act.region];
+  if(sf.kind==='produce'){
+    const line=lineOfAction(lv,act); if(!line)return;
+    line.production=Number(f.quantity)||0; line.grade=f.grade===''?null:Number(f.grade); line.model=f.model||'Standard'; line.unitCost=Number(f.unitCost)||0;
+  } else if(sf.kind==='price'){
+    const line=lineOfAction(lv,act); if(!line)return;
+    line.price=Number(f.price)||0; line.qtySold=Number(f.quantity)||0; line.advertising=Number(f.advertising)||0; line.sales=Math.round(line.price*line.qtySold); line.margin=null;
+  } else if(sf.kind==='factory'&&rl){ rl.chipFactories=Number(f.chipFactories)||0; rl.pcFactories=Number(f.pcFactories)||0; rl.newFac=rl.chipFactories+rl.pcFactories; }
+  else if(sf.kind==='offices'&&rl) rl.offices=Number(f.offices)||0;
+  else if(sf.kind==='transfer'&&rl){ rl.transferIn=f.direction==='to'?Number(f.amount)||0:0; rl.transferOut=f.direction==='from'?Number(f.amount)||0:0; }
+  else if(sf.kind==='invest'&&rl){ rl.invest=f.mode==='invest'?Number(f.amount)||0:0; rl.borrowLocal=f.mode==='borrow'?Number(f.amount)||0:0; }
+  if(act.form==='A3-3'&&rl) rl.convertAll=f.convertAll==='yes';
+  if(act.form==='A4'&&rl){ rl.chipsToPC=Number(f.reserve)||0; rl.transferPriceX=Number(f.transferPriceX)||0; rl.transferPriceY=Number(f.transferPriceY)||0; rl.priorityX=Number(f.priorityX)||0; rl.priorityY=Number(f.priorityY)||0; }
+  if(act.form==='H1-2') act.mrList=[f.study1,f.study2,f.study3].filter(Boolean);
+  if(act.form==='H2') lv.securities=Number(f.amount)||0;
+  if(act.form==='H4') lv.h4Loan=Number(f.principal)||0;
+  if(act.form==='H5') lv.h5License=Number(f.amount)||0;
+  if(act.form==='H6'&&rl){ rl.b2bUnits=Number(f.units)||0; rl.b2bPrice=Number(f.unitPrice)||0; }
+  if(act.form==='W3'&&rl) rl.fxSell=f.side==='sell'?Number(f.amount)||0:0;
+}
+window.saveDecisionAction=(targetQ,form,scenarioId,aid)=>{
+  const fields=readDecisionActionFields(form), errors=validateDecisionAction(form,fields), box=document.getElementById('decisionActionErrors');
+  if(errors.length){ if(box){ box.style.display='block'; box.innerHTML=`<b>יש לתקן לפני השמירה:</b><ul style="margin:6px 0 0;padding-inline-start:20px">${errors.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`; } return; }
+  let sc=S.scenarios.find(s=>s.id===scenarioId);
+  if(!sc){ sc={id:uid(),name:'תוכנית '+targetQ,base:S.activeQuarter,levers:{},createdAt:Date.now(),source:'manual'}; S.scenarios.unshift(sc); }
+  ensureLevRegions(sc,targetQ); const lv=sc.levers[targetQ]; lv.actions=lv.actions||[];
+  const region=(simForm(form)||{}).scope==='region'?(document.getElementById('daf_region')||{}).value:undefined;
+  let act=aid&&lv.actions.find(a=>a.aid===aid);
+  const dupe=lv.actions.some(a=>a!==act&&a.form===form&&a.region===region);
+  if(dupe){ if(box){ box.style.display='block'; box.textContent='הפעולה הזו כבר קיימת באזור שנבחר. אפשר לערוך את הפעולה הקיימת.'; } return; }
+  if(act) clearActionFields(lv,act);
+  else { act={aid:uid(),form,source:'manual'}; lv.actions.push(act); }
+  act.form=form; act.region=region; act.fields=fields; act.amount=Number(fields.amount||fields.principal||fields.units||fields.price)||0; act.note=decisionActionSummary(act); act.updatedAt=Date.now();
+  if(act.source!=='strategy') act.source='manual'; else act.editedByUser=true;
+  applyDecisionActionToLevers(lv,act);
   S.ui=S.ui||{}; S.ui.decisionScenarioId=sc.id; S.ui.exportScenarioId=sc.id;
-  save(); closeModal();
-  toast(`${form} נוסף ל"${sc.name}" ומוכן בגיליון ההזנה ✓`,'g');
-  if(currentPage==='decide') go('decide');
+  save(); closeModal(); toast(`${form} ${aid?'עודכן':'נוסף'} ל"${sc.name}" ומסונכרן להזנה ✓`,'g'); go('plan');
 };
 // Rebuild the action list from a legacy lever object (scenarios created before the builder existed).
 function deriveSimActions(lv){ const acts=[]; const g=()=>Math.random().toString(36).slice(2,8);
@@ -5642,6 +5849,7 @@ function syncActionsToLevers(lv){ lv.actions=lv.actions||[]; const g=()=>Math.ra
    amount or the note onto the action itself. */
 function simActionFilled(lv,act){
   const sf=simForm(act.form); if(!sf||!lv) return false;
+  if(act.fields&&Object.keys(act.fields).length) return validateDecisionAction(act.form,act.fields).length===0;
   if(sf.kind==='rd') return (lv.rd||0)>0;
   if(sf.kind==='note') return (act.amount||0)>0 || !!String(act.note||'').trim();
   const rl=((lv.regions||{})[act.region])||{};
@@ -5657,14 +5865,22 @@ function simActionFilled(lv,act){
 }
 // Zero out the engine fields an action controls, so the projection always matches the visible action list.
 function clearActionFields(lv,act){ const sf=simForm(act.form); if(!sf)return;
-  if(sf.kind==='rd'){ lv.rd=0; return; }
+  if(sf.kind==='rd'){ lv.rd=0; lv.rdX=0; lv.rdY=0; return; }
+  if(act.form==='H2') lv.securities=0;
+  if(act.form==='H4') lv.h4Loan=0;
+  if(act.form==='H5') lv.h5License=0;
   const rl=lv.regions[act.region]; if(!rl)return;
-  if(sf.kind==='produce'){ rl.production=0; rl.unitCost=0; }
-  else if(sf.kind==='price'){ rl.price=0; rl.qtySold=0; rl.sales=0; rl.advertising=0; rl.advPct=null; rl.margin=null; }
+  const line=(sf.kind==='produce'||sf.kind==='price')?lineOfAction(lv,act):rl;
+  if(sf.kind==='produce'&&line){ line.production=0; line.unitCost=0; }
+  else if(sf.kind==='price'&&line){ line.price=0; line.qtySold=0; line.sales=0; line.advertising=0; line.advPct=null; line.margin=null; }
   else if(sf.kind==='offices') rl.offices=0;
-  else if(sf.kind==='factory') rl.newFac=0;
-  else if(sf.kind==='transfer') rl.transferIn=0;
-  else if(sf.kind==='invest') rl.invest=0;
+  else if(sf.kind==='factory'){ rl.newFac=0; rl.chipFactories=0; rl.pcFactories=0; }
+  else if(sf.kind==='transfer'){ rl.transferIn=0; rl.transferOut=0; }
+  else if(sf.kind==='invest'){ rl.invest=0; rl.borrowLocal=0; }
+  if(act.form==='A3-3') rl.convertAll=false;
+  if(act.form==='A4'){ rl.chipsToPC=0; rl.transferPriceX=0; rl.transferPriceY=0; rl.priorityX=0; rl.priorityY=0; }
+  if(act.form==='H6'){ rl.b2bUnits=0; rl.b2bPrice=0; }
+  if(act.form==='W3') rl.fxSell=0;
 }
 /* FIX #74 — routing a field edit to the right production line.
    Line 0 is the region object itself (kept for backward compatibility with every saved
@@ -6329,8 +6545,8 @@ function parsePlanReview(txt, count){
 }
 function buildPlanReviewPrompt(targetQ){
   const blk=planV6For(targetQ); if(!blk) return '';
-  const listTxt=blk.actions.map((x,i)=>
-    `${i+1}. ${x.what}${x.form&&x.form!=='—'?` [טופס ${x.form}]`:''}\n   ערך כלכלי לפי התוכנית: ${x.value||'—'}`
+  const listTxt=blk.actions.map((x,i)=>({x,n:x.n!=null?x.n:i+1})).filter(y=>!isPlanRemoved(targetQ,y.n)).map(({x,n})=>
+    `${n}. ${x.what}${x.form&&x.form!=='—'?` [טופס ${x.form}]`:''}\n   ערך כלכלי לפי התוכנית: ${x.value||'—'}`
   ).join('\n');
   const floorTxt=blk.floorTotal?`רצפת הרבעון לפי התוכנית: ${fmt(blk.floorTotal)} SF. מקורות: ${blk.sources}`:'';
   return [buildPlanAIContext(),
@@ -6379,6 +6595,16 @@ const PLAN_AI_STATES = {
 function planPicks(q){ S.ui=S.ui||{}; S.ui.planPicks=S.ui.planPicks||{};
   S.ui.planPicks[q]=S.ui.planPicks[q]||{}; return S.ui.planPicks[q]; }
 function isPicked(q,n){ return !!planPicks(q)[n]; }
+function planRemoved(q){ S.ui=S.ui||{}; S.ui.planRemoved=S.ui.planRemoved||{};
+  S.ui.planRemoved[q]=S.ui.planRemoved[q]||{}; return S.ui.planRemoved[q]; }
+function isPlanRemoved(q,n){ return !!planRemoved(q)[n]; }
+window.removePlanAction=(n)=>{
+  const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  planRemoved(q)[n]=true; delete planPicks(q)[n]; save(); go('plan');
+};
+window.restorePlanActions=()=>{
+  const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter; S.ui.planRemoved[q]={}; save(); go('plan');
+};
 /* A sale action is the one plan line whose value depends on a number the plan does not fix: the
    price. Ticking one therefore asks for it, and shows what the evidence says — the calibrated
    demand anchor if there is one, otherwise the competitors' observed prices from MR17&28,
@@ -6452,7 +6678,7 @@ window.planPickAll=(on)=>{
   if(!blk) return;
   const picks=planPicks(q);
   Object.keys(picks).forEach(k=>delete picks[k]);
-  if(on) blk.actions.forEach((a,i)=>{ picks[a.n!=null?a.n:(i+1)]=true; });
+  if(on) blk.actions.forEach((a,i)=>{ const n=a.n!=null?a.n:(i+1); if(!isPlanRemoved(q,n)) picks[n]=true; });
   save(); go('plan');
 };
 /* What the ticked actions do to the quarter's cash.
@@ -6471,7 +6697,7 @@ function planPickedCash(q){
   const picks=planPicks(q);
   blk.actions.forEach((a,i)=>{
     const n=a.n!=null?a.n:(i+1);
-    if(!picks[n]) return;
+    if(!picks[n]||isPlanRemoved(q,n)) return;
     out.picked++;
     const c=a.cash||{};
     if(c.floor){ out.inFloor+=(c.out||0); out.lines.push({n, what:a.what, floor:true, out:c.out||0}); return; }
@@ -6532,16 +6758,49 @@ window.planAddToSheet=(idx)=>{
              :`${codes.join(' + ')} כבר קיימים בגיליון`, added?'g':'a');
   go('export');
 };
+/* Strategy-generated and manually added actions share one editable list. The engine may validate
+   these values, but it never authors this list: provenance is either Strategy/AI or manual. */
+function renderDecisionScenarioActions(targetQ){
+  const sc=decisionScenario();
+  const options=S.scenarios.map(s=>`<option value="${s.id}" ${sc&&s.id===sc.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  if(!sc) return `<div class="read" style="margin-top:18px"><div class="between" style="gap:8px;flex-wrap:wrap"><span class="rh">פעולות אסטרטגיה ועריכה ידנית</span><button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button></div><div class="small muted" style="margin-top:7px">טרם נוצרה רשימת פעולות. החלת אסטרטגיה או הוספת פעולה תיצור אותה כאן.</div></div>`;
+  const lv=sc.levers&&sc.levers[targetQ], acts=lv&&lv.actions||[];
+  const cards=acts.map((a,i)=>{ const sf=simForm(a.form)||{label:a.form}; const r=a.region?(REGIONS.find(x=>x.id===a.region)||{}):null;
+    const fields=a.fields||decisionActionInitialFields(lv,a), summary=decisionActionSummary(Object.assign({},a,{fields}));
+    const source=a.source==='strategy'?'אסטרטגיית AI':'נוסף ידנית';
+    return `<div class="act info" data-decision-action="${a.aid}">
+      <div class="an">${i+1}</div><div class="at">
+        <div class="between" style="gap:8px;flex-wrap:wrap"><b style="font-size:var(--fs-md)">${esc(sf.label)}</b>
+          <span class="row" style="gap:7px"><span class="tag ${source==='אסטרטגיית AI'?'b':'a'}">${source}${a.editedByUser?' · נערך ידנית':''}</span><span class="form">${a.form}</span></span></div>
+        <div class="small muted" style="margin-top:6px;line-height:1.75">${r?`<b>${r.name}</b>${summary?' · ':''}`:''}${summary||'הפעולה הגיעה מהאסטרטגיה; פתח עריכה כדי להשלים או לעדכן את שדות הטופס.'}</div>
+        <div class="row" style="gap:8px;margin-top:9px;flex-wrap:wrap">
+          <button class="btn sm" onclick="openDecisionActionForm('${targetQ}','${a.form}','${sc.id}','${a.aid}')">✎ ערוך</button>
+          <button class="btn sm ghost" aria-label="הסר פעולה" title="הסר פעולה" onclick="decisionRemoveAction('${sc.id}','${targetQ}','${a.aid}')">−</button>
+        </div></div></div>`; }).join('');
+  const strategyBased=sc.source==='strategy'||acts.some(a=>a.source==='strategy');
+  return `<div class="read" id="decisionScenarioActions" style="margin-top:18px">
+    <div class="between" style="gap:10px;flex-wrap:wrap"><div><span class="rh">הרשימה הסופית לעריכה · ${acts.length} פעולות</span><div class="small muted" style="margin-top:4px">${strategyBased?'מבוססת על האסטרטגיה שנוצרה ב-AI ונבדקה מול כללי המשחק;':'הרשימה נוצרה ידנית. אפשר להחיל אסטרטגיית AI ממסך האסטרטגיה;'} אפשר להוסיף, לערוך או להסיר פעולות ידנית.</div></div>
+      <span class="row" style="gap:8px;flex-wrap:wrap"><select class="f" style="width:auto;min-width:190px" onchange="setDecisionScenario(this.value)">${options}</select><button class="btn sm" onclick="openDecisionActionPicker('${targetQ}','${sc.id}')">＋ הוסף פעולה</button></span></div>
+    <div style="margin-top:12px">${cards||'<div class="small muted">אין עדיין פעולות בתרחיש הזה.</div>'}</div></div>`;
+}
+window.setDecisionScenario=(id)=>{ if(!S.scenarios.some(s=>s.id===id))return; S.ui=S.ui||{}; S.ui.decisionScenarioId=id; S.ui.exportScenarioId=id; save(); go('plan'); };
+window.decisionRemoveAction=(scenarioId,q,aid)=>{
+  const sc=S.scenarios.find(s=>s.id===scenarioId), lv=sc&&sc.levers&&sc.levers[q]; if(!lv)return;
+  const act=(lv.actions||[]).find(a=>a.aid===aid); if(!act)return;
+  clearActionFields(lv,act); lv.actions=lv.actions.filter(a=>a.aid!==aid); save(); toast(`${act.form} הוסר מההחלטות ומההזנה`,'g'); go('plan');
+};
+window.dismissPlanAiMissing=(i)=>{ const q=nextQuarters(S.activeQuarter)[0]||S.activeQuarter, rv=S.ai&&S.ai.planReview; if(!rv||rv.q!==q)return; rv.missing.splice(i,1); save(); go('plan'); };
 /* The plan as the page's decision list. Same card shape as the engine list it replaces, so the
    density and collapse rules the surfaces suite polices still apply. */
 function renderPlanActions(targetQ){
   const blk=planV6For(targetQ);
   if(!blk) return '';
   const rv=(S.ai&&S.ai.planReview&&S.ai.planReview.q===targetQ)?S.ai.planReview:null;
-  const tally=planV6Tally(blk.actions);
+  const visible=blk.actions.map((a,i)=>({a,i,n:a.n!=null?a.n:(i+1)})).filter(x=>!isPlanRemoved(targetQ,x.n));
+  const removed=blk.actions.length-visible.length;
+  const tally=planV6Tally(visible.map(x=>x.a));
   const _picked=planPickedCash(targetQ).picked;
-  const cards=blk.actions.map((a,i)=>{
-    const n=a.n!=null?a.n:(i+1);
+  const cards=visible.map(({a,i,n})=>{
     const ev=planV6Check(a.check);
     const av=rv?rv.byN[n]:null;
     const worst = (ev.state==='block'||(av&&av.verdict==='blocked')) ? 'red'
@@ -6556,7 +6815,8 @@ function renderPlanActions(targetQ){
           <b style="flex:1;min-width:180px;font-size:var(--fs-md)">${esc(a.what)}</b>
           <span class="row" style="gap:8px;align-items:baseline">
             ${as?`<span class="pv6 ${as.cls}">${as.glyph} ${as.label}</span>`:''}
-            ${a.form&&a.form!=='—'?`<span class="form">${esc(a.form)}</span>`:''}</span>
+            ${a.form&&a.form!=='—'?`<span class="form">${esc(a.form)}</span>`:''}
+            <button class="btn sm ghost" aria-label="הסר פעולה" title="הסר פעולה מהרשימה" onclick="removePlanAction(${n})">−</button></span>
         </div>
         ${a.value?`<div class="small muted" style="margin-top:5px;line-height:1.7">${esc(a.value)}</div>`:''}
         ${av?`<div class="small" style="margin-top:8px;padding:8px 10px;border-radius:8px;line-height:1.75;background:rgba(139,124,255,.10);border:1px solid rgba(139,124,255,.28)">
@@ -6575,13 +6835,15 @@ function renderPlanActions(targetQ){
       </div></div>`;
   }).join('');
   return `<div id="decisionsTop"></div>
+    ${renderDecisionScenarioActions(targetQ)}
     <div style="margin:14px 0 12px">
       <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
-        <b style="font-size:var(--fs-lg)" title="הפעולות כפי שהוזנו בקובץ התוכנית, גרסה ${PLAN_V6_VERSION}">התוכנית שלי ל-${targetQ} · <span style="color:var(--sig-act)">${_picked}</span>/${blk.actions.length} מסומנות</b>
+        <b style="font-size:var(--fs-lg)" title="הפעולות כפי שהוזנו בקובץ התוכנית, גרסה ${PLAN_V6_VERSION}">התוכנית שלי ל-${targetQ} · <span style="color:var(--sig-act)">${_picked}</span>/${visible.length} מסומנות</b>
         <span class="row" style="gap:8px;flex-wrap:wrap">
-          <button class="btn sm ghost" onclick="planPickAll(${_picked<blk.actions.length?'true':'false'})">${_picked<blk.actions.length?'סמן הכל':'נקה הכל'}</button>
+          <button class="btn sm ghost" onclick="planPickAll(${_picked<visible.length?'true':'false'})">${_picked<visible.length?'סמן הכל':'נקה הכל'}</button>
           <button class="btn sm ${rv?'':'primary'}" id="planAiBtn" onclick="reviewPlanWithAI()">${IC('cpu')} ${rv?'בדוק מחדש':'בדוק עם AI'}</button>
           <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
+          ${removed?`<button class="btn sm ghost" onclick="restorePlanActions()">שחזר ${removed} שהוסרו</button>`:''}
           ${rv?`<button class="btn sm ghost" onclick="clearPlanReview()">נקה בדיקת AI</button>`:''}</span>
       </div>
       <div class="small" style="margin-top:6px;display:flex;gap:11px;flex-wrap:wrap" title="סיכום בדיקת הנתונים והחוקים על פעולות התוכנית">
@@ -6595,12 +6857,12 @@ function renderPlanActions(targetQ){
       <div class="eyebrow" style="color:var(--sig-block)">${IC('warn')} נקודות שה-AI מצא שחסרות בתוכנית</div>
       <div class="small muted" style="line-height:1.8;margin-top:4px">תוספות שה-AI זיהה בבדיקת התוכנית. הן אינן מגיעות מרשימת המלצות אוטומטית.</div>
       <ul style="padding-inline-start:20px;margin:10px 0 0;line-height:1.9">
-        ${rv.missing.map(m=>`<li class="small"><b>${m.what}</b> <span class="muted">— ${m.why} (AI)</span></li>`).join('')}
+        ${rv.missing.map((m,i)=>`<li class="small"><span class="between" style="gap:8px"><span><b>${m.what}</b> <span class="muted">— ${m.why} (AI)</span></span><button class="btn sm ghost" aria-label="הסר הצעה" onclick="dismissPlanAiMissing(${i})">−</button></span></li>`).join('')}
       </ul></div>`:''}`;
 }
-/* The written plan is the decisions tab's sole authored action list. Deterministic checks beside
-   each line validate current facts and arithmetic; only the explicit AI review may suggest a
-   missing action. */
+/* The written plan remains the checked baseline beneath the editable final list. Deterministic
+   checks validate its facts and arithmetic; only an explicit AI review may suggest a missing
+   baseline action, while Strategy/manual actions live in the shared scenario above. */
 /* ==========================================================================
    THE WRITTEN PLAN (Q4-Q9 v5) — the team's own strategy document, embedded so the tool
    can hand it back and, more usefully, hand back an UPDATED copy in the same layout with
@@ -6881,13 +7143,13 @@ window.submitScenario=(id)=>{ const i=S.scenarios.findIndex(s=>s.id===id); if(i<
 
 /* ----- EXPORT (F8) ----- */
 function bodySubmit(c){
-  const q=S.activeQuarter; const sc=S.scenarios[0]; const targetQ=nextQuarters(q)[0]||q;
+  const q=S.activeQuarter; const sc=selectedExportScenario()||S.scenarios[0]; const targetQ=nextQuarters(q)[0]||q;
   /* This tab answers one question: what do I type into the simulator this quarter. That is the
      set of actions ticked in the decisions tab — nothing else. The full form catalogue, the plan
      document and the scenario machinery moved below into disclosures, and the pre-submit
      checklist stayed on the surface because it is the last thing that catches a missing price. */
   const _blk=planV6For(targetQ), _picks=planPicks(targetQ);
-  const _chosen=_blk?_blk.actions.map((a,i)=>({a,n:(a.n!=null?a.n:i+1)})).filter(x=>_picks[x.n]):[];
+  const _chosen=_blk?_blk.actions.map((a,i)=>({a,n:(a.n!=null?a.n:i+1)})).filter(x=>_picks[x.n]&&!isPlanRemoved(targetQ,x.n)):[];
   const _forms=[]; _chosen.forEach(x=>planFormCodes(x.a).forEach(f=>{ if(!_forms.includes(f)) _forms.push(f); }));
   const _noForm=_chosen.filter(x=>!planFormCodes(x.a).length);
   const _pickedHTML = _blk ? `
@@ -7109,7 +7371,12 @@ function buildInputRows(targetQ,sc){
     const sf=simForm(a.form); if(!sf || a.form==='H1-2') return;
     const r=a.region?(REGIONS.find(x=>x.id===a.region)||{}):null;
     const where=r?` — ${r.name}`:'';
-    if(sf.kind==='note'){
+    if(a.fields&&Object.keys(a.fields).length){
+      const f=a.fields;
+      const primary=Number(f.amount||f.quantity||f.units||f.principal||f.price||((f.rdX||0)+(f.rdY||0)))||0;
+      const source=a.source==='strategy'?'מאסטרטגיית AI':'נוסף ידנית';
+      add(a.form,`${sf.label}${where}`,primary,`${decisionActionSummary(a)} · ${source}`,'');
+    } else if(sf.kind==='note'){
       add(a.form,`${sf.label}${where}`,a.amount||0,a.note||'נוסף מלשונית ההחלטות — מלא את פרטי הטופס',simActionFilled(lev,a)?'':'למלא');
     } else if(!simActionFilled(lev,a)){
       add(a.form,`${sf.label}${where}`,0,'נוסף מלשונית ההחלטות — מלא את שדות הפעולה','למלא');
@@ -7421,7 +7688,7 @@ function renderChecklist(box,targetQ,sc){
      Section A is one row per ticked action, which is the sync that was missing. Section B keeps
      the legality checks, each carrying its own explanation instead of a bare label. */
   const _blk=planV6For(targetQ), _picks=planPicks(targetQ);
-  const _chosen=_blk?_blk.actions.map((a,i)=>({a,i,n:(a.n!=null?a.n:i+1)})).filter(x=>_picks[x.n]):[];
+  const _chosen=_blk?_blk.actions.map((a,i)=>({a,i,n:(a.n!=null?a.n:i+1)})).filter(x=>_picks[x.n]&&!isPlanRemoved(targetQ,x.n)):[];
   // which form codes actually reached the quarter's sheet
   const _lev=sc&&sc.levers[targetQ];
   const _sheetActs=(_lev&&_lev.actions)||[];
@@ -8340,10 +8607,11 @@ function renderStrategy(){
 }
 window.applyStrategy=(i)=>{
   const st=S.ai&&S.ai.strategy; const v=st&&st.variants[i]; if(!v)return;
-  const sc={id:uid(),name:v.name.slice(0,28),base:st.base,levers:JSON.parse(JSON.stringify(v.levers)),createdAt:Date.now()};
-  Object.keys(sc.levers).forEach(q=>syncActionsToLevers(sc.levers[q]));
-  S.scenarios.unshift(sc); save(); toast('נוצר תרחיש "'+sc.name+'" — נפתח בסימולטור','g');
-  go('sim'); setTimeout(()=>{ try{ editScenario(sc.id); }catch(e){} },60);
+  const sc={id:uid(),name:v.name.slice(0,28),base:st.base,levers:JSON.parse(JSON.stringify(v.levers)),createdAt:Date.now(),source:'strategy',strategyName:v.name,aiCheckedAt:st.at};
+  Object.keys(sc.levers).forEach(q=>{ syncActionsToLevers(sc.levers[q]); (sc.levers[q].actions||[]).forEach(a=>{ a.source='strategy'; a.strategyName=v.name; }); });
+  S.scenarios.unshift(sc); S.ui=S.ui||{}; S.ui.decisionScenarioId=sc.id; S.ui.exportScenarioId=sc.id;
+  save(); toast('האסטרטגיה "'+sc.name+'" נוספה להחלטות — אפשר לערוך או להסיר כל פעולה','g');
+  go('plan');
 };
 /* ==========================================================================
    DECISION ENRICHMENT — the fourth layer.

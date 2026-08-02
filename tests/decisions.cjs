@@ -30,17 +30,77 @@ const manualPicker=await page.evaluate(async()=>{
   openDecisionActionPicker(targetQ);
   const forms=[...document.querySelectorAll('#modalRoot .form')].map(x=>x.textContent.trim());
   decisionAddAction(targetQ,'W3');
+  const formOpened=!!document.getElementById('daf_amount') && /המרת מטבע/.test(document.querySelector('#modalRoot .mh').textContent);
+  document.getElementById('daf_currency').value='EUR';
+  document.getElementById('daf_side').value='sell';
+  document.getElementById('daf_amount').value='225860';
+  saveDecisionAction(targetQ,'W3','__new__','');
   await new Promise(r=>setTimeout(r,250));
-  const sc=S.scenarios[0], acts=(sc.levers[targetQ].actions||[]).map(a=>a.form);
+  const sc=S.scenarios[0], action=(sc.levers[targetQ].actions||[]).find(a=>a.form==='W3');
+  const acts=(sc.levers[targetQ].actions||[]).map(a=>a.form);
   const rows=buildInputRows(targetQ,sc).filter(r=>r.form==='W3');
+  const savedValue=action&&action.fields&&action.fields.amount;
+  const cardVisible=!!document.querySelector(`[data-decision-action="${action.aid}"]`);
+  openDecisionActionForm(targetQ,'W3',sc.id,action.aid);
+  document.getElementById('daf_amount').value='300000';
+  saveDecisionAction(targetQ,'W3',sc.id,action.aid);
+  await new Promise(r=>setTimeout(r,200));
+  const editedValue=action.fields.amount;
   go('export'); await new Promise(r=>setTimeout(r,250));
-  return {plus, forms, acts, rows:rows.length, scenarioId:sc.id, selected:(document.getElementById('expScenario')||{}).value};
+  const selected=(document.getElementById('expScenario')||{}).value;
+  decisionRemoveAction(sc.id,targetQ,action.aid);
+  await new Promise(r=>setTimeout(r,150));
+  const removed=!sc.levers[targetQ].actions.some(a=>a.aid===action.aid)
+    && !buildInputRows(targetQ,sc).some(r=>r.form==='W3'&&/300,000/.test(String(r.note||'')));
+  return {plus, forms, formOpened, acts, rows:rows.length, savedValue, editedValue, cardVisible, removed, scenarioId:sc.id, selected};
 });
 ck('Decisions has a + button for manual actions', manualPicker.plus);
 ck('the + picker exposes all 19 official forms', manualPicker.forms.length===19 && manualPicker.forms.includes('W3'), manualPicker.forms.join(','));
+ck('choosing a form opens its manual quantity/amount fields', manualPicker.formOpened);
 ck('a manually selected form is stored in the scenario', manualPicker.acts.includes('W3'));
-ck('a manual form reaches the input sheet before its fields are filled', manualPicker.rows===1);
+ck('the entered amount is stored on the action', manualPicker.savedValue===225860, manualPicker.savedValue);
+ck('the filled manual form reaches the input sheet', manualPicker.rows>=1);
+ck('the saved action appears in Decisions', manualPicker.cardVisible);
+ck('the action can be edited manually', manualPicker.editedValue===300000, manualPicker.editedValue);
+ck('the minus action removes it from Decisions and Input', manualPicker.removed);
 ck('Input stays on the scenario selected in Decisions', manualPicker.selected===manualPicker.scenarioId);
+await page.evaluate(()=>{ S.scenarios=[]; save(); go('plan'); });
+
+/* Every official form must have a real second-step form, not only the W3 example above. */
+const formCoverage=await page.evaluate(()=>({
+  catalog:SIM_FORMS.length,
+  schemas:Object.keys(DECISION_FORM_FIELDS).length,
+  missing:SIM_FORMS.filter(f=>!(DECISION_FORM_FIELDS[f.form]||[]).length).map(f=>f.form),
+  everyHasRequired:SIM_FORMS.every(f=>(DECISION_FORM_FIELDS[f.form]||[]).some(d=>d.required)||['A2-1','A4','H1-1'].includes(f.form))
+}));
+ck('all 19 official forms have manual field schemas', formCoverage.catalog===19 && formCoverage.schemas===19 && !formCoverage.missing.length, formCoverage.missing.join(','));
+ck('every form has a required or explicit at-least-one validation', formCoverage.everyHasRequired);
+
+/* Applying a Strategy variant is the authored source for the editable final action list. */
+const strategyFlow=await page.evaluate(async()=>{
+  const targetQ=nextQuarters(S.activeQuarter)[0]||S.activeQuarter;
+  const shell={levers:{}}; ensureLevRegions(shell,targetQ);
+  shell.levers[targetQ].rdX=40000; shell.levers[targetQ].rdY=70000; shell.levers[targetQ].rd=110000;
+  shell.levers[targetQ].regions.europe.product='Y';
+  shell.levers[targetQ].regions.europe.production=12000;
+  shell.levers[targetQ].regions.europe.unitCost=55;
+  S.ai=S.ai||{}; S.ai.strategy={base:S.activeQuarter,at:Date.now(),variants:[{name:'אסטרטגיית AI לבדיקה',thesis:'בדיקת זרימה',risk:'',
+    score:72,past:55,pot:89,endCash:1500000,legal:true,feasible:true,violations:[],breaches:0,levers:shell.levers}]};
+  applyStrategy(0); await new Promise(r=>setTimeout(r,250));
+  const sc=S.scenarios[0], acts=sc.levers[targetQ].actions||[];
+  const sourceBadges=[...document.querySelectorAll('#decisionScenarioActions .tag')].map(x=>x.textContent);
+  const minusCount=[...document.querySelectorAll('#decisionScenarioActions button')].filter(b=>b.textContent.trim()==='−').length;
+  const rows=buildInputRows(targetQ,sc);
+  const first=acts[0]; openDecisionActionForm(targetQ,first.form,sc.id,first.aid);
+  const editable=!!document.querySelector('#modalRoot .field input, #modalRoot .field select'); closeModal();
+  return {source:sc.source,selected:S.ui.decisionScenarioId===sc.id,actions:acts.length,
+    allSourced:acts.every(a=>a.source==='strategy'),sourceBadges,minusCount,rows:rows.length,editable};
+});
+ck('applying Strategy selects it as the Decisions scenario', strategyFlow.source==='strategy' && strategyFlow.selected);
+ck('Strategy actions are marked as AI-strategy actions', strategyFlow.actions>0 && strategyFlow.allSourced && strategyFlow.sourceBadges.some(x=>/אסטרטגיית AI/.test(x)));
+ck('every Strategy action has a minus control', strategyFlow.minusCount===strategyFlow.actions, `${strategyFlow.minusCount}/${strategyFlow.actions}`);
+ck('Strategy actions remain manually editable', strategyFlow.editable);
+ck('Strategy actions feed the Input rows', strategyFlow.rows>0, strategyFlow.rows);
 await page.evaluate(()=>{ S.scenarios=[]; save(); go('plan'); });
 
 /* ---- the advertising action must be honest about where NOT to spend ---- */
@@ -91,6 +151,22 @@ ck('the checkbox reflects the choice', pickFlow.boxOn===1);
 ck('the choice survives leaving the tab and coming back', pickFlow.survived===1);
 ck('a ticked action reaches the submission sheet with its form', pickFlow.onSheet===true);
 ck('unticking takes the cost back out', pickFlow.undoneOut===0);
+
+const removePlanFlow=await page.evaluate(async()=>{
+  const q='Q4'; S.ui.planRemoved={}; go('plan'); await new Promise(r=>setTimeout(r,200));
+  const before=document.querySelectorAll('#decisions~.act').length;
+  const removedText=planV6For(q).actions[0].what;
+  const minus=[...document.querySelectorAll('.act button')].filter(b=>b.textContent.trim()==='−').length;
+  removePlanAction(1); await new Promise(r=>setTimeout(r,200));
+  const removed=isPlanRemoved(q,1), picked=isPicked(q,1), restore=/שחזר 1 שהוסרו/.test(document.body.innerText);
+  const omittedFromAI=!buildPlanReviewPrompt(q).includes(removedText);
+  restorePlanActions(); await new Promise(r=>setTimeout(r,150));
+  return {before,minus,removed,picked,restore,omittedFromAI,restored:!isPlanRemoved(q,1)};
+});
+ck('every written-plan action exposes a minus control', removePlanFlow.minus>=15, removePlanFlow.minus);
+ck('minus removes the action and clears its selection', removePlanFlow.removed && !removePlanFlow.picked);
+ck('a manually removed action is omitted from the next AI review', removePlanFlow.omittedFromAI);
+ck('removed plan actions can be restored', removePlanFlow.restore && removePlanFlow.restored);
 
 /* ---- layer 4: the AI reviews the ENGINE'S list and returns the full recommended list ---- */
 const ai=await page.evaluate(()=>{
