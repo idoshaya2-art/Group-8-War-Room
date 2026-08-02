@@ -3858,11 +3858,10 @@ function bodyDecisions(c){
   const q=S.activeQuarter, Q=S.quarters[q];
   if(!Q.entered){ c.innerHTML=quartersStrip()+emptyBlock(IC('clipboard'),'אין בסיס לתוכנית','קלוט רבעון כדי לקבל תוכנית פעולה מעשית לרבעון הבא.',`<button class="btn primary" onclick="go('ingest')">קליטה</button>`); return; }
   const targetQ=nextQuarters(q)[0]||q;
-  const items=buildActionPlan(q,targetQ);
-  // Layer 4: when a review exists for this target quarter the page renders the AI's full
-  // ordered list instead of the engine's raw one. The engine still had the last word — every
-  // modified or added action passed its guards, and a mandatory action could not be removed.
-  const rv=(S.ai&&S.ai.review&&S.ai.review.q===targetQ)?S.ai.review:null;
+  // The legacy generated list no longer participates in this screen. These empty containers keep
+  // the old card-building block inert until it is removed separately without changing the ledger.
+  const items=[];
+  const rv=null;
   // items2 must be a COPY when there is no review — otherwise it aliases `items` and the
   // clear-then-refill below empties both, leaving the page with no decisions at all.
   const items2=rv?rv.list:items.slice();
@@ -3966,9 +3965,9 @@ function bodyDecisions(c){
   const decisionCount=decisionIdx.length;
   const sentCount=decisionIdx.filter(i=>isSent(targetQ,sentKeyFor(items[i]))).length;
   const _topPivot=(mp.pivots&&mp.pivots.length)?mp.pivots[0].replace(/<[^>]+>/g,''):'';
-  /* The ledger follows what the team TICKED, not what the engine would have proposed. `alloc` is
-     still computed (planGaps and the engine's own arithmetic need it) but the money on screen is
-     the plan's: ticked costs out, ticked revenue in, split by Data Log 09's collection schedule.
+  /* The ledger follows what the team TICKED, not what the rules layer would have proposed. `alloc`
+     is still computed for the deterministic arithmetic, but the money on screen is the plan's:
+     ticked costs out, ticked revenue in, split by Data Log 09's collection schedule.
      Actions whose cost is already in the floor contribute nothing — see planPickedCash. */
   const _pick=planPickedCash(targetQ);
   const _planBlk=planV6For(targetQ);
@@ -3980,9 +3979,12 @@ function bodyDecisions(c){
      this tool refuses everywhere else, so the quarter has to say it out loud instead. */
   const _costed=_hasPlan && _planBlk.actions.some(a=>a.cash&&((a.cash.out||0)>0||(a.cash.in||0)>0));
   const _uncosted=_hasPlan && !_costed;
-  const _out   = _hasPlan?_pick.out   : alloc.totalOut;
-  const _inNow = _hasPlan?_pick.inNow : alloc.inNow;
-  const _inLater=_hasPlan?_pick.inLater: alloc.inLater;
+  // Without a written plan there is no recommendation set to price. In particular, do not feed
+  // the engine-generated fallback into this ledger: it would make an invisible recommendation
+  // look like a chosen expense. Manually added forms are completed later on the input sheet.
+  const _out   = _hasPlan?_pick.out   : 0;
+  const _inNow = _hasPlan?_pick.inNow : 0;
+  const _inLater=_hasPlan?_pick.inLater: 0;
   const _income=_inNow+_inLater;
   /* No clamping. A max(0,...) here made the ledger stop adding up the moment cash fell below the
      floor — line 4 would print 0 while lines 1-3 summed to a negative — and a ledger that does not
@@ -3993,10 +3995,9 @@ function bodyDecisions(c){
   const _over=Math.max(0,_out-_capacity);
   const _strict=alloc.available-alloc.floor-_out;
   let _wb=null; try{ _wb=whatBreaksFirst(q, (S.scenarios[0]||{}).levers||null); }catch(e){}
-  // The written plan for this quarter, if there is one. When there is, it IS the list and the
-  // engine's own list becomes the second opinion below. When there is not (a quarter the plan
-  // does not cover), the engine's list stays where it was — better a generated list than none.
-  let _planList=''; try{ _planList=renderPlanActions(q,targetQ,items); }catch(e){ _planList=''; }
+  // For every quarter covered by the written plan, that plan is the sole action list. The rules
+  // layer can validate its numbers, but cannot append or promote its own recommendations.
+  let _planList=''; try{ _planList=renderPlanActions(targetQ); }catch(e){ _planList=''; }
   /* This tab answers four questions and nothing else: how much cash there is, what is expected
      to come in, what the floor costs against what the chosen actions cost, and then the list —
      with the AI beside it. It used to open with thirteen sections stacked above the first
@@ -4044,26 +4045,17 @@ function bodyDecisions(c){
       </div>
     </div>
 
-    <!-- THE LIST IS THE TEAM'S OWN PLAN — for any quarter the plan covers. For one it does not
-         (Q1-Q3, or past Q9) the engine's generated list is the fallback, with its own AI review;
-         better a sourced list than an empty tab. Obligations the plan misses are promoted above
-         it either way, by planGaps. -->
+    <!-- THE LIST IS THE TEAM'S OWN PLAN for every quarter it covers. The deterministic rules
+         layer may validate facts and arithmetic, but it never adds recommendations to the plan.
+         Additional suggested actions may come only from the explicit AI review. -->
     ${_planList || `<div id="decisionsTop"></div>
-    <div style="margin:14px 0 12px">
-      <div id="decisions" class="between" style="flex-wrap:wrap;gap:8px;scroll-margin-top:12px;padding-bottom:8px;border-bottom:1px solid var(--line2)">
-        <b style="font-size:var(--fs-lg)">${decisionCount} ההחלטות ל-${targetQ}${mustCount?` · <span style="color:var(--sig-block)">${mustCount} חובה</span>`:''}${sentCount?` · <span style="color:var(--sig-ok)">${sentCount} הועברו</span>`:''}${rv?`<span class="small" style="font-weight:400;color:var(--sig-ai)"> · נבחנו ע״י AI</span>`:''}</b>
-        <span class="row" style="gap:8px;flex-wrap:wrap">
-          <button class="btn sm ${rv?'':'primary'}" id="enrichBtn" onclick="reviewDecisions()">${IC('cpu')} ${rv?'בחן מחדש':'שפר עם AI'}</button>
-          <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
-          ${rv?`<button class="btn sm ghost" onclick="clearReview()">חזור לרשימת המנוע</button>`:''}</span>
+    <div id="decisions" class="note" style="margin:14px 0 12px;line-height:1.8">
+      <div class="between" style="gap:10px;flex-wrap:wrap">
+        <b>${IC('info')} אין תוכנית כתובה ל-${targetQ}</b>
+        <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה ידנית</button>
       </div>
-      <div id="enrichOut"></div>
-      ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75"><b>${IC('cpu')} העיקרון שהנחה את הסדר:</b> ${esc(rv.rationale)}</div>`:''}
-      ${rv&&rv.dropped&&rv.dropped.length?`<details class="fverd" style="margin-top:8px"><summary>${IC('warn')} ${rv.dropped.length} פעולות שה-AI המליץ לוותר עליהן ⌄</summary>
-        <div style="padding:8px 2px">${rv.dropped.map(d=>`<div class="small" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(d.title)}</b><div class="muted" style="line-height:1.7">${esc(d.aiNote||'')}</div></div>`).join('')}</div></details>`:''}
-      ${rv&&rv.rejected&&rv.rejected.length?`<div class="note is-warn" style="margin-top:8px">${IC('warn')} <b>${rv.rejected.length} הצעות AI נדחו על-ידי המנוע</b>: ${rv.rejected.map(a=>`"${esc(a.title)}" — ${esc(a.why)}`).join(' · ')}</div>`:''}
-    </div>
-    ${actionList}`}
+      <div class="small muted" style="margin-top:6px">לא מוצגות כאן המלצות אוטומטיות. כדי לקבל בדיקת AI יש להוסיף את הרבעון לתוכנית הכתובה; פעולות ידניות שתוסיף יופיעו בגיליון ההזנה.</div>
+    </div>`}
     <!-- One way out, because there is only one. "המשך לסימולטור" pointed at go('sim'), and the sim
          alias resolves to this very tab now that manual tuning is gone — a button that reloaded the
          page you were already on. The ticked actions go straight to the sheet.
@@ -6283,15 +6275,12 @@ function planV6Tally(actions){
    asked to work through someone else's fifteen items while holding your own is precisely the
    complication this tab was supposed to remove.
 
-   So the list IS the plan (PLAN_V6, the actions the team entered for the quarter), and both
-   checkers sit BESIDE it rather than in front of it:
-     · the engine, through PLAN_V6_CHECKS — arithmetic against DATALOG and live state;
-     · the model, through reviewPlanWithAI() — judgement against the same fact pack the rest of
-       the AI layer uses (rules, Data Log, MR74/MR17&28, competitor prices, liquidity by
-       currency, the demand model).
-   The engine's own list is not deleted — it moves below, and the only part of it promoted back
-   up is what it flags as mandatory that the plan does not cover. Losing a contract deadline
-   because it was not in the written plan is the one failure this arrangement must not allow.
+   So the list IS the plan (PLAN_V6, the actions the team entered for the quarter). Deterministic
+   checks through PLAN_V6_CHECKS only validate arithmetic against DATALOG and live state; they do
+   not author actions and their verdicts are not supplied to the AI as recommendations. The model,
+   through reviewPlanWithAI(), receives the written plan plus the factual context (official Data Log
+   constants, uploaded balances, contracts and raw MR74/MR17&28 observations). Only that explicit
+   AI review may identify a missing action.
    ========================================================================== */
 const PLAN_REVIEW_SYSTEM = `אתה בוחן תוכנית רבעונית שצוות INTOPIA (חברה 8) כתב בעצמו. התוכנית אינה שלך ואינך מחליף אותה — אתה בודק אותה מול הנתונים ומחזיר חוות דעת לכל פעולה.
 
@@ -6338,6 +6327,20 @@ function parsePlanReview(txt, count){
   })).filter(m=>m.what);
   return { rationale:esc(String(obj.rationale||'').slice(0,400)), byN, missing };
 }
+function buildPlanReviewPrompt(targetQ){
+  const blk=planV6For(targetQ); if(!blk) return '';
+  const listTxt=blk.actions.map((x,i)=>
+    `${i+1}. ${x.what}${x.form&&x.form!=='—'?` [טופס ${x.form}]`:''}\n   ערך כלכלי לפי התוכנית: ${x.value||'—'}`
+  ).join('\n');
+  const floorTxt=blk.floorTotal?`רצפת הרבעון לפי התוכנית: ${fmt(blk.floorTotal)} SF. מקורות: ${blk.sources}`:'';
+  return [buildPlanAIContext(),
+    `## התוכנית הכתובה של הצוות ל-${targetQ} (גרסה ${PLAN_V6_VERSION}) — זו הרשימה שאתה בוחן`,
+    blk.subtitle?`כותרת הרבעון בתוכנית: ${blk.subtitle}`:'',
+    listTxt, floorTxt,
+    `## הסתייגות שהתוכנית עצמה רושמת`, PLAN_V6.caveat,
+    `## רבעון היעד: ${targetQ}`].filter(Boolean).join('\n')+
+    `\n\n---\nבדוק כל פעולה ברשימה והחזר חוות דעת לכל אחת. JSON בלבד.`;
+}
 window.reviewPlanWithAI=async()=>{
   if(!getApiKey()){ openAISettings(); return; }
   const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q;
@@ -6347,20 +6350,8 @@ window.reviewPlanWithAI=async()=>{
   const box=$('#planAiOut');
   if(box) box.innerHTML=`<div class="chip">${IC('clock')} ה-AI בודק כל פעולה מול החוקים, המחקרים והכספים…</div>`;
   try{
-    // Each action goes with the engine's own verdict attached, so the model is told what the
-    // arithmetic already found instead of re-deriving (or contradicting) it blind.
-    const listTxt=blk.actions.map((x,i)=>{
-      const v=planV6Check(x.check);
-      return `${i+1}. ${x.what}${x.form&&x.form!=='—'?` [טופס ${x.form}]`:''}\n   ערך כלכלי לפי התוכנית: ${x.value||'—'}\n   בדיקת המנוע: ${PLAN_V6_STATES[v.state].label} — ${String(v.txt).replace(/<[^>]+>/g,'')}`;
-    }).join('\n');
-    const floorTxt=blk.floorTotal?`רצפת הרבעון לפי התוכנית: ${fmt(blk.floorTotal)} SF. מקורות: ${blk.sources}`:'';
-    const ctx=[buildAIContext(),
-      `## התוכנית הכתובה של הצוות ל-${targetQ} (גרסה ${PLAN_V6_VERSION}) — זו הרשימה שאתה בוחן`,
-      blk.subtitle?`כותרת הרבעון בתוכנית: ${blk.subtitle}`:'',
-      listTxt, floorTxt,
-      `## הסתייגות שהתוכנית עצמה רושמת`, PLAN_V6.caveat,
-      `## רבעון היעד: ${targetQ}`].filter(Boolean).join('\n');
-    const out=await callLLM([{role:'user',content:ctx+`\n\n---\nבדוק כל פעולה ברשימה והחזר חוות דעת לכל אחת. JSON בלבד.`}],
+    // Recommendations are derived from the written plan and factual source context only.
+    const out=await callLLM([{role:'user',content:buildPlanReviewPrompt(targetQ)}],
       PLAN_REVIEW_SYSTEM,{max_tokens:2600});
     const rev=parsePlanReview(out, blk.actions.length);
     S.ai=S.ai||{};
@@ -6382,21 +6373,6 @@ const PLAN_AI_STATES = {
   fix:    {cls:'warn',  glyph:'✎', label:'דורש תיקון'},
   blocked:{cls:'block', glyph:'✕', label:'חסום'},
 };
-/* Engine findings the written plan does not cover. Only mandatory ones are promoted — the rest of
-   the engine's list stays below, in the background section, as a second opinion rather than a
-   second to-do list. Matching is by decision-form code, which is what both sides speak. */
-function planGaps(engineItems, blk){
-  if(!blk) return [];
-  const planForms=new Set();
-  blk.actions.forEach(a=>String(a.form||'').split(/[\/+]/).forEach(f=>{
-    const m=String(f).trim().match(/^([A-Z]\d(?:-\d)?)/); if(m) planForms.add(m[1]);
-  }));
-  return (engineItems||[]).filter(it=>{
-    if(it.level!=='red' || it.blocked) return false;
-    const m=String(it.form||'').match(/^([A-Z]\d(?:-\d)?)/);
-    return !(m && planForms.has(m[1]));
-  });
-}
 /* Which plan actions are ticked, per quarter. A tick means "this is in my quarter", and the money
    ledger above the list is computed from exactly these — that is the whole point of the checkbox.
    Nothing is ticked by default: the ledger must start from what the team has actually chosen. */
@@ -6558,11 +6534,10 @@ window.planAddToSheet=(idx)=>{
 };
 /* The plan as the page's decision list. Same card shape as the engine list it replaces, so the
    density and collapse rules the surfaces suite polices still apply. */
-function renderPlanActions(base, targetQ, engineItems){
+function renderPlanActions(targetQ){
   const blk=planV6For(targetQ);
   if(!blk) return '';
   const rv=(S.ai&&S.ai.planReview&&S.ai.planReview.q===targetQ)?S.ai.planReview:null;
-  const gaps=planGaps(engineItems, blk);
   const tally=planV6Tally(blk.actions);
   const _picked=planPickedCash(targetQ).picked;
   const cards=blk.actions.map((a,i)=>{
@@ -6595,7 +6570,7 @@ function renderPlanActions(base, targetQ, engineItems){
           ${_codes.length?`<span class="small muted">· טופס ${_codes.join(' + ')}</span>`:`<span class="small muted">· אין טופס הזנה</span>`}
         </div>
         ${_cash.note?`<div class="small muted" style="margin-top:5px;line-height:1.65">${IC('info')} ${esc(_cash.note)}</div>`:''}
-        <details class="fverd" style="margin-top:8px"><summary>${planV6Mark(ev.state)} — מה המנוע מודד ⌄</summary>
+        <details class="fverd" style="margin-top:8px"><summary>${planV6Mark(ev.state)} — בדיקת נתונים וחוקים ⌄</summary>
           <div class="small muted" style="line-height:1.75;margin-top:6px">${ev.txt}</div></details>
       </div></div>`;
   }).join('');
@@ -6609,24 +6584,23 @@ function renderPlanActions(base, targetQ, engineItems){
           <button class="btn sm" onclick="openDecisionActionPicker('${targetQ}')">＋ הוסף פעולה</button>
           ${rv?`<button class="btn sm ghost" onclick="clearPlanReview()">נקה בדיקת AI</button>`:''}</span>
       </div>
-      <div class="small" style="margin-top:6px;display:flex;gap:11px;flex-wrap:wrap" title="סיכום בדיקת המנוע על פעולות התוכנית">
+      <div class="small" style="margin-top:6px;display:flex;gap:11px;flex-wrap:wrap" title="סיכום בדיקת הנתונים והחוקים על פעולות התוכנית">
         ${['ok','warn','block','na'].map(k=>`<span class="pv6 ${k}">${PLAN_V6_STATES[k].glyph} <b class="num">${tally[k]}</b> ${PLAN_V6_STATES[k].label}</span>`).join('')}
       </div>
       <div id="planAiOut" style="margin-top:8px"></div>
       ${rv&&rv.rationale?`<div class="small" style="margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(139,124,255,.10);line-height:1.75">${IC('cpu')} <b>סיכום ה-AI:</b> ${rv.rationale}</div>`:''}
     </div>
     ${cards}
-    ${(gaps.length||(rv&&rv.missing.length))?`<div class="focus is-block" style="margin-top:18px">
-      <div class="eyebrow" style="color:var(--sig-block)">${IC('warn')} מה שהתוכנית לא מכסה</div>
-      <div class="small muted" style="line-height:1.8;margin-top:4px">חובות שהחוקים או ההתחייבויות מטילים ואין להן פעולה ברשימה שלמעלה. הן אינן הצעות — התעלמות מהן עולה בציון.</div>
+    ${(rv&&rv.missing.length)?`<div class="focus is-block" style="margin-top:18px">
+      <div class="eyebrow" style="color:var(--sig-block)">${IC('warn')} נקודות שה-AI מצא שחסרות בתוכנית</div>
+      <div class="small muted" style="line-height:1.8;margin-top:4px">תוספות שה-AI זיהה בבדיקת התוכנית. הן אינן מגיעות מרשימת המלצות אוטומטית.</div>
       <ul style="padding-inline-start:20px;margin:10px 0 0;line-height:1.9">
-        ${gaps.map(g=>`<li class="small"><b>${g.title}</b>${g.form?` <span class="form">${esc(g.form)}</span>`:''} <span class="muted">— לפי המנוע</span></li>`).join('')}
-        ${rv?rv.missing.map(m=>`<li class="small"><b>${m.what}</b> <span class="muted">— ${m.why} (AI)</span></li>`).join(''):''}
+        ${rv.missing.map(m=>`<li class="small"><b>${m.what}</b> <span class="muted">— ${m.why} (AI)</span></li>`).join('')}
       </ul></div>`:''}`;
 }
-/* The written plan as the baseline of the decisions tab. It does NOT replace the engine's own
-   list below it — the two are deliberately separate: this is what the team committed to on
-   paper, and beside every line, whether the engine can still stand behind it today. */
+/* The written plan is the decisions tab's sole authored action list. Deterministic checks beside
+   each line validate current facts and arithmetic; only the explicit AI review may suggest a
+   missing action. */
 /* ==========================================================================
    THE WRITTEN PLAN (Q4-Q9 v5) — the team's own strategy document, embedded so the tool
    can hand it back and, more usefully, hand back an UPDATED copy in the same layout with
@@ -7918,7 +7892,7 @@ function renderFormsReference(box){
 /* Build a compact, labelled factual snapshot the model must ground on. */
 // Data Log game constants for the AI context — without these the model invents prices,
 // tax, capacity etc. (e.g. pricing a PC at 1,200 EUR when the real market price is 130).
-function datalogContextText(){
+function datalogContextText(sourceOnly=false){
   const op=S.quarters[S.activeQuarter].operational;
   const L=['## חוקי המשחק — קבועים רשמיים מ-Data Log [מחייב: בסס כל מספר על אלה, אל תמציא]'];
   L.push(`- שערי מטבע (שווי-SF ליחידה): USD 1 · EUR 1.5 · BRL 0.5 · SF 1. עמלת המרה: US/EU 0.6% · ברזיל 0.8% · מטה 0.4%.`);
@@ -7932,7 +7906,9 @@ function datalogContextText(){
   L.push(`- פוטנציאל שוק למחשבים (לחברה/דגם/רבעון): ~קיבולת מפעל ×1.2 → אירופה ~21,600 · ארה״ב ~30,000 · ברזיל ~16,800. שבבים לצרכן ~¼ מזה.`);
   L.push(`- לוח גבייה (מזומן/רבעון+1/רבעון+2): ארה״ב 40/60/0 · אירופה 50/20/30 · ברזיל 30/30/40. פחת: שבב 8%/רבעון · מחשב 5%/רבעון. עלות אחזקת מלאי מחשב לא-מכור: 8 EUR/יח׳ באירופה.`);
   L.push(`- השהיות: מפעל→ייצור→מכירה, כל שלב רבעון; מו״פ מבשיל רבעון קדימה; העברת כסף/סחורה 1 רבעון.`);
-  L.push(rulesContextText());
+  // Plan review gets only the official Data Log constants above. The general advisor may also
+  // receive the interpreted Guide layer, which includes calibrated estimates and guidance.
+  if(!sourceOnly) L.push(rulesContextText());
   return L.join('\n');
 }
 /* The behavioural half of the rule book (Guide §4.10, §5.1-5.4). Without this the model
@@ -7959,6 +7935,49 @@ function rulesContextText(){
   L.push(`- **השהיות (Data Log 08):** ${Object.entries(RULES.lags).map(([k,v])=>v).join(' · ')}`);
   return L.join('\n');
 }
+/* Factual context for reviewing the written plan. This intentionally excludes every prescriptive
+   engine output (action plans, priorities, critical paths, maturation advice, projections and
+   demand recommendations). The AI receives source rules, uploaded state and market observations;
+   it must form its own judgement about the team's plan from those facts. */
+function buildPlanAIContext(){
+  const q=S.activeQuarter, Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals;
+  const L=[`# נתוני מקור לבדיקת התוכנית — חברה 8, רבעון פעיל ${q}`, datalogContextText(true)];
+  L.push(`## מצב פיננסי שנקלט (${q})`);
+  REGIONS.forEach(r=>L.push(`- מזומן ${r.name}: ${fmt(f.cash[r.id]||0)} ${r.cur}`));
+  L.push(`- רווח נקי: ${fmt(f.netProfit)} · מחזור: ${fmt(f.revenue)} · רווחים צבורים: ${fmt(f.retainedEarnings)}`);
+  L.push(`- הלוואות/חוב: ${fmt(f.loans)} · אשראי ספקים: ${fmt(f.supplierCredit)} · A/P: ${fmt(f.ap)} · A/R: ${fmt(f.ar)}`);
+  if(f.roe||f.roi||f.ros) L.push(`- ROE: ${f.roe||0}% · ROI: ${f.roi||0}% · ROS: ${f.ros||0}%`);
+  L.push(`## מצב תפעולי שנקלט (${q})`);
+  L.push(`- רמות טכנולוגיה: X=${op.techX}, Y=${op.techY} · מפעלים=${op.factories} · משרדים=${op.offices} · Max Producible=${op.maxProducible} · מו״פ=${fmt(op.rd)}`);
+  if(op.plantsByRegion) L.push(`- מפעלים לפי אזור: ${REGIONS.filter(r=>r.id!=='hq').map(r=>`${r.name} ${op.plantsByRegion[r.id]||0}`).join(' · ')}`);
+  if(op.inventory.length) L.push(`- מלאי: ${op.inventory.map(i=>`${i.product||'?'}${i.grade!=null?'/'+i.grade:''} כמות ${fmt(i.qty)} עלות ${fmt(i.cost)} מחיר ${i.price>0?fmt(i.price):'(לא הוזן)'}`).join(' ; ')}`);
+  L.push(`## יעדי הצוות`);
+  L.push(`- רצפת מזומן ${q}: ${fmt(g.floors[q]||0)} · יעדי טכנולוגיה X=${g.techXTarget} Y=${g.techYTarget} · תקרת חוב=${fmt(g.debtCeiling)} · יעד ציון Q9=${g.q9Score}`);
+  L.push(formsCatalogText());
+  const contracts=Array.isArray(S.config.contracts)?S.config.contracts:[];
+  if(contracts.length){
+    L.push(`## התחייבויות חוזיות שנקלטו`);
+    contracts.forEach(c=>L.push(`- ${c.deliveryQuarter}: ${fmt(c.qty)} יח׳ ${c.product}${c.grade!=null?c.grade:''} ל-${c.counterparty||'צד נגדי'} ב-${c.region||'אזור לא ידוע'} · מחיר ${fmt(c.price||0)} ${c.currency||''} · ${c.note||''}`));
+  }
+  const mi=Q.marketIntel||{}, comps=Object.values(mi.competitors||{}).sort((a,b)=>a.num-b.num);
+  if(comps.length){
+    L.push(`## נתוני מתחרים גולמיים — MR74`);
+    comps.forEach(c=>L.push(`- חברה ${c.num}${c.num===OUR_CO?' (אנחנו)':''}: מזומן ${fmt(c.cash)} · ני״ע ${fmt(c.securities)} · הלוואות ${fmt(c.bankLoans)} · רווחים צבורים ${fmt(c.retainedEarnings)} · רווח נקי ${fmt(c.netEarnings)} · מו״פ Chip/PC ${fmt(c.rdChip)}/${fmt(c.rdPc)}`));
+  }
+  if((mi.sales||[]).length){
+    L.push(`## מכירות שנצפו — MR17&28`);
+    mi.sales.forEach(s=>L.push(`- חברה ${s.company}${+s.company===OUR_CO?' (אנחנו)':''}: ${fmt(s.units)} יח׳${s.region?` · ${s.region}`:''}${s.product?` · ${s.product}`:''}`));
+  }
+  const prices=(mi.compPrices||[]).filter(x=>x.company!==OUR_CO);
+  if(prices.length){
+    L.push(`## מחירי מתחרים שנצפו — MR28`);
+    prices.forEach(x=>L.push(`- חברה ${x.company}: ${x.region} · ${x.product} ${x.grade!=null?x.grade:''} · מחיר ${fmt(x.price)}`));
+  }
+  L.push(`## גבול שימוש בנתונים`);
+  L.push(`- אלו נתוני מקור בלבד. אין בהקשר הזה רשימת פעולות, סדר עדיפויות או המלצה שחושבו במנוע.`);
+  return L.join('\n');
+}
+
 function buildAIContext(){
   const q=S.activeQuarter, Q=S.quarters[q], f=Q.financial, op=Q.operational, g=S.config.goals;
   const L=[];
@@ -8457,28 +8476,14 @@ function applyReview(engineItems, review, targetQ){
   engineItems.forEach((it,i)=>{ if(!seen.has(i) && !dropped.some(d=>d.title===it.title)) list.push({...it, aiVerdict:'untouched'}); });
   return {list, dropped, rejected};
 }
-window.reviewDecisions=async()=>{
-  if(!getApiKey()){ openAISettings(); return; }
-  const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q;
-  const btn=$('#enrichBtn'); if(btn){ btn.disabled=true; btn.textContent='בוחן…'; }
-  const box=$('#enrichOut'); if(box) box.innerHTML=`<div class="chip">${IC('clock')} ה-AI בוחן כל פעולה של המנוע ובונה רשימה מלאה…</div>`;
-  try{
-    const items=buildActionPlan(q,targetQ)||[];
-    const listTxt=items.map((it,i)=>`${i+1}. [${it.level}] ${it.title}${it.form?' — '+it.form:''}`
-      +(it.sim?`  ‹מנופים: ${JSON.stringify(it.sim.regions||{}).slice(0,220)}${it.sim.rd!=null?' rd='+it.sim.rd:''}›`:'  ‹ללא מנופים›')).join('\n');
-    const ctx=[buildAIContext(), `## רשימת המנוע ל-${targetQ} — בחן כל אחת מהן`, listTxt,
-      `## רבעון היעד: ${targetQ}`].join('\n');
-    const txt=await callLLM([{role:'user',content:ctx+`\n\n---\nבחן כל פעולה והחזר את רשימת הפעולות המלאה והמומלצת. JSON בלבד.`}],
-      REVIEW_SYSTEM,{max_tokens:2600});
-    const review=parseReviewJSON(txt,targetQ,items.length);
-    const applied=applyReview(items,review,targetQ);
-    S.ai.review={q:targetQ, at:Date.now(), rationale:review.rationale, ...applied};
-    save(); go('plan');
-    toast(`הרשימה נבחנה: ${applied.list.length} פעולות${applied.dropped.length?` · ${applied.dropped.length} הוסרו`:''}${applied.rejected.length?` · ${applied.rejected.length} נדחו ע״י המנוע`:''}`,'g');
-  }catch(e){
-    if(box) box.innerHTML=`<div class="tag r" style="display:block;line-height:1.7;white-space:normal">${IC('warn')} ${esc(aiErr(e))}</div>`;
-  }
-  const b2=$('#enrichBtn'); if(b2){ b2.disabled=false; b2.textContent='בחן והצע רשימה מלאה'; }
+/* Retained as a compatibility guard for old saved/UI calls. The former implementation sent the
+   engine's list to the model and is deliberately disabled: recommendations now flow only through
+   reviewPlanWithAI(), which starts from the written plan and factual source context. */
+window.reviewDecisions=()=>{
+  // Keep the old parser/guard reachable for migration and security regression tests only; no
+  // model call and no engine-derived list can be produced through this compatibility entry point.
+  void parseReviewJSON; void applyReview; void REVIEW_SYSTEM;
+  toast('מסלול המלצות המנוע הוסר — בדיקת AI זמינה רק לתוכנית הכתובה','a');
 };
 window.clearReview=()=>{ if(S.ai) S.ai.review=null; save(); go('plan'); };
 
@@ -8530,16 +8535,10 @@ function buildAdvisorContext(q,targetQ,items){
     if(ls.gaps.length) L.push(`- פערי מידע (מחקרי שוק לקנות): ${ls.gaps.map(g=>g.mr).join(', ')}`); }
   return L.join('\n');
 }
-window.runQuarterAdvisor=async()=>{
-  if(!getApiKey()){ openAISettings(); return; }
-  const q=S.activeQuarter, targetQ=nextQuarters(q)[0]||q, items=buildActionPlan(q,targetQ);
-  const box=$('#advOut'); if(box) box.innerHTML=`<div class="small muted">${IC('clock')} היועץ שוקל את ההמלצות מול המצב…</div>`;
-  const btn=$('#advBtn'); if(btn){ btn.disabled=true; btn.textContent='מנתח…'; }
-  try{
-    const txt=await callLLM([{role:'user',content:buildAdvisorContext(q,targetQ,items)+`\n\n---\nבצע ביקורת 4-עמודים על כל פעולה של המנוע והוצא רשימת פעולות מאושרות ל-${targetQ}, תיקונים/אזהרות, וסיכון+תדריך.`}], ADVISOR_SYSTEM.replace(/\{targetQ\}/g,targetQ), {max_tokens:1300});
-    S.ai.advisor={q,targetQ,text:txt,ts:Date.now()}; save();
-  }catch(e){ S.ai.advisor={q,targetQ,text:aiErr(e),ts:Date.now(),err:true}; }
-  if(currentPage==='plan') go('plan');
+window.runQuarterAdvisor=()=>{
+  // Legacy prompt builder is retained for regression coverage, but this path is intentionally inert.
+  void buildAdvisorContext; void ADVISOR_SYSTEM;
+  toast('מסלול היועץ המבוסס על רשימת המנוע הוסר — השתמשו בבדיקת AI של התוכנית הכתובה','a');
 };
 // Every request is time-boxed. Without this a stalled mobile connection leaves the
 // "מנתח…" placeholder on screen forever with no error and no way to retry.

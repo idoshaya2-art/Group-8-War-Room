@@ -153,10 +153,9 @@ ck('the PC grade row follows v6 in deferring Y2 to Q6',
 ck('Brazil absorption is now one of the tracked anchors',
   del.some(r=>/ברזיל/.test(r.topic) && /14,000/.test(r.planned)));
 
-/* ---------------- where the plan renders, and where the engine's list does.
-   For a quarter the written plan covers, the plan IS the tab's list. For one it does not (Q1-Q3,
-   or past Q9) the engine's generated list is the fallback — better a sourced list than an empty
-   tab. The orientation disclosure that used to hold the plan document was removed outright. */
+/* ---------------- where the plan renders.
+   For a quarter the written plan covers, the plan IS the tab's list. For one it does not, the tab
+   must say so plainly and must not manufacture a fallback recommendation list. */
 await page.evaluate(()=>go('decide')); await page.waitForTimeout(900);
 const where=await page.evaluate(async()=>{
   const c=()=>document.querySelector('.content');
@@ -168,25 +167,30 @@ const where=await page.evaluate(async()=>{
   await new Promise(r=>setTimeout(r,600));
   const fallback={ cards:c().querySelectorAll('.act').length,
     isPlan:/התוכנית שלי/.test((document.getElementById('decisions')||{}).textContent||''),
-    hasAiButton:!!document.getElementById('enrichBtn') };
+    hasAiButton:!!document.getElementById('enrichBtn'),
+    saysNoPlan:/אין תוכנית כתובה/.test((document.getElementById('decisions')||{}).textContent||''),
+    hasManualAdd:!![...c().querySelectorAll('button')].find(b=>/הוסף פעולה ידנית/.test(b.textContent)),
+    actionCost:[...c().querySelectorAll('.ledger > div')].find(x=>/עלות (?:ה)?פעולות/.test(x.textContent))?.textContent||'' };
   S.activeQuarter='Q3'; save(); go('plan');
   await new Promise(r=>setTimeout(r,600));
   return {planned, fallback};
 });
 ck('for a quarter the plan covers, the plan is the list',
   where.planned.isPlan===true && where.planned.cards>=15, `${where.planned.cards} cards`);
-ck('for a quarter it does not cover, the engine\'s list is the fallback rather than an empty tab',
-  where.fallback.isPlan===false && where.fallback.cards>0 && where.fallback.hasAiButton===true,
+ck('for a quarter it does not cover, no engine recommendation list or review button appears',
+  where.fallback.isPlan===false && where.fallback.cards===0 && where.fallback.hasAiButton===false,
   `${where.fallback.cards} engine cards`);
+ck('the no-plan state is explicit and still allows a manual form',
+  where.fallback.saysNoPlan===true && where.fallback.hasManualAdd===true);
+ck('a no-plan quarter prices no hidden recommendation into the ledger',
+  /0\s*SF/.test(where.fallback.actionCost), where.fallback.actionCost);
 ck('the orientation disclosure was removed outright, not just collapsed',
   where.planned.background===false);
 
 /* ---------------- the plan IS the list.
-   The tab used to lead with buildActionPlan()'s output — a well-sourced list, but not the one the
-   team wrote. Being handed someone else's fifteen items while holding your own is the complication
-   this tab exists to remove, so the written plan is now the page's decision list and the engine's
-   own list is a second opinion below it. What must not happen is the engine's MANDATORY findings
-   going quiet just because they are not in the written plan. */
+   The tab used to lead with buildActionPlan()'s output. The written plan is now the only authored
+   list, deterministic checks only validate its facts, and only the explicit AI review may identify
+   something missing. */
 const asList=await page.evaluate(()=>{
   const c=document.querySelector('.content');
   const cards=[...c.querySelectorAll('.act')];
@@ -205,33 +209,48 @@ const asList=await page.evaluate(()=>{
 ck('the page\'s decision list is the written plan, not the engine\'s list',
   asList.visible===15 && asList.allFromPlan===true, `${asList.visible} visible cards`);
 ck('...and says so in its header', /התוכנית שלי/.test(asList.header), asList.header.slice(0,50));
-/* The engine's list is not on this tab at all when the plan covers the quarter — see the
-   fallback assertion above for where it does render. buildActionPlan still RUNS regardless, since
-   planGaps depends on it to promote obligations the plan does not cover. */
+/* The engine's list is not on this tab at all when the plan covers the quarter. Its arithmetic
+   may validate a plan line, but it must never promote an extra recommendation into the list. */
 ck('the engine renders no competing list beside the plan', asList.engineCards===0,
   `${asList.engineCards} engine cards`);
 ck('one button checks the plan with the AI', asList.aiButton===true);
 
-// mandatory engine findings the plan does not cover must be promoted back to the surface
-const gaps=await page.evaluate(()=>{
-  const blk=planV6For('Q4');
-  const eng=buildActionPlan('Q3','Q4')||[];
-  const real=planGaps(eng, blk);
-  // a red item on a form the plan DOES use must not be promoted (it is already covered)
-  const covered=planGaps([{level:'red', form:'A3-1 (Transfers)', title:'כבר בתוכנית'}], blk);
-  // a red item on a form the plan does not use must be
-  const uncovered=planGaps([{level:'red', form:'H2 (Securities)', title:'לא בתוכנית'}], blk);
-  // an amber item is never promoted — this section is for obligations, not suggestions
-  const amber=planGaps([{level:'amber', form:'H2 (Securities)', title:'רק מומלץ'}], blk);
-  // and a blocked one is not actionable yet
-  const blocked=planGaps([{level:'red', blocked:'תלוי במו״פ', form:'H2', title:'חסום'}], blk);
-  return { real:real.map(x=>x.title), covered:covered.length, uncovered:uncovered.length,
-    amber:amber.length, blocked:blocked.length };
+// An engine finding must never become a recommendation. Only an explicit AI review may add a
+// missing-plan notice, and that notice must identify its source clearly.
+const recommendationSources=await page.evaluate(()=>{
+  S.ai=S.ai||{};
+  const prior=S.ai.planReview;
+  S.ai.planReview=null;
+  const plain=renderPlanActions('Q4');
+  S.ai.planReview={q:'Q4',at:Date.now(),rationale:'',byN:{},
+    missing:[{what:'בדיקת התחייבות',why:'נמצאה בבדיקת AI'}]};
+  const reviewed=renderPlanActions('Q4');
+  S.ai.planReview=prior;
+  const prompt=buildPlanReviewPrompt('Q4');
+  return {
+    hasPromotionFunction:typeof window.planGaps==='function',
+    engineRecommendation:/לפי המנוע|מה שהתוכנית לא מכסה/.test(plain),
+    aiMissing:/נקודות שה-AI מצא שחסרות בתוכנית/.test(reviewed) &&
+      /בדיקת התחייבות/.test(reviewed) && /\(AI\)/.test(reviewed),
+    promptHasPlanAndFacts:/התוכנית הכתובה של הצוות/.test(prompt) && /מצב פיננסי שנקלט/.test(prompt),
+    promptHasEngineAdvice:/רשימת המנוע|נתיב קריטי \[מחושב במנוע\]|הנתיב המתגלגל עד Q9|מחיר מכירה מחושב-מנוע|הבשלה מול סוף המשחק|מנוע ביקוש ולמידה|אומדני המנוע|מסקנה:/.test(prompt)
+  };
 });
-ck('an obligation on a form the plan already uses is NOT repeated', gaps.covered===0);
-ck('an obligation on a form the plan never touches IS surfaced', gaps.uncovered===1);
-ck('merely recommended engine actions are not promoted — only obligations', gaps.amber===0);
-ck('a blocked obligation is not presented as something to do now', gaps.blocked===0);
+ck('there is no engine-to-recommendation promotion path',
+  recommendationSources.hasPromotionFunction===false && recommendationSources.engineRecommendation===false);
+ck('only the explicit AI review can surface a missing-plan notice',
+  recommendationSources.aiMissing===true);
+ck('the AI prompt contains the written plan and source facts, but no engine-authored advice',
+  recommendationSources.promptHasPlanAndFacts===true && recommendationSources.promptHasEngineAdvice===false);
+const legacyGuardCalls=await page.evaluate(()=>{
+  let calls=0; const old=window.callLLM;
+  window.callLLM=async()=>{ calls++; return '{}'; };
+  reviewDecisions(); runQuarterAdvisor();
+  window.callLLM=old;
+  return calls;
+});
+ck('legacy engine-advisor entry points cannot make a model call', legacyGuardCalls===0,
+  `${legacyGuardCalls} calls`);
 
 // ---------------- the AI review of the plan, parsed defensively
 const pr=await page.evaluate(()=>{

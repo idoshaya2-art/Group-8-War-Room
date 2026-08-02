@@ -146,10 +146,7 @@ ck('and the rejection is reported, not hidden', ai.badModifyReported);
 ck('malformed model output throws rather than corrupting the list', ai.garbage);
 ck('an out-of-range action reference is neutralised', ai.outOfRangeRef);
 
-/* ---- the reviewed list is what the page renders ----
-   The engine's generated list — and therefore its AI review — is the FALLBACK: it renders for a
-   quarter the written plan does not cover. For Q4 the plan is the list, so this block moves to a
-   quarter without one, which is where that path actually lives now. */
+/* ---- a quarter without a written plan must not fall back to engine recommendations ---- */
 await page.evaluate(()=>{ S.activeQuarter='Q1'; save(); go('plan'); });
 await page.waitForTimeout(600);
 await page.evaluate(()=>{
@@ -166,23 +163,15 @@ await page.evaluate(()=>{
 });
 await page.waitForTimeout(700);
 const ui=await page.evaluate(()=>({
-  // The provenance stopped being a row of four pills and became one muted line; the wording
-  // moved from "4 · AI · נבחן" to "נבחנו ע״י AI". Same claim, current phrasing.
-  banner:/נבחנו ע״י AI/.test(document.body.innerText),
-  rationaleShown:/העיקרון שהנחה את הסדר/.test(document.body.innerText),
-  droppedSection:/המליץ לוותר עליהן/.test(document.body.innerText),
-  aiTagOnCard:[...document.querySelectorAll('.act')].some(a=>/\bAI\b/.test(a.textContent)),
-  revertBtn:!![...document.querySelectorAll('button')].find(b=>/חזור לרשימת המנוע/.test(b.textContent)),
-  addedVisible:[...document.querySelectorAll('.act')].some(a=>/ברזיל/.test(a.textContent))
+  explicit:/אין תוכנית כתובה/.test(document.body.innerText),
+  cards:document.querySelectorAll('.content .act').length,
+  engineReviewButton:!!document.getElementById('enrichBtn'),
+  manualAdd:!![...document.querySelectorAll('.content button')].find(b=>/הוסף פעולה ידנית/.test(b.textContent))
 }));
-ck('the page shows it is running the reviewed list', ui.banner);
-ck('the ordering principle is displayed', ui.rationaleShown);
-ck('dropped actions are still visible, in their own section', ui.droppedSection);
-ck('AI-originated actions are labelled on the card', ui.aiTagOnCard);
-ck('the AI addition appears as a real actionable card', ui.addedVisible);
-ck('you can revert to the engine list', ui.revertBtn);
-await page.evaluate(()=>clearReview()); await page.waitForTimeout(400);
-ck('reverting restores the engine list', await page.evaluate(()=>!/נבחן/.test(document.body.innerText)));
+ck('a no-plan quarter says so explicitly', ui.explicit);
+ck('a no-plan quarter has no engine recommendation cards or review button',
+  ui.cards===0 && ui.engineReviewButton===false);
+ck('manual form entry remains available without manufacturing a recommendation', ui.manualAdd);
 await page.evaluate(()=>{ S.activeQuarter='Q3'; save(); go('plan'); });   // back to the planned quarter
 await page.waitForTimeout(500);
 
